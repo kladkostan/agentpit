@@ -30,8 +30,8 @@ class ClobDB:
                 order_type TEXT,
                 salt TEXT,
                 maker TEXT,
-                signer TEXT,
                 taker TEXT,
+                signer TEXT,
                 tokenId TEXT,
                 makerAmount TEXT,
                 takerAmount TEXT,
@@ -63,12 +63,20 @@ class ClobDB:
             )
         return json.dumps(response.__dict__)
 
+    def create_orders(self, args: list[PostOrdersArgs]) -> str:
+        responses = []
+        for arg in args:
+            response_json = self.create_order(arg.order, arg.order_type, arg.post_only)
+            response_dict = json.loads(response_json)
+            responses.append(response_dict)
+        return json.dumps(responses)
+
     def addOrderToDb(self, order: Order, order_type: OrderType, post_only: bool, serialized_body: dict) -> int | None:
         with self.db:
             cursor = self.db.execute(
                 """
                 INSERT INTO orders (api_key, price, post_only, order_type,
-                                    salt, maker, signer, taker, tokenId,
+                                    salt, maker, taker, signer, tokenId,
                                     makerAmount, takerAmount, expiration, nonce,
                                     feeRateBps, side, signatureType, order_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -80,8 +88,8 @@ class ClobDB:
                     order_type.value,
                     order.salt,
                     order.maker,
-                    order.signer,
                     order.taker,
+                    order.signer,
                     order.tokenId,
                     order.makerAmount,
                     order.takerAmount,
@@ -95,12 +103,3 @@ class ClobDB:
             )
             order_id = cursor.lastrowid
         return order_id
-
-
-def create_orders(self, args: list[PostOrdersArgs]) -> str:
-            responses = []
-            for arg in args:
-                response_json = self.create_order(arg.order, arg.order_type, arg.post_only)
-                response_dict = json.loads(response_json)
-                responses.append(response_dict)
-            return json.dumps(responses)
