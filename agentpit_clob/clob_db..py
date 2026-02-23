@@ -58,6 +58,7 @@ class ClobDB:
                 asset_id TEXT,
                 price TEXT,
                 size TEXT,
+                remaining_size TEXT,
                 side TEXT,
                 status TEXT,
                 match_time TEXT,
