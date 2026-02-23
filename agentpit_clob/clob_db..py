@@ -47,10 +47,30 @@ class ClobDB:
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_price ON orders(price)"
         )
+        self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trades
+            (
+                id TEXT PRIMARY KEY,
+                taker_order_id TEXT,
+                maker_orders TEXT, -- JSON array
+                market TEXT,
+                asset_id TEXT,
+                price TEXT,
+                size TEXT,
+                side TEXT,
+                status TEXT,
+                match_time TEXT,
+                transaction_hash TEXT,
+                bucket_index INTEGER,
+                fee_rate_bps INTEGER
+            )
+            """
+        )
 
     def create_order(self, order: Order, order_type: OrderType, post_only: bool):
         serialized_body = order_to_json(order, self.api_key, order_type, post_only)
-        order_id = self.addOrderToDb(order, order_type, post_only, serialized_body)
+        order_id = self.add_order_to_db(order, order_type, post_only, serialized_body)
 
         response = OrderResponse(
                 success=True,
@@ -71,7 +91,7 @@ class ClobDB:
             responses.append(response_dict)
         return json.dumps(responses)
 
-    def addOrderToDb(self, order: Order, order_type: OrderType, post_only: bool, serialized_body: dict) -> int | None:
+    def add_order_to_db(self, order: Order, order_type: OrderType, post_only: bool, serialized_body: dict) -> int | None:
         with self.db:
             cursor = self.db.execute(
                 """
@@ -103,3 +123,47 @@ class ClobDB:
             )
             order_id = cursor.lastrowid
         return order_id
+
+    def find_matching_orders(self, orderId: str):
+        with self.db:
+            row = self.db.execute(
+                "SELECT price, order_type, side FROM orders WHERE rowid = ?",
+                (orderId,)
+            ).fetchone()
+            if not row:
+                return []
+            price, order_type, side = row
+            opposite_side = "SELL" if side == "BUY" else "BUY"
+
+            if order_type == "MARKET":
+                cursor = self.db.execute(
+                    """
+                    SELECT * FROM orders
+                    WHERE side = ? AND rowid != ?
+                    ORDER BY price ASC
+                    """,
+                    (opposite_side, orderId)
+                )
+            elif order_type in ("GTC", "GTD", "FAK", "FOK"):
+                if side == "BUY":
+                    cursor = self.db.execute(
+                        """
+                        SELECT * FROM orders
+                        WHERE side = ? AND price <= ? AND rowid != ?
+                        ORDER BY price ASC
+                        """,
+                        (opposite_side, price, orderId)
+                    )
+                else:
+                    cursor = self.db.execute(
+                        """
+                        SELECT * FROM orders
+                        WHERE side = ? AND price >= ? AND rowid != ?
+                        ORDER BY price DESC
+                        """,
+                        (opposite_side, price, orderId)
+                    )
+            else:
+                return []
+            matching_orders = cursor.fetchall()
+        return matching_orders
