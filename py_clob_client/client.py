@@ -593,6 +593,10 @@ class ClobClient:
         """
         Posts orders
         """
+        # BEGIN_AGENTPIT
+        if self.host == "":
+            return self.agentpit_client.post_orders(args)
+        # END_AGENTPIT
         self.assert_level_2_auth()
         body = [
             order_to_json(arg.order, self.creds.api_key, arg.orderType, arg.postOnly) for arg in args
@@ -626,6 +630,11 @@ class ClobClient:
         """
         if post_only and (orderType != OrderType.GTC and orderType != OrderType.GTD):
             raise Exception("post_only orders can only be of type GTC or GTD")
+
+        # BEGIN_AGENTPIT
+        if self.host == "":
+            return self.agentpit_client.post_order(order, orderType, post_only)
+        # END_AGENTPIT
 
         self.assert_level_2_auth()
         body = order_to_json(order, self.creds.api_key, orderType, post_only)
