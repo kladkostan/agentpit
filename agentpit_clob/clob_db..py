@@ -69,7 +69,7 @@ class ClobDB:
             """
         )
 
-    def create_order(self, order: Order, order_type: OrderType, post_only: bool):
+    def process_new_order(self, order: Order, order_type: OrderType, post_only: bool):
         serialized_body = order_to_json(order, self.api_key, order_type, post_only)
         order_id = self.add_order_to_db(order, order_type, post_only, serialized_body)
 
@@ -84,10 +84,10 @@ class ClobDB:
             )
         return json.dumps(response.__dict__)
 
-    def create_orders(self, args: list[PostOrdersArgs]) -> str:
+    def process_new_orders(self, args: list[PostOrdersArgs]) -> str:
         responses = []
         for arg in args:
-            response_json = self.create_order(arg.order, arg.order_type, arg.post_only)
+            response_json = self.process_new_order(arg.order, arg.order_type, arg.post_only)
             response_dict = json.loads(response_json)
             responses.append(response_dict)
         return json.dumps(responses)

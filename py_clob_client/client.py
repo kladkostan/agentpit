@@ -595,7 +595,7 @@ class ClobClient:
         """
         # BEGIN_AGENTPIT
         if self.host == "":
-            return self.agentpit_client.create_orders(args)
+            return self.agentpit_client.process_new_orders(args)
         # END_AGENTPIT
         self.assert_level_2_auth()
         body = [
@@ -633,7 +633,7 @@ class ClobClient:
 
         # BEGIN_AGENTPIT
         if self.host == "":
-            return self.agentpit_client.create_order(order, orderType, post_only)
+            return self.agentpit_client.process_new_order(order, orderType, post_only)
         # END_AGENTPIT
 
         self.assert_level_2_auth()
