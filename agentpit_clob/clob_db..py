@@ -50,6 +50,20 @@ class ClobDB:
 
     def create_order(self, order: Order, order_type: OrderType, post_only: bool):
         serialized_body = order_to_json(order, self.api_key, order_type, post_only)
+        order_id = self.addOrderToDb(order, order_type, post_only, serialized_body)
+
+        response = OrderResponse(
+                success=True,
+                orderID=str(order_id),
+                status="open",
+                filledSize="0",
+                remainingSize=str(order.makerAmount),
+                avgPrice=None,
+                errorMsg=None
+            )
+        return json.dumps(response.__dict__)
+
+    def addOrderToDb(self, order: Order, order_type: OrderType, post_only: bool, serialized_body: dict) -> int | None:
         with self.db:
             cursor = self.db.execute(
                 """
@@ -80,17 +94,7 @@ class ClobDB:
                 )
             )
             order_id = cursor.lastrowid
-            response = OrderResponse(
-                success=True,
-                orderID=str(order_id),
-                status="open",
-                filledSize="0",
-                remainingSize=str(order.makerAmount),
-                avgPrice=None,
-                errorMsg=None
-            )
-            return json.dumps(response.__dict__)
-
+        return order_id
 
 
 def create_orders(self, args: list[PostOrdersArgs]) -> str:
