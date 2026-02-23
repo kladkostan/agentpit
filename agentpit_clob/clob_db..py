@@ -4,9 +4,11 @@ from py_clob_client import ClobClient, OrderType
 
 import logging
 import sqlite3
+import json
 
 from py_clob_client.clob_types import PostOrdersArgs
 from py_clob_client.utilities import order_to_json
+from agentpit_clob.order_response import OrderResponse
 
 
 class ClobDB:
@@ -62,10 +64,10 @@ class ClobDB:
             "CREATE INDEX IF NOT EXISTS idx_orders_price ON orders(price)"
         )
 
-    def save_order(self, order: Order, order_type: OrderType, post_only: bool):
+    def create_order(self, order: Order, order_type: OrderType, post_only: bool):
         serialized_body = order_to_json(order, self.api_key, order_type, post_only)
         with self.db:
-            self.db.execute(
+            cursor = self.db.execute(
                 """
                 INSERT INTO orders (api_key, price, post_only, order_type,
                                     salt, maker, signer, taker, tokenId,
@@ -93,8 +95,20 @@ class ClobDB:
                     serialized_body
                 )
             )
+            orderId = cursor.lastrowid
+            response = OrderResponse(
+                success=True,
+                orderID=str(orderId),
+                status="open",
+                filledSize="0",
+                remainingSize=str(order.makerAmount),
+                avgPrice=None,
+                errorMsg=None
+            )
+            return json.dumps(response.__dict__)
 
-    def save_orders(self, args: list[PostOrdersArgs]) -> None:
+
+    def create_orders(self, args: list[PostOrdersArgs]) -> None:
         # Insert all orders in a single transaction using executemany
         rows = []
         for arg in args:
