@@ -19,44 +19,28 @@ class ClobDB:
         self.api_key = api_key
         self.logger = logging.getLogger(self.__class__.__name__)
         self.db = sqlite3.connect('/tmp/x.db')
+        # Explicit integer primary key for stable order IDs
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS orders
             (
-                api_key
-                TEXT,
-                price
-                REAL,
-                post_only
-                INTEGER,
-                order_type
-                TEXT,
-                salt
-                TEXT,
-                maker
-                TEXT,
-                signer
-                TEXT,
-                taker
-                TEXT,
-                tokenId
-                TEXT,
-                makerAmount
-                TEXT,
-                takerAmount
-                TEXT,
-                expiration
-                TEXT,
-                nonce
-                TEXT,
-                feeRateBps
-                TEXT,
-                side
-                TEXT,
-                signatureType
-                TEXT,
-                order_json
-                TEXT
+                api_key TEXT,
+                price REAL,
+                post_only INTEGER,
+                order_type TEXT,
+                salt TEXT,
+                maker TEXT,
+                signer TEXT,
+                taker TEXT,
+                tokenId TEXT,
+                makerAmount TEXT,
+                takerAmount TEXT,
+                expiration TEXT,
+                nonce TEXT,
+                feeRateBps TEXT,
+                side TEXT,
+                signatureType TEXT,
+                order_json TEXT
             )
             """
         )
@@ -95,10 +79,10 @@ class ClobDB:
                     serialized_body
                 )
             )
-            orderId = cursor.lastrowid
+            order_id = cursor.lastrowid
             response = OrderResponse(
                 success=True,
-                orderID=str(orderId),
+                orderID=str(order_id),
                 status="open",
                 filledSize="0",
                 remainingSize=str(order.makerAmount),
@@ -108,9 +92,11 @@ class ClobDB:
             return json.dumps(response.__dict__)
 
 
-    def create_orders(self, args: list[PostOrdersArgs]) -> None:
-        # Insert all orders in a single transaction using executemany
+
+    def create_orders(self, args: list[PostOrdersArgs]) -> str:
+        # Prepare rows and keep a parallel list of orders for response building
         rows = []
+        orders_for_response: list[Order] = []
         for arg in args:
             order = arg.order
             serialized_body = order_to_json(order, self.api_key, arg.order_type, arg.post_only)
@@ -135,18 +121,36 @@ class ClobDB:
                     serialized_body,
                 )
             )
+            orders_for_response.append(order)
 
         if not rows:
-            return
+            return json.dumps([])
 
-        with self.db:  # begins a transaction and commits on success
-            self.db.executemany(
-                """
+        responses: list[OrderResponse] = []
+
+        # Insert each row and collect rowid in a single transaction
+        with self.db:
+            insert_sql = """
                 INSERT INTO orders (api_key, price, post_only, order_type,
                                     salt, maker, signer, taker, tokenId,
                                     makerAmount, takerAmount, expiration, nonce,
                                     feeRateBps, side, signatureType, order_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
+            """
+            for row, order in zip(rows, orders_for_response):
+                cursor = self.db.execute(insert_sql, row)
+                order_id = cursor.lastrowid
+                responses.append(
+                    OrderResponse(
+                        success=True,
+                        orderID=str(order_id),
+                        status="open",
+                        filledSize="0",
+                        remainingSize=str(order.makerAmount),
+                        avgPrice=None,
+                        errorMsg=None,
+                    )
+                )
+
+        # Return JSON array of responses
+        return json.dumps([r.__dict__ for r in responses])
