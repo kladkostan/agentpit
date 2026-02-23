@@ -58,6 +58,9 @@ class ClobDB:
             )
             """
         )
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_price ON orders(price)"
+        )
 
     def save_order(self, order: Order, order_type: OrderType, post_only: bool):
         serialized_body = order_to_json(order, self.api_key, order_type, post_only)
