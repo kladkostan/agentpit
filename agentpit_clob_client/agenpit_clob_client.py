@@ -18,7 +18,7 @@ class AgentPitClobClient:
 
     def post_order(self, order, orderType: OrderType, post_only: bool):
         serialized_body = order_to_json(order, self.creds.api_key, orderType, post_only)
-        pass
+        self.db.put(self.creds.api_key.encode(), serialized_body.encode())
 
     def post_orders(self, args: list[PostOrdersArgs]):
         pass
