@@ -8,21 +8,26 @@ from decimal import Decimal
 from typing import Literal, Any
 
 from py_clob_client.clob_types import PostOrdersArgs
-from py_clob_client.utilities import order_to_json
+from py_clob_client.utilities import order_to_json, price_valid
 from agentpit_clob.order_response import OrderResponse
 
+from eth_utils import keccak
+from py_order_utils.utils import prepend_zx
+
+# Adjust this import to your actual EIP-712 Order model
+from py_order_utils.model import Order  # or wherever your Order type lives
+
+# Adjust this to your actual CLOB order domain builder
+from py_clob_client.signing.eip712 import get_clob_auth_domain  # or get_clob_order_domain
 
 class ClobDB:
-    def __init__(
-            self,
-            api_key: str
-    ):
+    def __init__(self, api_key: str, chain_id: int):
         self.api_key = api_key
+        self.chain_id = chain_id
         self.logger = logging.getLogger(self.__class__.__name__)
         self.db = sqlite3.connect('/tmp/x.db')
         self.db.row_factory = sqlite3.Row
 
-        # Explicit primary key and remaining_amount for partial fills
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS orders
@@ -71,12 +76,17 @@ class ClobDB:
                 DEFAULT
                 'open',
                 remaining_amount
+                TEXT,
+                order_hash
                 TEXT
             )
             """
         )
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
+        )
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_order_hash ON orders(order_hash)"
         )
         self.db.execute(
             """
@@ -121,6 +131,9 @@ class ClobDB:
 
         if not post_only:
             matches, remaining = self.match_and_fill_order(taker_order_id)
+        else:
+            # For post\-only orders, nothing is filled immediately.
+            remaining = Decimal(signed_order.order.makerAmount)
 
         response = OrderResponse(
             success=True,
@@ -143,9 +156,20 @@ class ClobDB:
 
     def add_order_to_db(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool) -> int:
         order = signed_order.order
-        serialized_body = order_to_json(order, self.api_key, order_type, post_only)
+
+        tick_size = order.tickSize
+        if not price_valid(float(order.price), tick_size):
+            raise ValueError(f"Invalid price {order.price} for tick_size {tick_size}")
+
+        order_type_str = str(order_type)
         remaining_amount = str(order.makerAmount)
         price_u256 = str(order.price)
+
+        # For Polymarket, this should be the SignedOrder
+        serialized_body = order_to_json(signed_order, self.api_key, order_type, post_only)
+
+        order_hash = self.compute_polymarket_compatible_order_id(order)
+        self.logger.debug(f"Computed order hash: {order_hash}")
 
         with self.db:
             cursor = self.db.execute(
@@ -154,14 +178,14 @@ class ClobDB:
                                     salt, maker, taker, signer, tokenId,
                                     makerAmount, takerAmount, expiration, nonce,
                                     feeRateBps, side, signatureType, order_json,
-                                    status, remaining_amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    status, remaining_amount, order_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self.api_key,
                     price_u256,
                     int(post_only),
-                    order_type.value,
+                    order_type_str,
                     order.salt,
                     order.maker,
                     order.taker,
@@ -177,10 +201,13 @@ class ClobDB:
                     serialized_body,
                     "open",
                     remaining_amount,
-                )
+                    order_hash,
+                ),
             )
             order_id = cursor.lastrowid
         return int(order_id)
+
+
 
     def is_price_acceptable(
             self,
@@ -322,3 +349,23 @@ class ClobDB:
     # Keep old name for compatibility, but now it runs matching
     def find_matching_orders(self, orderId: str):
         return self.match_and_fill_order(int(orderId))
+
+
+    def compute_polymarket_compatible_order_id(self, order: Order) -> str:
+        """
+        Compute the canonical EIP-712 order hash (chash) for a given CLOB Order.
+
+        \- Uses the same EIP-712 encoding as signing: order.signable_bytes(domain).
+        \- Returns a 0x-prefixed hex string.
+        """
+        # Build the EIP-712 domain used for orders on this chain
+        domain = get_clob_auth_domain(self.chain_id)  # or get_clob_order_domain if available
+
+        # Bytes that are signed for this order
+        signable = order.signable_bytes(domain)
+
+        # EIP-712 struct hash
+        struct_hash = keccak(signable)
+
+        # 0x-prefixed hex string
+        return prepend_zx(struct_hash.hex())
