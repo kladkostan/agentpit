@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import json
 from decimal import Decimal
+from typing import Literal
 
 from py_clob_client.clob_types import PostOrdersArgs
 from py_clob_client.utilities import order_to_json
@@ -13,8 +14,8 @@ from agentpit_clob.order_response import OrderResponse
 
 class ClobDB:
     def __init__(
-        self,
-        api_key: str
+            self,
+            api_key: str
     ):
         self.api_key = api_key
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -26,26 +27,51 @@ class ClobDB:
             """
             CREATE TABLE IF NOT EXISTS orders
             (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                api_key TEXT,
-                price TEXT,
-                post_only INTEGER,
-                order_type TEXT,
-                salt TEXT,
-                maker TEXT,
-                taker TEXT,
-                signer TEXT,
-                tokenId TEXT,
-                makerAmount TEXT,
-                takerAmount TEXT,
-                expiration TEXT,
-                nonce TEXT,
-                feeRateBps TEXT,
-                side TEXT,
-                signatureType TEXT,
-                order_json TEXT,
-                status TEXT DEFAULT 'open',
-                remaining_amount TEXT
+                id
+                INTEGER
+                PRIMARY
+                KEY
+                AUTOINCREMENT,
+                api_key
+                TEXT,
+                price
+                TEXT,
+                post_only
+                INTEGER,
+                order_type
+                TEXT,
+                salt
+                TEXT,
+                maker
+                TEXT,
+                taker
+                TEXT,
+                signer
+                TEXT,
+                tokenId
+                TEXT,
+                makerAmount
+                TEXT,
+                takerAmount
+                TEXT,
+                expiration
+                TEXT,
+                nonce
+                TEXT,
+                feeRateBps
+                TEXT,
+                side
+                TEXT,
+                signatureType
+                TEXT,
+                order_json
+                TEXT,
+                status
+                TEXT
+                DEFAULT
+                'open',
+                remaining_amount
+                TEXT
             )
             """
         )
@@ -56,20 +82,36 @@ class ClobDB:
             """
             CREATE TABLE IF NOT EXISTS trades
             (
-                id TEXT PRIMARY KEY,
-                taker_order_id TEXT,
-                maker_orders TEXT,
-                market TEXT,
-                asset_id TEXT,
-                price TEXT,
-                size TEXT,
-                remaining_size TEXT,
-                side TEXT,
-                status TEXT,
-                match_time TEXT,
-                transaction_hash TEXT,
-                bucket_index INTEGER,
-                fee_rate_bps INTEGER
+                id
+                TEXT
+                PRIMARY
+                KEY,
+                taker_order_id
+                TEXT,
+                maker_orders
+                TEXT,
+                market
+                TEXT,
+                asset_id
+                TEXT,
+                price
+                TEXT,
+                size
+                TEXT,
+                remaining_size
+                TEXT,
+                side
+                TEXT,
+                status
+                TEXT,
+                match_time
+                TEXT,
+                transaction_hash
+                TEXT,
+                bucket_index
+                INTEGER,
+                fee_rate_bps
+                INTEGER
             )
             """
         )
@@ -140,7 +182,12 @@ class ClobDB:
             order_id = cursor.lastrowid
         return int(order_id)
 
-    def price_ok(self, maker, taker_side: str, taker_price: int) -> bool:
+    def is_price_acceptable(
+            self,
+            maker: sqlite3.Row,
+            taker_side: Literal["BUY", "SELL"],
+            taker_price: int
+    ) -> bool:
         maker_price = int(str(maker["price"]))
         return maker_price <= taker_price if taker_side == "BUY" else maker_price >= taker_price
 
@@ -154,8 +201,10 @@ class ClobDB:
         with self.db:
             taker = self.db.execute(
                 """
-                SELECT * FROM orders
-                WHERE id = ? AND status = 'open'
+                SELECT *
+                FROM orders
+                WHERE id = ?
+                  AND status = 'open'
                 """,
                 (order_id,)
             ).fetchone()
@@ -171,14 +220,15 @@ class ClobDB:
 
             candidates = self.db.execute(
                 """
-                SELECT * FROM orders
+                SELECT *
+                FROM orders
                 WHERE side = ?
                   AND status = 'open'
                 """,
                 (opposite_side,)
             ).fetchall()
 
-            filtered = [m for m in candidates if self.price_ok(m, taker_side, taker_price)]
+            filtered = [m for m in candidates if self.is_price_acceptable(m, taker_side, taker_price)]
 
             filtered.sort(
                 key=lambda m: (int(str(m["price"])), m["id"]) if taker_side == "BUY"
@@ -203,7 +253,7 @@ class ClobDB:
                     """
                     UPDATE orders
                     SET remaining_amount = ?,
-                        status = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                        status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
                     WHERE id = ?
                     """,
                     (str(maker_remaining), maker_remaining, maker["id"])
@@ -223,7 +273,7 @@ class ClobDB:
                 """
                 UPDATE orders
                 SET remaining_amount = ?,
-                    status = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                    status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
                 WHERE id = ?
                 """,
                 (str(taker_remaining), taker_remaining, order_id)
