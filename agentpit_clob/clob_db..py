@@ -140,6 +140,10 @@ class ClobDB:
             order_id = cursor.lastrowid
         return int(order_id)
 
+    def price_ok(self, maker, taker_side: str, taker_price: int) -> bool:
+        maker_price = int(str(maker["price"]))
+        return maker_price <= taker_price if taker_side == "BUY" else maker_price >= taker_price
+
     def match_order(self, order_id: int):
         """
         Match a single taker order against the book.
@@ -174,11 +178,7 @@ class ClobDB:
                 (opposite_side,)
             ).fetchall()
 
-            def price_ok(m):
-                maker_price = int(str(m["price"]))
-                return maker_price <= taker_price if taker_side == "BUY" else maker_price >= taker_price
-
-            filtered = [m for m in candidates if price_ok(m)]
+            filtered = [m for m in candidates if self.price_ok(m, taker_side, taker_price)]
 
             filtered.sort(
                 key=lambda m: (int(str(m["price"])), m["id"]) if taker_side == "BUY"
