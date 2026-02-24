@@ -1,10 +1,10 @@
-from py_order_utils.model import Order
-
+from py_order_utils.model import SignedOrder
 from py_clob_client import ClobClient, OrderType
 
 import logging
 import sqlite3
 import json
+from decimal import Decimal
 
 from py_clob_client.clob_types import PostOrdersArgs
 from py_clob_client.utilities import order_to_json
@@ -13,19 +13,22 @@ from agentpit_clob.order_response import OrderResponse
 
 class ClobDB:
     def __init__(
-            self,
-            api_key: str
+        self,
+        api_key: str
     ):
         self.api_key = api_key
         self.logger = logging.getLogger(self.__class__.__name__)
         self.db = sqlite3.connect('/tmp/x.db')
-        # Explicit integer primary key for stable order IDs
+        self.db.row_factory = sqlite3.Row
+
+        # Explicit primary key and remaining_amount for partial fills
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS orders
             (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 api_key TEXT,
-                price REAL,
+                price TEXT,
                 post_only INTEGER,
                 order_type TEXT,
                 salt TEXT,
@@ -40,12 +43,14 @@ class ClobDB:
                 feeRateBps TEXT,
                 side TEXT,
                 signatureType TEXT,
-                order_json TEXT
+                order_json TEXT,
+                status TEXT DEFAULT 'open',
+                remaining_amount TEXT
             )
             """
         )
         self.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_price ON orders(price)"
+            "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
         )
         self.db.execute(
             """
@@ -53,7 +58,7 @@ class ClobDB:
             (
                 id TEXT PRIMARY KEY,
                 taker_order_id TEXT,
-                maker_orders TEXT, -- JSON array
+                maker_orders TEXT,
                 market TEXT,
                 asset_id TEXT,
                 price TEXT,
@@ -69,19 +74,21 @@ class ClobDB:
             """
         )
 
-    def process_new_order(self, order: Order, order_type: OrderType, post_only: bool):
-        serialized_body = order_to_json(order, self.api_key, order_type, post_only)
-        order_id = self.add_order_to_db(order, order_type, post_only, serialized_body)
+    def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
+        taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
+
+        # Run matching for this new taker order
+        matches, remaining = self.match_order(taker_order_id)
 
         response = OrderResponse(
-                success=True,
-                orderID=str(order_id),
-                status="open",
-                filledSize="0",
-                remainingSize=str(order.makerAmount),
-                avgPrice=None,
-                errorMsg=None
-            )
+            success=True,
+            orderID=str(taker_order_id),
+            status="open" if remaining > 0 else "filled",
+            filledSize=str(Decimal(signed_order.order.makerAmount) - remaining),
+            remainingSize=str(remaining),
+            avgPrice=None,
+            errorMsg=None
+        )
         return json.dumps(response.__dict__)
 
     def process_new_orders(self, args: list[PostOrdersArgs]) -> str:
@@ -92,19 +99,25 @@ class ClobDB:
             responses.append(response_dict)
         return json.dumps(responses)
 
-    def add_order_to_db(self, order: Order, order_type: OrderType, post_only: bool, serialized_body: dict) -> int | None:
+    def add_order_to_db(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool) -> int:
+        order = signed_order.order
+        serialized_body = order_to_json(order, self.api_key, order_type, post_only)
+        remaining_amount = str(order.makerAmount)
+        price_u256 = str(order.price)
+
         with self.db:
             cursor = self.db.execute(
                 """
                 INSERT INTO orders (api_key, price, post_only, order_type,
                                     salt, maker, taker, signer, tokenId,
                                     makerAmount, takerAmount, expiration, nonce,
-                                    feeRateBps, side, signatureType, order_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    feeRateBps, side, signatureType, order_json,
+                                    status, remaining_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self.api_key,
-                    order.price,
+                    price_u256,
                     int(post_only),
                     order_type.value,
                     order.salt,
@@ -112,59 +125,112 @@ class ClobDB:
                     order.taker,
                     order.signer,
                     order.tokenId,
-                    order.makerAmount,
-                    order.takerAmount,
+                    str(order.makerAmount),
+                    str(order.takerAmount),
                     order.expiration,
                     order.nonce,
                     order.feeRateBps,
                     order.side,
                     order.signatureType,
-                    serialized_body
+                    serialized_body,
+                    "open",
+                    remaining_amount,
                 )
             )
             order_id = cursor.lastrowid
-        return order_id
+        return int(order_id)
 
-    def find_matching_orders(self, orderId: str):
+    def match_order(self, order_id: int):
+        """
+        Match a single taker order against the book.
+
+        \- Respects price priority then time (id) priority.
+        \- Supports partial fills via remaining_amount updates.
+        """
         with self.db:
-            row = self.db.execute(
-                "SELECT price, order_type, side FROM orders WHERE rowid = ?",
-                (orderId,)
+            taker = self.db.execute(
+                """
+                SELECT * FROM orders
+                WHERE id = ? AND status = 'open'
+                """,
+                (order_id,)
             ).fetchone()
-            if not row:
-                return []
-            price, order_type, side = row
-            opposite_side = "SELL" if side == "BUY" else "BUY"
 
-            if order_type == "MARKET":
-                cursor = self.db.execute(
+            if not taker:
+                return [], Decimal(0)
+
+            taker_side = taker["side"]
+            taker_price = int(str(taker["price"]))
+            taker_remaining = Decimal(taker["remaining_amount"])
+
+            opposite_side = "SELL" if taker_side == "BUY" else "BUY"
+
+            candidates = self.db.execute(
+                """
+                SELECT * FROM orders
+                WHERE side = ?
+                  AND status = 'open'
+                """,
+                (opposite_side,)
+            ).fetchall()
+
+            def price_ok(m):
+                maker_price = int(str(m["price"]))
+                return maker_price <= taker_price if taker_side == "BUY" else maker_price >= taker_price
+
+            filtered = [m for m in candidates if price_ok(m)]
+
+            filtered.sort(
+                key=lambda m: (int(str(m["price"])), m["id"]) if taker_side == "BUY"
+                else (-int(str(m["price"])), m["id"])
+            )
+
+            matches = []
+            for maker in filtered:
+                if taker_remaining <= 0:
+                    break
+
+                maker_remaining = Decimal(maker["remaining_amount"])
+                if maker_remaining <= 0:
+                    continue
+
+                trade_size = min(taker_remaining, maker_remaining)
+                taker_remaining -= trade_size
+                maker_remaining -= trade_size
+
+                # Update maker order
+                self.db.execute(
                     """
-                    SELECT * FROM orders
-                    WHERE side = ? AND rowid != ?
-                    ORDER BY price ASC
+                    UPDATE orders
+                    SET remaining_amount = ?,
+                        status = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                    WHERE id = ?
                     """,
-                    (opposite_side, orderId)
+                    (str(maker_remaining), maker_remaining, maker["id"])
                 )
-            elif order_type in ("GTC", "GTD", "FAK", "FOK"):
-                if side == "BUY":
-                    cursor = self.db.execute(
-                        """
-                        SELECT * FROM orders
-                        WHERE side = ? AND price <= ? AND rowid != ?
-                        ORDER BY price ASC
-                        """,
-                        (opposite_side, price, orderId)
-                    )
-                else:
-                    cursor = self.db.execute(
-                        """
-                        SELECT * FROM orders
-                        WHERE side = ? AND price >= ? AND rowid != ?
-                        ORDER BY price DESC
-                        """,
-                        (opposite_side, price, orderId)
-                    )
-            else:
-                return []
-            matching_orders = cursor.fetchall()
-        return matching_orders
+
+                matches.append(
+                    {
+                        "taker_order_id": order_id,
+                        "maker_order_id": maker["id"],
+                        "price": str(maker["price"]),
+                        "size": str(trade_size),
+                    }
+                )
+
+            # Update taker order
+            self.db.execute(
+                """
+                UPDATE orders
+                SET remaining_amount = ?,
+                    status = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                WHERE id = ?
+                """,
+                (str(taker_remaining), taker_remaining, order_id)
+            )
+
+        return matches, taker_remaining
+
+    # Keep old name for compatibility, but now it runs matching
+    def find_matching_orders(self, orderId: str):
+        return self.match_order(int(orderId))
