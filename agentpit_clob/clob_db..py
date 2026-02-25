@@ -29,7 +29,6 @@ class ClobDB:
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 api_key TEXT,
                 price TEXT,
                 post_only INTEGER,
@@ -84,19 +83,40 @@ class ClobDB:
         # use string order_id as the external order id
         taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
 
+        matches: list[dict[str, Any]] = []
         if not post_only:
             matches, remaining = self.match_and_fill_order(taker_order_id)
         else:
             remaining = Decimal(signed_order.order.makerAmount)
 
+        total_requested = Decimal(signed_order.order.makerAmount)
+        filled = total_requested - remaining
+
+        # compute volume‑weighted average price from matches
+        notional = Decimal(0)
+        total_size = Decimal(0)
+        for m in matches:
+            size_dec = Decimal(m["size"])
+            price_dec = Decimal(m["price"])
+            notional += size_dec * price_dec
+            total_size += size_dec
+
+        avg_price: str | None
+        if total_size > 0:
+            avg_price = str(notional / total_size)
+        else:
+            avg_price = None
+
         response = OrderResponse(
             success=True,
             orderID=taker_order_id,
             status="open" if remaining > 0 else "filled",
-            filledSize=str(Decimal(signed_order.order.makerAmount) - remaining),
+            filledSize=str(filled),
             remainingSize=str(remaining),
-            avgPrice=None,
+            avgPrice=avg_price,
             errorMsg=None,
+            # if OrderResponse has a field to hold per‑fill details, attach them;
+            # otherwise they are available in DB trades table.
         )
         return json.dumps(response.__dict__)
 
@@ -290,15 +310,6 @@ class ClobDB:
             (str(taker_remaining), taker_remaining, order_pk)
         )
 
-    def append_new_match(self, maker, matches: list[Any], order_id: str, trade_size: Decimal):
-        matches.append(
-            {
-                "taker_order_id": order_id,
-                "maker_order_id": maker["order_id"],
-                "price": str(maker["price"]),
-                "size": str(trade_size),
-            }
-        )
 
     def update_maker_remaining(self, maker, maker_remaining: Decimal):
         self.db.execute(
@@ -359,7 +370,7 @@ class ClobDB:
 
         trade = Trade(
             id=str(trade_id),
-            taker_order_id=str(taker_row["order_id"]),
+            taker_order_id=str(taker_row["trade_id"]),
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
