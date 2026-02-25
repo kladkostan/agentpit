@@ -10,7 +10,7 @@ class Trade:
     market: str
     asset_id: str
     price: str
-    size: str
+    trade_size: str
     remaining_size: str
     side: str
     match_time: str
