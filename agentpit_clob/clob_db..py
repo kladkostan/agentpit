@@ -62,7 +62,7 @@ class ClobDB:
         self.db.execute(
             """
             CREATE TABLE IF NOT EXISTS trades (
-                id TEXT PRIMARY KEY,
+                trade_id TEXT PRIMARY KEY,
                 taker_order_id TEXT,
                 maker_orders TEXT,
                 market TEXT,
@@ -263,7 +263,7 @@ class ClobDB:
                   FROM orders
                   WHERE side = ?
                     AND status = 'open'
-                    AND CAST(price AS INTEGER) <= ? \
+                    AND CAST(price AS INTEGER) <= ?
                   """
         else:
             sql = """
@@ -271,7 +271,7 @@ class ClobDB:
                   FROM orders
                   WHERE side = ?
                     AND status = 'open'
-                    AND CAST(price AS INTEGER) >= ? \
+                    AND CAST(price AS INTEGER) >= ?
                   """
 
         candidates = self.db.execute(sql, (opposite_side, taker_price)).fetchall()
