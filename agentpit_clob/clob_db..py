@@ -115,8 +115,6 @@ class ClobDB:
             remainingSize=str(remaining),
             avgPrice=avg_price,
             errorMsg=None,
-            # if OrderResponse has a field to hold per‑fill details, attach them;
-            # otherwise they are available in DB trades table.
         )
         return json.dumps(response.__dict__)
 
@@ -141,7 +139,6 @@ class ClobDB:
 
         serialized_body = order_to_json(signed_order, self.api_key, order_type, post_only)
 
-        # previously "order_hash"
         order_id = self.compute_polymarket_compatible_order_id(order)
         self.logger.debug(f"Computed order id: {order_id}")
 
@@ -178,24 +175,14 @@ class ClobDB:
                     order_id,
                 ),
             )
-        # return canonical id: the order_id column
+        # always use order_id (hash) as canonical identifier
         return order_id
-
-    def is_price_acceptable(
-        self,
-        maker: sqlite3.Row,
-        taker_side: Literal["BUY", "SELL"],
-        taker_price: int,
-    ) -> bool:
-        maker_price = int(str(maker["price"]))
-        return maker_price <= taker_price if taker_side == "BUY" else maker_price >= taker_price
 
     def match_and_fill_order(self, order_id: str):
         """
         Match a single taker order against the book.
 
-        order_id is the canonical external id; we resolve it to the row and
-        then use the integer primary key (id) internally.
+        order_id is the canonical external id (orders.order_id).
         """
         with self.db:
             taker = self.get_existing_order(order_id)
@@ -219,7 +206,8 @@ class ClobDB:
                 taker_remaining -= trade_size
                 maker_remaining -= trade_size
 
-                self.update_maker_remaining(maker, maker_remaining)
+                # update maker by external order_id to avoid mixing with nonexistent PK
+                self.update_maker_remaining(maker["order_id"], maker_remaining)
 
                 match = {
                     "taker_order_id": taker["order_id"],
@@ -236,7 +224,8 @@ class ClobDB:
                     remaining_taker=taker_remaining,
                 )
 
-            self.update_taker_remaining(taker["id"], taker_remaining)
+            # update taker by external order_id as well
+            self.update_taker_remaining(taker["order_id"], taker_remaining)
 
         return matches, taker_remaining
 
@@ -257,8 +246,8 @@ class ClobDB:
 
     def sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
         candidates.sort(
-            key=lambda m: (int(str(m["price"])), m["id"]) if taker_side == "BUY"
-            else (-int(str(m["price"])), m["id"])
+            key=lambda m: (int(str(m["price"])), m["order_id"]) if taker_side == "BUY"
+            else (-int(str(m["price"])), m["order_id"])
         )
 
     def get_sorted_candidates(
@@ -274,9 +263,6 @@ class ClobDB:
         to INTEGER in SQL for correct numeric comparison.
         """
         opposite_side = "SELL" if taker_side == "BUY" else "BUY"
-
-        # BUY taker: maker_price <= taker_price
-        # SELL taker: maker_price >= taker_price
         if taker_side == "BUY":
             sql = """
                   SELECT *
@@ -298,52 +284,49 @@ class ClobDB:
         self.sort_candidates(candidates, taker_side)
         return candidates
 
-    def update_taker_remaining(self, order_pk: int, taker_remaining: Decimal):
-        # order_id here is the internal integer primary key (orders.id)
+    def update_taker_remaining(self, order_id: str, taker_remaining: Decimal):
+        """
+        Update remaining amount and status for the taker order by external order_id.
+        """
+        remaining_int = int(taker_remaining)
         self.db.execute(
             """
             UPDATE orders
             SET remaining_amount = ?,
                 status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
-            WHERE id = ?
+            WHERE order_id = ?
             """,
-            (str(taker_remaining), taker_remaining, order_pk)
+            (str(taker_remaining), remaining_int, order_id)
         )
 
-
-    def update_maker_remaining(self, maker, maker_remaining: Decimal):
+    def update_maker_remaining(self, order_id: str, maker_remaining: Decimal):
+        """
+        Update remaining amount and status for a maker order by external order_id.
+        """
+        remaining_int = int(maker_remaining)
         self.db.execute(
             """
             UPDATE orders
             SET remaining_amount = ?,
                 status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
-            WHERE id = ?
+            WHERE order_id = ?
             """,
-            (str(maker_remaining), maker_remaining, maker["id"])
+            (str(maker_remaining), remaining_int, order_id)
         )
 
     # Keep old name for compatibility, but now it runs matching by external order_id
     def find_matching_orders(self, orderId: str):
         return self.match_and_fill_order(orderId)
 
+
     def compute_polymarket_compatible_order_id(self, order: Order) -> str:
-        """
-        Compute the canonical EIP-712 order hash (chash) for a given CLOB Order.
-
-        \- Uses the same EIP-712 encoding as signing: order.signable_bytes(domain).
-        \- Returns a 0x-prefixed hex string.
-        """
-        # Build the EIP-712 domain used for orders on this chain
-        domain = get_clob_auth_domain(self.chain_id)  # or get_clob_order_domain if available
-
-        # Bytes that are signed for this order
+        # Polymarket currently uses the auth domain for order hashes
+        domain = get_clob_auth_domain(self.chain_id)
         signable = order.signable_bytes(domain)
-
-        # EIP-712 struct hash
         struct_hash = keccak(signable)
-
-        # 0x-prefixed hex string
         return prepend_zx(struct_hash.hex())
+
+
 
     def _insert_trade_row(
         self,
@@ -370,7 +353,7 @@ class ClobDB:
 
         trade = Trade(
             id=str(trade_id),
-            taker_order_id=str(taker_row["trade_id"]),
+            taker_order_id=str(taker_row["order_id"]),
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
@@ -387,7 +370,7 @@ class ClobDB:
         self.db.execute(
             """
             INSERT INTO trades (
-                id,
+                trade_id,
                 taker_order_id,
                 maker_orders,
                 market,
