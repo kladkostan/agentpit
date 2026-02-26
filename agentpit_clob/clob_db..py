@@ -31,6 +31,7 @@ ORDER_TYPE_GTD = "GTD"
 ORDER_TYPE_FOK = "FOK"
 ORDER_TYPE_FAK = "FAK"
 
+
 class OrderStatus(str, Enum):
     LIVE = "live"
     MATCHED = "matched"
@@ -169,7 +170,6 @@ class ClobDB:
             """
         )
 
-
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
 
         _processed = self._process_expired_orders()
@@ -180,7 +180,17 @@ class ClobDB:
         with self._lock:
             with self.db:
                 taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
-                if not post_only:
+
+                cancel_fok = False
+                if (order_type == OrderType.FOK):
+                    # For FOK  cancel if not fully filled.
+                    # Do a dry run
+                    dry_run_spent, dry_run_remaining, dry_run_status = self._match_and_fill_order(taker_order_id, True)
+                    if dry_run_remaining > 0:
+                        # Cancel the order by setting its status to CANCELLED
+                        self.set_order_status(taker_order_id, OrderStatus.CANCELLED)
+                        cancel_fok = True
+                if not post_only and not cancel_fok:
                     total_spent, remaining, status = self._match_and_fill_order(taker_order_id)
                 else:
                     remaining = int(signed_order.order.makerAmount)
@@ -318,7 +328,7 @@ class ClobDB:
         except KeyError:
             raise ValueError(f"Unsupported signatureType: {sig_type_int}")
 
-    def _match_and_fill_order(self, order_id: str) -> tuple[int, int, str]:
+    def _match_and_fill_order(self, order_id: str, dry_run: bool = False) -> tuple[int, int, str]:
         taker = self._get_existing_order(order_id)
 
         taker_side = taker["side"]  # string "BUY"/"SELL"
@@ -340,17 +350,16 @@ class ClobDB:
             taker_remaining = taker_remaining - match.trade_size
             matches.append(match)
 
-        # update taker by external order_id as well
-        self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
-
         total_spent = int(0)
         for m in matches:
             size = int(m.trade_size)
             price = int(m.price)
             total_spent += size * price
 
-
-        self.set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(order_id)
+        # update taker by external order_id as well
+        if not dry_run:
+            self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
+            self.set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(order_id)
 
         status = self.get_order_status(order_id)
 
@@ -417,19 +426,20 @@ class ClobDB:
         self._sort_candidates(candidates, taker_side)
         return candidates
 
-    def _fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) -> Match:
+    def _fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int, dry_run: bool = False) -> Match:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
 
-        self._update_maker_remaining_in_db(maker["order_id"], maker_remaining)
+        if not dry_run:
+            self._update_maker_remaining_in_db(maker["order_id"], maker_remaining)
 
-        self._insert_trade_row(
-            taker_row=taker,
-            maker_row=maker,
-            trade_size=trade_size,
-            remaining_taker=taker_remaining,
-        )
+            self._insert_trade_row(
+                taker_row=taker,
+                maker_row=maker,
+                trade_size=trade_size,
+                remaining_taker=taker_remaining,
+            )
 
         match = Match(
             taker_order_id=taker["order_id"],
@@ -481,7 +491,6 @@ class ClobDB:
             (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
 
-
     def _compute_polymarket_compatible_order_id(self, order: Order) -> str:
         # Polymarket currently uses the auth domain for order hashes
         domain = get_clob_auth_domain(self.chain_id)
@@ -503,13 +512,11 @@ class ClobDB:
         - status is always 'CONFIRMED' for now.
         """
 
-
         trade_id = (
             f"{taker_row['order_id']}-"
             f"{maker_row['order_id']}-"
             f"{uuid.uuid4()}"
         )
-
 
         maker_orders_payload = [
             {
@@ -518,11 +525,6 @@ class ClobDB:
                 "matched_amount": str(trade_size),
             }
         ]
-
-
-
-
-
 
         trade = Trade(
             id=str(trade_id),
@@ -602,8 +604,6 @@ class ClobDB:
 
         scaled = price_dec * USDC_SCALE
         return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
-
-
 
     def _order_type_as_str(self, order_type: OrderType) -> str:
         if order_type == OrderType.GTC:
