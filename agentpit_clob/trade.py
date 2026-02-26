@@ -9,7 +9,7 @@ class Trade:
     maker_orders: list[dict[str, Any]]
     market: str
     asset_id: str
-    price: float
+    price: int
     trade_size: int
     remaining_size: int
     side: str          # "BUY" or "SELL"

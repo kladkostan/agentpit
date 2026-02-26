@@ -30,7 +30,7 @@ class ClobDB:
         self.api_key = api_key
         self.chain_id = chain_id
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.db = sqlite3.connect('/tmp/x.db')
+        self.db = sqlite3.connect('/tmp/x.db', check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         with self.db:
@@ -132,14 +132,14 @@ class ClobDB:
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
 
+        matches: list[Match] = []
         with self._lock:
-            taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
-
-            matches: list[Match] = []
-            if not post_only:
-                matches, remaining = self._match_and_fill_order(taker_order_id)
-            else:
-                remaining = int(signed_order.order.makerAmount)
+            with self.db:
+                taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
+                if not post_only:
+                    matches, remaining = self._match_and_fill_order(taker_order_id)
+                else:
+                    remaining = int(signed_order.order.makerAmount)
 
         total_requested = int(signed_order.order.makerAmount)
         filled = total_requested - remaining
@@ -154,7 +154,7 @@ class ClobDB:
 
         avg_price: str | None
         if filled > 0:
-            avg_price = str(Decimal(total_spent) / Decimal(filled))
+            avg_price = str(Decimal(total_spent) / (Decimal(filled)) * Decimal(10 ** 6))
         else:
             avg_price = None
 
@@ -201,54 +201,54 @@ class ClobDB:
 
         side_str = self._side_as_str(order)
 
-        with self.db:
-            self.db.execute(
-                """
-                INSERT INTO orders (api_key,
-                                    price,
-                                    post_only,
-                                    order_type,
-                                    salt,
-                                    maker,
-                                    taker,
-                                    signer,
-                                    tokenId,
-                                    maker_amount,
-                                    taker_amount,
-                                    expiration,
-                                    nonce,
-                                    fee_rate_bps,
-                                    side,
-                                    signature_type,
-                                    order_json,
-                                    status,
-                                    remaining_amount,
-                                    order_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    self.api_key,
-                    self._get_price_int(order),
-                    int(post_only),
-                    order_type_str,
-                    int(order.salt),
-                    order.maker,
-                    order.taker,
-                    order.signer,
-                    order.tokenId,
-                    int(order.makerAmount),
-                    int(order.takerAmount),
-                    int(order.expiration),
-                    int(order.nonce),
-                    int(order.feeRateBps),
-                    side_str,
-                    self._signature_type_as_str(order.signatureType),  # store as TEXT
-                    serialized_body,
-                    "open",
-                    int(order.makerAmount),
-                    order_id,
-                ),
-            )
+
+        self.db.execute(
+            """
+            INSERT INTO orders (api_key,
+                                price,
+                                post_only,
+                                order_type,
+                                salt,
+                                maker,
+                                taker,
+                                signer,
+                                tokenId,
+                                maker_amount,
+                                taker_amount,
+                                expiration,
+                                nonce,
+                                fee_rate_bps,
+                                side,
+                                signature_type,
+                                order_json,
+                                status,
+                                remaining_amount,
+                                order_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.api_key,
+                self._get_price_int(order),
+                int(post_only),
+                order_type_str,
+                int(order.salt),
+                order.maker,
+                order.taker,
+                order.signer,
+                order.tokenId,
+                int(order.makerAmount),
+                int(order.takerAmount),
+                int(order.expiration),
+                int(order.nonce),
+                int(order.feeRateBps),
+                side_str,
+                self._signature_type_as_str(order.signatureType),  # store as TEXT
+                serialized_body,
+                "open",
+                int(order.makerAmount),
+                order_id,
+            ),
+        )
 
         # always use order_id (hash) as canonical identifier
         return order_id
@@ -275,30 +275,29 @@ class ClobDB:
             raise ValueError(f"Unsupported signatureType: {sig_type_int}")
 
     def _match_and_fill_order(self, order_id: str):
-        with self.db:
-            taker = self._get_existing_order(order_id)
+        taker = self._get_existing_order(order_id)
 
-            taker_side = taker["side"]  # string "BUY"/"SELL"
-            taker_price = int(taker["price"])
-            taker_remaining = int(taker["remaining_amount"])
+        taker_side = taker["side"]  # string "BUY"/"SELL"
+        taker_price = int(taker["price"])
+        taker_remaining = int(taker["remaining_amount"])
 
-            candidates = self._get_sorted_candidates(taker_side, taker_price)
+        candidates = self._get_sorted_candidates(taker_side, taker_price)
 
-            matches: list[Match] = []
-            for maker in candidates:
-                if taker_remaining <= 0:
-                    break
+        matches: list[Match] = []
+        for maker in candidates:
+            if taker_remaining <= 0:
+                break
 
-                maker_remaining = int(maker["remaining_amount"])
-                if maker_remaining <= 0:
-                    continue
+            maker_remaining = int(maker["remaining_amount"])
+            if maker_remaining <= 0:
+                continue
 
-                match = self._fill_order(maker, maker_remaining, taker, taker_remaining)
-                taker_remaining = taker_remaining - match.trade_size
-                matches.append(match)
+            match = self._fill_order(maker, maker_remaining, taker, taker_remaining)
+            taker_remaining = taker_remaining - match.trade_size
+            matches.append(match)
 
-            # update taker by external order_id as well
-            self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
+        # update taker by external order_id as well
+        self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
 
         return matches, taker_remaining
 
@@ -347,15 +346,15 @@ class ClobDB:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
-        with self.db:
-            self._update_maker_remaining_in_db(maker["order_id"], maker_remaining)
 
-            self._insert_trade_row(
-                taker_row=taker,
-                maker_row=maker,
-                trade_size=trade_size,
-                remaining_taker=taker_remaining,
-            )
+        self._update_maker_remaining_in_db(maker["order_id"], maker_remaining)
+
+        self._insert_trade_row(
+            taker_row=taker,
+            maker_row=maker,
+            trade_size=trade_size,
+            remaining_taker=taker_remaining,
+        )
 
         match = Match(
             taker_order_id=taker["order_id"],
@@ -385,29 +384,29 @@ class ClobDB:
         Update remaining amount and status for the taker order by external order_id.
         """
         remaining_int = int(taker_remaining)
-        with self.db:
-            self.db.execute(
-                """
-                UPDATE orders
-                SET remaining_amount = ?,
-                    status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
-                WHERE order_id = ?
-                """,
-                (remaining_int, remaining_int, order_id)
-            )
+
+        self.db.execute(
+            """
+            UPDATE orders
+            SET remaining_amount = ?,
+                status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+            WHERE order_id = ?
+            """,
+            (remaining_int, remaining_int, order_id)
+        )
 
     def _update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
         remaining_int = int(maker_remaining)
-        with self.db:
-            self.db.execute(
-                """
-                UPDATE orders
-                SET remaining_amount = ?,
-                    status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
-                WHERE order_id = ?
-                """,
-                (remaining_int, remaining_int, order_id)
-            )
+
+        self.db.execute(
+            """
+            UPDATE orders
+            SET remaining_amount = ?,
+                status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+            WHERE order_id = ?
+            """,
+            (remaining_int, remaining_int, order_id)
+        )
 
     # Keep old name for compatibility, but now it runs matching by external order_id
     def _find_matching_orders(self, orderId: str):
@@ -450,10 +449,10 @@ class ClobDB:
             }
         ]
 
-        price_int = maker_row["price"]
-        trade_size_int = int(trade_size)
-        remaining_int = int(remaining_taker)
-        match_time_int = int(datetime.utcnow().timestamp())
+
+
+
+
 
         trade = Trade(
             id=str(trade_id),
@@ -461,65 +460,55 @@ class ClobDB:
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
-            price=price_int,
-            trade_size=trade_size_int,
-            remaining_size=remaining_int,
+            price=maker_row["price"],
+            trade_size=int(trade_size),
+            remaining_size=int(remaining_taker),
             side=taker_row["side"],  # string "BUY"/"SELL"
-            match_time=match_time_int,
+            match_time=int(datetime.utcnow().timestamp()),
             transaction_hash="",
             bucket_index=0,
             fee_rate_bps=int(taker_row["fee_rate_bps"]),
         )
-        with self.db:
-            self.db.execute(
-                """
-                INSERT INTO trades (trade_id,
-                                    taker_order_id,
-                                    maker_orders,
-                                    market,
-                                    asset_id,
-                                    price,
-                                    trade_size,
-                                    remaining_size,
-                                    side,
-                                    status,
-                                    match_time,
-                                    transaction_hash,
-                                    bucket_index,
-                                    fee_rate_bps)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    trade.id,
-                    trade.taker_order_id,
-                    json.dumps(trade.maker_orders),
-                    trade.market,
-                    trade.asset_id,
-                    trade.price,
-                    trade.trade_size,
-                    trade.remaining_size,
-                    trade.side,  # TEXT in DB
-                    "CONFIRMED",
-                    trade.match_time,
-                    trade.transaction_hash,
-                    trade.bucket_index,
-                    trade.fee_rate_bps,
-                ),
-            )
-
+        self.db.execute(
+            """
+            INSERT INTO trades (trade_id,
+                                taker_order_id,
+                                maker_orders,
+                                market,
+                                asset_id,
+                                price,
+                                trade_size,
+                                remaining_size,
+                                side,
+                                status,
+                                match_time,
+                                transaction_hash,
+                                bucket_index,
+                                fee_rate_bps)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trade.id,
+                trade.taker_order_id,
+                json.dumps(trade.maker_orders),
+                trade.market,
+                trade.asset_id,
+                trade.price,
+                trade.trade_size,
+                trade.remaining_size,
+                trade.side,  # TEXT in DB
+                "CONFIRMED",
+                trade.match_time,
+                trade.transaction_hash,
+                trade.bucket_index,
+                trade.fee_rate_bps,
+            ),
+        )
 
     def _get_price_int(self, order: Order) -> int:
-
         USDC_DECIMALS = 6
-        USDC_SCALE = 10 ** USDC_DECIMALS
+        USDC_SCALE = Decimal(10 ** USDC_DECIMALS)
 
-        """
-        Derive Polymarket limit price from order amounts and side, then
-        convert to 6‑decimal integer for DB storage.
-
-        BUY:  price = taker_amount / maker_amount
-        SELL: price = maker_amount / taker_amount
-        """
         maker_amount = Decimal(str(int(order.makerAmount)))
         taker_amount = Decimal(str(int(order.takerAmount)))
 
@@ -527,17 +516,19 @@ class ClobDB:
             raise ValueError("maker_amount and taker_amount must be positive")
 
         side_int = int(order.side)
-        if side_int == 0:
-            side = "BUY"
-        elif side_int == 1:
-            side = "SELL"
-        else:
-            raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
 
-        if side == "BUY":
-            price_dec = taker_amount / maker_amount
-        else:  # side == "SELL"
+        # 0 = BUY: Maker gives Collateral (makerAmount), receives Asset (takerAmount)
+        if side_int == 0:
+            # Price = Collateral / Asset
             price_dec = maker_amount / taker_amount
+
+        # 1 = SELL: Maker gives Asset (makerAmount), receives Collateral (takerAmount)
+        elif side_int == 1:
+            # Price = Collateral / Asset
+            price_dec = taker_amount / maker_amount
+
+        else:
+            raise ValueError(f"Invalid order.side value: {order.side!r}")
 
         scaled = price_dec * USDC_SCALE
         return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
