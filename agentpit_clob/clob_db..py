@@ -667,3 +667,29 @@ class ClobDB:
                     """,
                     (OrderStatus.CANCELLED, order_id, ORDER_TYPE_FAK, OrderStatus.LIVE)
                 )
+
+    def cancel_order(self, order_id: str) -> bool:
+        """
+        Cancels an order if it is currently LIVE.
+        Returns True if the order was cancelled, False otherwise.
+        """
+        with self._lock:
+            with self.db:
+                cursor = self.db.execute(
+                    """
+                    UPDATE orders
+                    SET status = ?
+                    WHERE order_id = ?
+                      AND status = ?
+                    """,
+                    (OrderStatus.CANCELLED, order_id, OrderStatus.LIVE)
+                )
+                return cursor.rowcount > 0
+
+
+    def cancel_orders(self, order_ids: list[str]) -> list[bool]:
+        """
+        Cancels a batch of orders by calling cancel_order for each ID.
+        Returns a list of booleans indicating if each order was successfully cancelled.
+        """
+        return [self.cancel_order(order_id) for order_id in order_ids]

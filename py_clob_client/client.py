@@ -674,6 +674,14 @@ class ClobClient:
         Cancels an order
         Level 2 Auth required
         """
+
+        # BEGIN_AGENTPIT
+        if self.host == "":
+            return self.agentpit_client.cancel_order(order_id)
+        # END_AGENTPIT
+
+
+
         self.assert_level_2_auth()
         body = {"orderID": order_id}
 
@@ -695,6 +703,12 @@ class ClobClient:
         Cancels orders
         Level 2 Auth required
         """
+
+        # BEGIN_AGENTPIT
+        if self.host == "":
+            return self.agentpit_client.cancel_orders(order_ids)
+        # END_AGENTPIT
+
         self.assert_level_2_auth()
         body = order_ids
         serialized = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
