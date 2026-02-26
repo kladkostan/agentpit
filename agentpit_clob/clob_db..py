@@ -75,15 +75,14 @@ class ClobDB:
                     status
                     TEXT
                     DEFAULT
-                    'open',
+                    'live',
                     remaining_amount
                     INTEGER,
                     order_id
                     TEXT
                     NOT
                     NULL
-                    UNIQUE
-                )
+                    UNIQUE                )
                 """
             )
             self.db.execute(
@@ -161,7 +160,7 @@ class ClobDB:
         response = OrderResponse(
             success=True,
             orderID=taker_order_id,
-            status="open" if remaining > 0 else "filled",
+            status="live" if remaining > 0 else "matched",
             filledSize=str(filled),
             remainingSize=str(remaining),
             avgPrice=avg_price,
@@ -244,7 +243,7 @@ class ClobDB:
                 side_str,
                 self._signature_type_as_str(order.signatureType),  # store as TEXT
                 serialized_body,
-                "open",
+                "livw",
                 int(order.makerAmount),
                 order_id,
             ),
@@ -326,7 +325,7 @@ class ClobDB:
                   SELECT *
                   FROM orders
                   WHERE side = ?
-                    AND status = 'open'
+                    AND status = 'live'
                     AND price <= ?
                   """
         else:
@@ -334,7 +333,7 @@ class ClobDB:
                   SELECT *
                   FROM orders
                   WHERE side = ?
-                    AND status = 'open'
+                    AND status = 'live'
                     AND price >= ?
                   """
 
@@ -370,13 +369,13 @@ class ClobDB:
             SELECT *
             FROM orders
             WHERE order_id = ?
-              AND status = 'open'
+              AND status = 'live'
             """,
             (order_id,),
         ).fetchone()
 
         if not taker:
-            raise RuntimeError(f"Taker order {order_id} not found or not open")
+            raise RuntimeError(f"Taker order {order_id} not found or not live")
         return taker
 
     def _update_taker_remaining_in_db(self, order_id: str, taker_remaining: int):
@@ -389,7 +388,7 @@ class ClobDB:
             """
             UPDATE orders
             SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                status           = CASE WHEN ? = 0 THEN 'matched' ELSE 'live' END
             WHERE order_id = ?
             """,
             (remaining_int, remaining_int, order_id)
@@ -402,7 +401,7 @@ class ClobDB:
             """
             UPDATE orders
             SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                status           = CASE WHEN ? = 0 THEN 'matched' ELSE 'live' END
             WHERE order_id = ?
             """,
             (remaining_int, remaining_int, order_id)
