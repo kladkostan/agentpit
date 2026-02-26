@@ -17,15 +17,10 @@ from py_order_utils.utils import prepend_zx
 from py_clob_client.signing.eip712 import get_clob_auth_domain
 from decimal import Decimal, ROUND_HALF_UP
 
+from agentpit_clob.match import Match
+
 from py_clob_client.utilities import order_to_json
 from dataclasses import dataclass
-
-@dataclass
-class Match:
-    taker_order_id: str
-    maker_order_id: str
-    price: int
-    trade_size: int
 
 
 class ClobDB:
@@ -38,27 +33,53 @@ class ClobDB:
 
         self.db.execute(
             """
-            CREATE TABLE IF NOT EXISTS orders (
-                api_key TEXT,
-                price INTEGER,
-                post_only INTEGER,
-                order_type TEXT,
-                salt INTEGER,
-                maker TEXT,
-                taker TEXT,
-                signer TEXT,
-                tokenId TEXT,
-                maker_amount INTEGER,
-                taker_amount INTEGER,
-                expiration INTEGER,
-                nonce INTEGER,
-                fee_rate_bps INTEGER,
-                side TEXT,
-                signature_type TEXT,
-                order_json TEXT,
-                status TEXT DEFAULT 'open',
-                remaining_amount INTEGER,
-                order_id TEXT NOT NULL UNIQUE
+            CREATE TABLE IF NOT EXISTS orders
+            (
+                api_key
+                TEXT,
+                price
+                INTEGER,
+                post_only
+                INTEGER,
+                order_type
+                TEXT,
+                salt
+                INTEGER,
+                maker
+                TEXT,
+                taker
+                TEXT,
+                signer
+                TEXT,
+                tokenId
+                TEXT,
+                maker_amount
+                INTEGER,
+                taker_amount
+                INTEGER,
+                expiration
+                INTEGER,
+                nonce
+                INTEGER,
+                fee_rate_bps
+                INTEGER,
+                side
+                TEXT,
+                signature_type
+                TEXT,
+                order_json
+                TEXT,
+                status
+                TEXT
+                DEFAULT
+                'open',
+                remaining_amount
+                INTEGER,
+                order_id
+                TEXT
+                NOT
+                NULL
+                UNIQUE
             )
             """
         )
@@ -70,21 +91,38 @@ class ClobDB:
         )
         self.db.execute(
             """
-            CREATE TABLE IF NOT EXISTS trades (
-                trade_id TEXT PRIMARY KEY,
-                taker_order_id TEXT,
-                maker_orders TEXT,
-                market TEXT,
-                asset_id TEXT,
-                price INTEGER,
-                trade_size INTEGER,
-                remaining_size INTEGER,
-                side TEXT,
-                status TEXT,
-                match_time INTEGER,
-                transaction_hash TEXT,
-                bucket_index INTEGER,
-                fee_rate_bps INTEGER
+            CREATE TABLE IF NOT EXISTS trades
+            (
+                trade_id
+                TEXT
+                PRIMARY
+                KEY,
+                taker_order_id
+                TEXT,
+                maker_orders
+                TEXT,
+                market
+                TEXT,
+                asset_id
+                TEXT,
+                price
+                INTEGER,
+                trade_size
+                INTEGER,
+                remaining_size
+                INTEGER,
+                side
+                TEXT,
+                status
+                TEXT,
+                match_time
+                INTEGER,
+                transaction_hash
+                TEXT,
+                bucket_index
+                INTEGER,
+                fee_rate_bps
+                INTEGER
             )
             """
         )
@@ -93,7 +131,7 @@ class ClobDB:
         # use string order_id as the external order id
         taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
 
-        matches: list[dict[str, Any]] = []
+        matches: list[Match] = []
         if not post_only:
             matches, remaining = self.match_and_fill_order(taker_order_id)
         else:
@@ -104,14 +142,15 @@ class ClobDB:
 
         # compute volume‑weighted average price from matches
         total_spent = int(0)
+
         for m in matches:
-            size = m["trade_size"]
-            price = m["price"]
+            size = int(m.trade_size)
+            price = int(m.price)
             total_spent += size * price
 
         avg_price: str | None
         if filled > 0:
-            avg_price = str(total_spent / filled)
+            avg_price = str(Decimal(total_spent) / Decimal(filled))
         else:
             avg_price = None
 
@@ -141,6 +180,7 @@ class ClobDB:
             order_type: OrderType,
             post_only: bool,
     ) -> str:
+
         order = signed_order.order
 
         serialized_body = order_to_json(
@@ -153,9 +193,7 @@ class ClobDB:
         order_id = self.compute_polymarket_compatible_order_id(order)
 
         # Normalize order_type from py_clob_client.OrderType to a plain string.
-        order_type_str = str(order_type)
-        if "." in order_type_str:
-            order_type_str = order_type_str.split(".")[-1]
+        order_type_str = self.order_type_as_str(order_type)
 
         side_str = self.side_as_str(order)
 
@@ -186,7 +224,7 @@ class ClobDB:
                 """,
                 (
                     self.api_key,
-                    get_price_int(order),
+                    self.get_price_int(order),
                     int(post_only),
                     order_type_str,
                     int(order.salt),
@@ -221,8 +259,6 @@ class ClobDB:
             raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
         return side_str
 
-
-
     def signature_type_as_str(self, signature_type: int | str) -> str:
         SIG_TYPE_MAP = {
             0: "EIP712",
@@ -233,8 +269,6 @@ class ClobDB:
             return SIG_TYPE_MAP[sig_type_int]
         except KeyError:
             raise ValueError(f"Unsupported signatureType: {sig_type_int}")
-
-
 
     def match_and_fill_order(self, order_id: str):
         with self.db:
@@ -256,7 +290,7 @@ class ClobDB:
                     continue
 
                 match = self.fill_order(maker, maker_remaining, taker, taker_remaining)
-                taker_remaining = taker_remaining - match["trade_size"]
+                taker_remaining = taker_remaining - match.trade_size
                 matches.append(match)
 
             # update taker by external order_id as well
@@ -272,9 +306,9 @@ class ClobDB:
         )
 
     def get_sorted_candidates(
-        self,
-        taker_side: Literal["BUY", "SELL"],
-        taker_price: int,
+            self,
+            taker_side: Literal["BUY", "SELL"],
+            taker_price: int,
     ) -> list[Any]:
         """
         Return maker orders on the opposite side that are price-acceptable
@@ -305,13 +339,12 @@ class ClobDB:
         self.sort_candidates(candidates, taker_side)
         return candidates
 
-    def fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) ->  Match :
+    def fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) -> Match:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
 
         self.update_maker_remaining_in_db(maker["order_id"], maker_remaining)
-
 
         self.insert_trade_row(
             taker_row=taker,
@@ -374,7 +407,6 @@ class ClobDB:
     def find_matching_orders(self, orderId: str):
         return self.match_and_fill_order(orderId)
 
-
     def compute_polymarket_compatible_order_id(self, order: Order) -> str:
         # Polymarket currently uses the auth domain for order hashes
         domain = get_clob_auth_domain(self.chain_id)
@@ -382,14 +414,12 @@ class ClobDB:
         struct_hash = keccak(signable)
         return prepend_zx(struct_hash.hex())
 
-
-
     def insert_trade_row(
-        self,
-        taker_row: sqlite3.Row,
-        maker_row: sqlite3.Row,
-        trade_size: int,
-        remaining_taker: int,
+            self,
+            taker_row: sqlite3.Row,
+            maker_row: sqlite3.Row,
+            trade_size: int,
+            remaining_taker: int,
     ) -> None:
         """
         Insert a single trade into the trades table.
@@ -430,22 +460,21 @@ class ClobDB:
 
         self.db.execute(
             """
-            INSERT INTO trades (
-                trade_id,
-                taker_order_id,
-                maker_orders,
-                market,
-                asset_id,
-                price,
-                trade_size,
-                remaining_size,
-                side,
-                status,
-                match_time,
-                transaction_hash,
-                bucket_index,
-                fee_rate_bps
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO trades (trade_id,
+                                taker_order_id,
+                                maker_orders,
+                                market,
+                                asset_id,
+                                price,
+                                trade_size,
+                                remaining_size,
+                                side,
+                                status,
+                                match_time,
+                                transaction_hash,
+                                bucket_index,
+                                fee_rate_bps)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trade.id,
@@ -465,35 +494,51 @@ class ClobDB:
             ),
         )
 
-USDC_DECIMALS = 6
-USDC_SCALE = 10 ** USDC_DECIMALS
 
-def get_price_int(order: Order) -> int:
-    """
-    Derive Polymarket limit price from order amounts and side, then
-    convert to 6‑decimal integer for DB storage.
+    def get_price_int(self, order: Order) -> int:
 
-    BUY:  price = taker_amount / maker_amount
-    SELL: price = maker_amount / taker_amount
-    """
-    maker_amount = Decimal(str(int(order.makerAmount)))
-    taker_amount = Decimal(str(int(order.takerAmount)))
+        USDC_DECIMALS = 6
+        USDC_SCALE = 10 ** USDC_DECIMALS
 
-    if maker_amount <= 0 or taker_amount <= 0:
-        raise ValueError("maker_amount and taker_amount must be positive")
+        """
+        Derive Polymarket limit price from order amounts and side, then
+        convert to 6‑decimal integer for DB storage.
 
-    side_int = int(order.side)
-    if side_int == 0:
-        side = "BUY"
-    elif side_int == 1:
-        side = "SELL"
-    else:
-        raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
+        BUY:  price = taker_amount / maker_amount
+        SELL: price = maker_amount / taker_amount
+        """
+        maker_amount = Decimal(str(int(order.makerAmount)))
+        taker_amount = Decimal(str(int(order.takerAmount)))
 
-    if side == "BUY":
-        price_dec = taker_amount / maker_amount
-    else:  # side == "SELL"
-        price_dec = maker_amount / taker_amount
+        if maker_amount <= 0 or taker_amount <= 0:
+            raise ValueError("maker_amount and taker_amount must be positive")
 
-    scaled = price_dec * USDC_SCALE
-    return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
+        side_int = int(order.side)
+        if side_int == 0:
+            side = "BUY"
+        elif side_int == 1:
+            side = "SELL"
+        else:
+            raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
+
+        if side == "BUY":
+            price_dec = taker_amount / maker_amount
+        else:  # side == "SELL"
+            price_dec = maker_amount / taker_amount
+
+        scaled = price_dec * USDC_SCALE
+        return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+    def order_type_as_str(self, order_type: OrderType):
+        if order_type == OrderType.GTC:
+            return "GTC"
+        elif order_type == OrderType.FOK:
+            return "FOK"
+        elif order_type == OrderType.GTD:
+            return "GTD"
+        elif order_type == OrderType.FAK:
+            return "FAK"
+        else:
+            raise ValueError(f"Unsupported OrderType: {order_type}")
+
