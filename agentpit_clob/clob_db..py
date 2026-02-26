@@ -33,7 +33,7 @@ class ClobDB:
                 price INTEGER,
                 post_only INTEGER,
                 order_type TEXT,
-                salt TEXT,
+                salt INTEGER,
                 maker TEXT,
                 taker TEXT,
                 signer TEXT,
