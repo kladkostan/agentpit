@@ -334,8 +334,9 @@ class ClobDB:
         taker_side = taker["side"]  # string "BUY"/"SELL"
         taker_price = int(taker["price"])
         taker_remaining = int(taker["remaining_amount"])
+        token_id = taker["token_id"]
 
-        candidates = self._get_sorted_candidates(taker_side, taker_price)
+        candidates = self._get_sorted_candidates(taker_side, taker_price, token_id)
 
         matches: list[Match] = []
         for maker in candidates:
@@ -391,6 +392,7 @@ class ClobDB:
             self,
             taker_side: Literal["BUY", "SELL"],
             taker_price: int,
+            token_id: str,
     ) -> list[Any]:
         """
         Return maker orders on the opposite side that are price-acceptable
@@ -406,6 +408,7 @@ class ClobDB:
                   WHERE side = ?
                     AND status = ?
                     AND price <= ?
+                    AND tokenId = ?
                   """
         # Taker SELL matches with BUYS having price >= taker_price
         else:
@@ -415,12 +418,13 @@ class ClobDB:
                   WHERE side = ?
                     AND status = ?
                     AND price >= ?
+                    AND tokenId = ?
                   """
 
         # Execute query. Note: We use OrderStatus.LIVE explicitly.
         candidates = self.db.execute(
             sql,
-            (opposite_side, OrderStatus.LIVE, taker_price)
+            (opposite_side, OrderStatus.LIVE, taker_price, token_id)
         ).fetchall()
 
         self._sort_candidates(candidates, taker_side)
