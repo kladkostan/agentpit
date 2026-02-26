@@ -17,6 +17,7 @@ from eth_utils import keccak
 from py_order_utils.utils import prepend_zx
 from py_order_utils.model import Order
 from py_clob_client.signing.eip712 import get_clob_auth_domain
+from decimal import Decimal, ROUND_HALF_UP
 
 tick_size = Decimal(0.01)
 
@@ -42,9 +43,9 @@ class ClobDB:
                 tokenId TEXT,
                 maker_amount INTEGER,
                 taker_amount INTEGER,
-                expiration TEXT,
+                expiration INTEGER,
                 nonce INTEGER,
-                feeRateBps INTEGER,
+                fee_rate_bps INTEGER,
                 side TEXT,
                 signatureType TEXT,
                 order_json TEXT,
@@ -68,7 +69,7 @@ class ClobDB:
                 maker_orders TEXT,
                 market TEXT,
                 asset_id TEXT,
-                price REAL,
+                price INTEGER,
                 trade_size INTEGER,
                 remaining_size INTEGER,
                 side TEXT,
@@ -129,69 +130,81 @@ class ClobDB:
             responses.append(response_dict)
         return json.dumps(responses)
 
-    def add_order_to_db(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool) -> str:
+    def add_order_to_db(
+            self,
+            signed_order: SignedOrder,
+            order_type: OrderType,
+            post_only: bool,
+    ) -> str:
         order = signed_order.order
 
-        if not price_valid(float(order.price), tick_size):
-            raise ValueError(f"Invalid price {order.price} for tick_size {tick_size}")
-
-        order_type_str = str(order_type)
-
-        # normalize maker_amount / taker_amount to integer units for DB storage
-        maker_amount_dec = Decimal(str(order.maker_amount))
-        taker_amount_dec = Decimal(str(order.taker_amount))
-        maker_amount_int = int(maker_amount_dec)
-        taker_amount_int = int(taker_amount_dec)
-
-        remaining_amount_int = maker_amount_int
-
-        # store price as integer (u256 as decimal fits into SQLite INTEGER)
-        price_int = int(order.price)
-
-        # normalize nonce to integer if it is not already
-        nonce_int = int(order.nonce)
-
-        # normalize feeRateBps to integer
-        fee_rate_bps_int = int(order.feeRateBps)
-
-        serialized_body = order_to_json(signed_order, self.api_key, order_type, post_only)
+        serialized_body = order_to_json(
+            signed_order,
+            self.api_key,
+            order_type,
+            post_only,
+        )
 
         order_id = self.compute_polymarket_compatible_order_id(order)
-        self.logger.debug(f"Computed order id: {order_id}")
+
+
+        # Normalize order_type to a plain string for DB storage.
+        # OrderType is defined as `class OrderType(enumerate)`, so we cannot
+        # rely on `.value`; instead, use str(order_type), which yields e.g. "OrderType.GTC"
+        # and then strip the prefix to store just "GTC".
+        order_type_str = str(order_type)
+        if "." in order_type_str:
+            order_type_str = order_type_str.split(".")[-1]
 
         with self.db:
             self.db.execute(
                 """
-                INSERT INTO orders (api_key, price, post_only, order_type,
-                                    salt, maker, taker, signer, tokenId,
-                                    maker_amount, taker_amount, expiration, nonce,
-                                    feeRateBps, side, signatureType, order_json,
-                                    status, remaining_amount, order_id)
+                INSERT INTO orders (api_key,
+                                    price,
+                                    post_only,
+                                    order_type,
+                                    salt,
+                                    maker,
+                                    taker,
+                                    signer,
+                                    tokenId,
+                                    maker_amount,
+                                    taker_amount,
+                                    expiration,
+                                    nonce,
+                                    fee_rate_bps,
+                                    side,
+                                    signatureType,
+                                    order_json,
+                                    status,
+                                    remaining_amount,
+                                    order_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self.api_key,
-                    price_int,
+                    get_price_int(order),  # uses module-level helper
                     int(post_only),
-                    order_type_str,
-                    order.salt,
+                    order_type_str,        # <‑‑ store as plain string, e.g. "GTC"
+                    int(order.salt),
                     order.maker,
                     order.taker,
                     order.signer,
                     order.tokenId,
-                    maker_amount_int,
-                    taker_amount_int,
+                    int(order.maker_amount),
+                    int(order.taker_amount),
                     order.expiration,
-                    nonce_int,
-                    fee_rate_bps_int,
-                    order.side,
-                    order.signatureType,
+                    int(order.nonce),
+                    int(order.fee_rate_bps),
+                    str(order.side),
+                    str(order.signatureType),
                     serialized_body,
                     "open",
-                    remaining_amount_int,
+                    int(order.maker_amount),  # remaining_amount
                     order_id,
                 ),
             )
+
         # always use order_id (hash) as canonical identifier
         return order_id
 
@@ -367,8 +380,7 @@ class ClobDB:
             }
         ]
 
-        # price is stored as REAL in trades; convert maker_row["price"] (INTEGER) to float
-        price_real = float(maker_row["price"])
+        price_int = maker_row["price"]
         trade_size_int = int(trade_size)
         remaining_int = int(remaining_taker)
         match_time_int = int(datetime.utcnow().timestamp() * 1000)
@@ -379,14 +391,14 @@ class ClobDB:
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
-            price=price_real,
+            price=price_int,
             trade_size=trade_size_int,
             remaining_size=remaining_int,
             side=taker_row["side"],
             match_time=match_time_int,
             transaction_hash="",
             bucket_index=0,
-            fee_rate_bps=int(taker_row["feeRateBps"]),
+            fee_rate_bps=int(taker_row["fee_rate_bps"]),
         )
 
         self.db.execute(
@@ -425,3 +437,31 @@ class ClobDB:
                 trade.fee_rate_bps,
             ),
         )
+
+USDC_DECIMALS = 6
+USDC_SCALE = 10 ** USDC_DECIMALS
+
+def get_price_int(order: Order) -> int:
+    """
+    Derive Polymarket limit price from order amounts and side, then
+    convert to 6‑decimal integer for DB storage.
+
+    BUY:  price = taker_amount / maker_amount
+    SELL: price = maker_amount / taker_amount
+    """
+    maker_amount = Decimal(str(order.maker_amount))
+    taker_amount = Decimal(str(order.taker_amount))
+
+    if maker_amount <= 0 or taker_amount <= 0:
+        raise ValueError("maker_amount and taker_amount must be positive")
+
+    side = str(order.side).upper()
+    if side == "BUY":
+        price_dec = taker_amount / maker_amount
+    elif side == "SELL":
+        price_dec = maker_amount / taker_amount
+    else:
+        raise ValueError(f"Unknown side: {order.side}")
+
+    scaled = price_dec * USDC_SCALE
+    return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
