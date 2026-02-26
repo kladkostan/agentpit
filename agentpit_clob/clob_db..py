@@ -88,23 +88,21 @@ class ClobDB:
         if not post_only:
             matches, remaining = self.match_and_fill_order(taker_order_id)
         else:
-            remaining = Decimal(signed_order.order.makerAmount)
+            remaining = int(signed_order.order.makerAmount)
 
-        total_requested = Decimal(signed_order.order.makerAmount)
+        total_requested = int(signed_order.order.makerAmount)
         filled = total_requested - remaining
 
         # compute volume‑weighted average price from matches
-        notional = Decimal(0)
-        total_size = Decimal(0)
+        total_spent = int(0)
         for m in matches:
-            size_dec = Decimal(m["trade_size"])
-            price_dec = Decimal(m["price"])
-            notional += size_dec * price_dec
-            total_size += size_dec
+            size = m["trade_size"]
+            price = m["price"]
+            total_spent += size * price
 
         avg_price: str | None
-        if total_size > 0:
-            avg_price = str(notional / total_size)
+        if filled > 0:
+            avg_price = str(total_spent / filled)
         else:
             avg_price = None
 
