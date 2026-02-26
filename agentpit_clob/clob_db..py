@@ -22,8 +22,19 @@ from decimal import Decimal, ROUND_HALF_UP
 from agentpit_clob.match import Match
 
 from py_clob_client.utilities import order_to_json
-import time
+from enum import Enum
 import uuid
+
+ORDER_TYPE_GTC = "GTC"
+ORDER_TYPE_GTD = "GTD"
+ORDER_TYPE_FOK = "FOK"
+ORDER_TYPE_FAK = "FAK"
+
+class OrderStatus(str, Enum):
+    LIVE = "live"
+    MATCHED = "matched"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
 
 class ClobDB:
     def __init__(self, api_key: str, chain_id: int):
@@ -38,51 +49,27 @@ class ClobDB:
                 """
                 CREATE TABLE IF NOT EXISTS orders
                 (
-                    api_key
-                    TEXT,
-                    price
-                    INTEGER,
-                    post_only
-                    INTEGER,
-                    order_type
-                    TEXT,
-                    salt
-                    INTEGER,
-                    maker
-                    TEXT,
-                    taker
-                    TEXT,
-                    signer
-                    TEXT,
-                    tokenId
-                    TEXT,
-                    maker_amount
-                    INTEGER,
-                    taker_amount
-                    INTEGER,
-                    expiration
-                    INTEGER,
-                    nonce
-                    INTEGER,
-                    fee_rate_bps
-                    INTEGER,
-                    side
-                    TEXT,
-                    signature_type
-                    TEXT,
-                    order_json
-                    TEXT,
-                    status
-                    TEXT
-                    DEFAULT
-                    'live',
-                    remaining_amount
-                    INTEGER,
-                    order_id
-                    TEXT
-                    NOT
-                    NULL
-                    UNIQUE                )
+                    api_key          TEXT,
+                    price            INTEGER,
+                    post_only        INTEGER,
+                    order_type       TEXT,
+                    salt             INTEGER,
+                    maker            TEXT,
+                    taker            TEXT,
+                    signer           TEXT,
+                    tokenId          TEXT,
+                    maker_amount     INTEGER,
+                    taker_amount     INTEGER,
+                    expiration       INTEGER,
+                    nonce            INTEGER,
+                    fee_rate_bps     INTEGER,
+                    side             TEXT,
+                    signature_type   TEXT,
+                    order_json       TEXT,
+                    status           TEXT DEFAULT 'live',
+                    remaining_amount INTEGER,
+                    order_id         TEXT NOT NULL UNIQUE
+                )
                 """
             )
             self.db.execute(
@@ -90,6 +77,20 @@ class ClobDB:
             )
             self.db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)"
+            )
+            # new composite index for efficient expiration processing
+            self.db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
+                    ON orders(order_type, status, expiration)
+                """
+            )
+            # optional helper index if you ever query just by status/expiration
+            self.db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_orders_status_expiration
+                ON orders(status, expiration)
+                """
             )
             self.db.execute(
                 """
@@ -131,6 +132,8 @@ class ClobDB:
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
 
+        _processed = self._process_expired_orders()
+
         matches: list[Match] = []
         with self._lock:
             with self.db:
@@ -160,7 +163,7 @@ class ClobDB:
         response = OrderResponse(
             success=True,
             orderID=taker_order_id,
-            status="live" if remaining > 0 else "matched",
+            status=OrderStatus.LIVE if remaining > 0 else OrderStatus.MATCHED,
             filledSize=str(filled),
             remainingSize=str(remaining),
             avgPrice=avg_price,
@@ -241,9 +244,9 @@ class ClobDB:
                 int(order.nonce),
                 int(order.feeRateBps),
                 side_str,
-                self._signature_type_as_str(order.signatureType),  # store as TEXT
+                self._signature_type_as_str(order.signatureType),
                 serialized_body,
-                "livw",
+                OrderStatus.LIVE,
                 int(order.makerAmount),
                 order_id,
             ),
@@ -266,6 +269,7 @@ class ClobDB:
         SIG_TYPE_MAP = {
             0: "EIP712",
             1: "ETHSIGN",
+            2: "EOA"
         }
         sig_type_int = int(signature_type)
         try:
@@ -315,29 +319,34 @@ class ClobDB:
         """
         Return maker orders on the opposite side that are price-acceptable
         for the given taker side and limit price.
-
-
-        are done directly in SQL without CAST.
         """
         opposite_side = "SELL" if taker_side == "BUY" else "BUY"
+
+        # Taker BUY matches with SELLS having price <= taker_price
         if taker_side == "BUY":
             sql = """
                   SELECT *
                   FROM orders
                   WHERE side = ?
-                    AND status = 'live'
+                    AND status = ?
                     AND price <= ?
                   """
+        # Taker SELL matches with BUYS having price >= taker_price
         else:
             sql = """
                   SELECT *
                   FROM orders
                   WHERE side = ?
-                    AND status = 'live'
+                    AND status = ?
                     AND price >= ?
                   """
 
-        candidates = self.db.execute(sql, (opposite_side, taker_price)).fetchall()
+        # Execute query. Note: We use OrderStatus.LIVE explicitly.
+        candidates = self.db.execute(
+            sql,
+            (opposite_side, OrderStatus.LIVE, taker_price)
+        ).fetchall()
+
         self._sort_candidates(candidates, taker_side)
         return candidates
 
@@ -369,9 +378,9 @@ class ClobDB:
             SELECT *
             FROM orders
             WHERE order_id = ?
-              AND status = 'live'
+              AND status = ?
             """,
-            (order_id,),
+            (order_id, OrderStatus.LIVE),
         ).fetchone()
 
         if not taker:
@@ -383,28 +392,26 @@ class ClobDB:
         Update remaining amount and status for the taker order by external order_id.
         """
         remaining_int = int(taker_remaining)
-
         self.db.execute(
             """
             UPDATE orders
             SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN 'matched' ELSE 'live' END
+                status           = CASE WHEN ? = 0 THEN ? ELSE ? END
             WHERE order_id = ?
             """,
-            (remaining_int, remaining_int, order_id)
+            (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
 
     def _update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
         remaining_int = int(maker_remaining)
-
         self.db.execute(
             """
             UPDATE orders
             SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN 'matched' ELSE 'live' END
+                status           = CASE WHEN ? = 0 THEN ? ELSE ? END
             WHERE order_id = ?
             """,
-            (remaining_int, remaining_int, order_id)
+            (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
 
     # Keep old name for compatibility, but now it runs matching by external order_id
@@ -533,15 +540,40 @@ class ClobDB:
         return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
 
 
-    def _order_type_as_str(self, order_type: OrderType):
+
+    def _order_type_as_str(self, order_type: OrderType) -> str:
         if order_type == OrderType.GTC:
-            return "GTC"
+            return ORDER_TYPE_GTC
         elif order_type == OrderType.FOK:
-            return "FOK"
+            return ORDER_TYPE_FOK
         elif order_type == OrderType.GTD:
-            return "GTD"
+            return ORDER_TYPE_GTD
         elif order_type == OrderType.FAK:
-            return "FAK"
+            return ORDER_TYPE_FAK
         else:
             raise ValueError(f"Unsupported OrderType: {order_type}")
 
+    def _process_expired_orders(self) -> int:
+        """
+        Move all GTD orders that are currently 'live' and whose expiration
+        timestamp is in the past to status 'expired'.
+        """
+        now = int(datetime.utcnow().timestamp())
+        with self._lock:
+            with self.db:
+                cur = self.db.execute(
+                    """
+                    UPDATE orders
+                    SET status = ?
+                    WHERE order_type = ?
+                      AND status = ?
+                      AND expiration <= ?
+                    """,
+                    (
+                        OrderStatus.EXPIRED,
+                        ORDER_TYPE_GTD,
+                        OrderStatus.LIVE,
+                        now
+                    ),
+                )
+                return cur.rowcount
