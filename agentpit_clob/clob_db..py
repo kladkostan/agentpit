@@ -38,11 +38,11 @@ class ClobDB:
                 taker TEXT,
                 signer TEXT,
                 tokenId TEXT,
-                makes_amount INTEGER,
+                maker_amount INTEGER,
                 taker_amount INTEGER,
                 expiration TEXT,
                 nonce INTEGER,
-                feeRateBps TEXT,
+                feeRateBps INTEGER,
                 side TEXT,
                 signatureType TEXT,
                 order_json TEXT,
@@ -66,12 +66,12 @@ class ClobDB:
                 maker_orders TEXT,
                 market TEXT,
                 asset_id TEXT,
-                price TEXT,
-                trade_size TEXT,
-                remaining_size TEXT,
+                price INTEGER,
+                trade_size INTEGER,
+                remaining_size INTEGER,
                 side TEXT,
                 status TEXT,
-                match_time TEXT,
+                match_time INTEGER,
                 transaction_hash TEXT,
                 bucket_index INTEGER,
                 fee_rate_bps INTEGER
@@ -149,6 +149,9 @@ class ClobDB:
         # normalize nonce to integer if it is not already
         nonce_int = int(order.nonce)
 
+        # normalize feeRateBps to integer
+        fee_rate_bps_int = int(order.feeRateBps)
+
         serialized_body = order_to_json(signed_order, self.api_key, order_type, post_only)
 
         order_id = self.compute_polymarket_compatible_order_id(order)
@@ -178,7 +181,7 @@ class ClobDB:
                     taker_amount_int,
                     order.expiration,
                     nonce_int,
-                    order.feeRateBps,
+                    fee_rate_bps_int,
                     order.side,
                     order.signatureType,
                     serialized_body,
@@ -362,18 +365,23 @@ class ClobDB:
             }
         ]
 
+        # normalize numeric fields to integer units for DB storage
+        price_int = int(maker_row["price"])
+        trade_size_int = int(trade_size)
+        remaining_int = int(remaining_taker)
+        match_time_int = int(datetime.utcnow().timestamp() * 1000)
+
         trade = Trade(
             id=str(trade_id),
             taker_order_id=str(taker_row["order_id"]),
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
-            price=str(int(maker_row["price"])),
-            trade_size=str(trade_size),
-            # remaining_taker is Decimal; normalize to string of integer units
-            remaining_size=str(int(remaining_taker)),
+            price=price_int,
+            trade_size=trade_size_int,
+            remaining_size=remaining_int,
             side=taker_row["side"],
-            match_time=datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+            match_time=match_time_int,
             transaction_hash="",
             bucket_index=0,
             fee_rate_bps=int(taker_row["feeRateBps"]),

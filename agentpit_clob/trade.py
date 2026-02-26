@@ -9,11 +9,11 @@ class Trade:
     maker_orders: list[dict[str, Any]]
     market: str
     asset_id: str
-    price: str
-    trade_size: str
-    remaining_size: str
+    price: int
+    trade_size: int
+    remaining_size: int
     side: str
-    match_time: str
+    match_time: int
     transaction_hash: str
     bucket_index: int
     fee_rate_bps: int
