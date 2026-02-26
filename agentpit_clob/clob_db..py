@@ -20,8 +20,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from agentpit_clob.match import Match
 
 from py_clob_client.utilities import order_to_json
-from dataclasses import dataclass
-
+import time
+import uuid
 
 class ClobDB:
     def __init__(self, api_key: str, chain_id: int):
@@ -30,102 +30,102 @@ class ClobDB:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.db = sqlite3.connect('/tmp/x.db')
         self.db.row_factory = sqlite3.Row
-
-        self.db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS orders
-            (
-                api_key
-                TEXT,
-                price
-                INTEGER,
-                post_only
-                INTEGER,
-                order_type
-                TEXT,
-                salt
-                INTEGER,
-                maker
-                TEXT,
-                taker
-                TEXT,
-                signer
-                TEXT,
-                tokenId
-                TEXT,
-                maker_amount
-                INTEGER,
-                taker_amount
-                INTEGER,
-                expiration
-                INTEGER,
-                nonce
-                INTEGER,
-                fee_rate_bps
-                INTEGER,
-                side
-                TEXT,
-                signature_type
-                TEXT,
-                order_json
-                TEXT,
-                status
-                TEXT
-                DEFAULT
-                'open',
-                remaining_amount
-                INTEGER,
-                order_id
-                TEXT
-                NOT
-                NULL
-                UNIQUE
+        with self.db:
+            self.db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS orders
+                (
+                    api_key
+                    TEXT,
+                    price
+                    INTEGER,
+                    post_only
+                    INTEGER,
+                    order_type
+                    TEXT,
+                    salt
+                    INTEGER,
+                    maker
+                    TEXT,
+                    taker
+                    TEXT,
+                    signer
+                    TEXT,
+                    tokenId
+                    TEXT,
+                    maker_amount
+                    INTEGER,
+                    taker_amount
+                    INTEGER,
+                    expiration
+                    INTEGER,
+                    nonce
+                    INTEGER,
+                    fee_rate_bps
+                    INTEGER,
+                    side
+                    TEXT,
+                    signature_type
+                    TEXT,
+                    order_json
+                    TEXT,
+                    status
+                    TEXT
+                    DEFAULT
+                    'open',
+                    remaining_amount
+                    INTEGER,
+                    order_id
+                    TEXT
+                    NOT
+                    NULL
+                    UNIQUE
+                )
+                """
             )
-            """
-        )
-        self.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
-        )
-        self.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)"
-        )
-        self.db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS trades
-            (
-                trade_id
-                TEXT
-                PRIMARY
-                KEY,
-                taker_order_id
-                TEXT,
-                maker_orders
-                TEXT,
-                market
-                TEXT,
-                asset_id
-                TEXT,
-                price
-                INTEGER,
-                trade_size
-                INTEGER,
-                remaining_size
-                INTEGER,
-                side
-                TEXT,
-                status
-                TEXT,
-                match_time
-                INTEGER,
-                transaction_hash
-                TEXT,
-                bucket_index
-                INTEGER,
-                fee_rate_bps
-                INTEGER
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
             )
-            """
-        )
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)"
+            )
+            self.db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trades
+                (
+                    trade_id
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    taker_order_id
+                    TEXT,
+                    maker_orders
+                    TEXT,
+                    market
+                    TEXT,
+                    asset_id
+                    TEXT,
+                    price
+                    INTEGER,
+                    trade_size
+                    INTEGER,
+                    remaining_size
+                    INTEGER,
+                    side
+                    TEXT,
+                    status
+                    TEXT,
+                    match_time
+                    INTEGER,
+                    transaction_hash
+                    TEXT,
+                    bucket_index
+                    INTEGER,
+                    fee_rate_bps
+                    INTEGER
+                )
+                """
+            )
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
         # use string order_id as the external order id
@@ -343,15 +343,15 @@ class ClobDB:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
+        with self.db:
+            self.update_maker_remaining_in_db(maker["order_id"], maker_remaining)
 
-        self.update_maker_remaining_in_db(maker["order_id"], maker_remaining)
-
-        self.insert_trade_row(
-            taker_row=taker,
-            maker_row=maker,
-            trade_size=trade_size,
-            remaining_taker=taker_remaining,
-        )
+            self.insert_trade_row(
+                taker_row=taker,
+                maker_row=maker,
+                trade_size=trade_size,
+                remaining_taker=taker_remaining,
+            )
 
         match = Match(
             taker_order_id=taker["order_id"],
@@ -381,27 +381,29 @@ class ClobDB:
         Update remaining amount and status for the taker order by external order_id.
         """
         remaining_int = int(taker_remaining)
-        self.db.execute(
-            """
-            UPDATE orders
-            SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
-            WHERE order_id = ?
-            """,
-            (remaining_int, remaining_int, order_id)
-        )
+        with self.db:
+            self.db.execute(
+                """
+                UPDATE orders
+                SET remaining_amount = ?,
+                    status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                WHERE order_id = ?
+                """,
+                (remaining_int, remaining_int, order_id)
+            )
 
     def update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
         remaining_int = int(maker_remaining)
-        self.db.execute(
-            """
-            UPDATE orders
-            SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
-            WHERE order_id = ?
-            """,
-            (remaining_int, remaining_int, order_id)
-        )
+        with self.db:
+            self.db.execute(
+                """
+                UPDATE orders
+                SET remaining_amount = ?,
+                    status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
+                WHERE order_id = ?
+                """,
+                (remaining_int, remaining_int, order_id)
+            )
 
     # Keep old name for compatibility, but now it runs matching by external order_id
     def find_matching_orders(self, orderId: str):
@@ -425,10 +427,17 @@ class ClobDB:
         Insert a single trade into the trades table.
 
         - maker_orders is stored as JSON; currently a single-maker array.
-        - match_time is an ISO-8601 timestamp in UTC.
         - status is always 'CONFIRMED' for now.
         """
-        trade_id = f"{taker_row['order_id']}-{maker_row['order_id']}-{datetime.utcnow().timestamp()}"
+
+
+        trade_id = (
+            f"{taker_row['order_id']}-"
+            f"{maker_row['order_id']}-"
+            f"{uuid.uuid4()}"
+        )
+
+
         maker_orders_payload = [
             {
                 "order_id": maker_row["order_id"],
@@ -440,7 +449,7 @@ class ClobDB:
         price_int = maker_row["price"]
         trade_size_int = int(trade_size)
         remaining_int = int(remaining_taker)
-        match_time_int = int(datetime.utcnow().timestamp() * 1000)
+        match_time_int = int(datetime.utcnow().timestamp())
 
         trade = Trade(
             id=str(trade_id),
@@ -457,42 +466,42 @@ class ClobDB:
             bucket_index=0,
             fee_rate_bps=int(taker_row["fee_rate_bps"]),
         )
-
-        self.db.execute(
-            """
-            INSERT INTO trades (trade_id,
-                                taker_order_id,
-                                maker_orders,
-                                market,
-                                asset_id,
-                                price,
-                                trade_size,
-                                remaining_size,
-                                side,
-                                status,
-                                match_time,
-                                transaction_hash,
-                                bucket_index,
-                                fee_rate_bps)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                trade.id,
-                trade.taker_order_id,
-                json.dumps(trade.maker_orders),
-                trade.market,
-                trade.asset_id,
-                trade.price,
-                trade.trade_size,
-                trade.remaining_size,
-                trade.side,  # TEXT in DB
-                "CONFIRMED",
-                trade.match_time,
-                trade.transaction_hash,
-                trade.bucket_index,
-                trade.fee_rate_bps,
-            ),
-        )
+        with self.db:
+            self.db.execute(
+                """
+                INSERT INTO trades (trade_id,
+                                    taker_order_id,
+                                    maker_orders,
+                                    market,
+                                    asset_id,
+                                    price,
+                                    trade_size,
+                                    remaining_size,
+                                    side,
+                                    status,
+                                    match_time,
+                                    transaction_hash,
+                                    bucket_index,
+                                    fee_rate_bps)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trade.id,
+                    trade.taker_order_id,
+                    json.dumps(trade.maker_orders),
+                    trade.market,
+                    trade.asset_id,
+                    trade.price,
+                    trade.trade_size,
+                    trade.remaining_size,
+                    trade.side,  # TEXT in DB
+                    "CONFIRMED",
+                    trade.match_time,
+                    trade.transaction_hash,
+                    trade.bucket_index,
+                    trade.fee_rate_bps,
+                ),
+            )
 
 
     def get_price_int(self, order: Order) -> int:
