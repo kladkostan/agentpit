@@ -18,6 +18,8 @@ from py_order_utils.utils import prepend_zx
 from py_order_utils.model import Order
 from py_clob_client.signing.eip712 import get_clob_auth_domain
 
+tick_size = Decimal(0.01)
+
 class ClobDB:
     def __init__(self, api_key: str, chain_id: int):
         self.api_key = api_key
@@ -129,7 +131,7 @@ class ClobDB:
 
     def add_order_to_db(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool) -> str:
         order = signed_order.order
-        tick_size = order.tickSize
+
         if not price_valid(float(order.price), tick_size):
             raise ValueError(f"Invalid price {order.price} for tick_size {tick_size}")
 
