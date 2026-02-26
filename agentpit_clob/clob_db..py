@@ -24,6 +24,7 @@ from agentpit_clob.match import Match
 from py_clob_client.utilities import order_to_json
 from enum import Enum
 import uuid
+from pathlib import Path
 
 ORDER_TYPE_GTC = "GTC"
 ORDER_TYPE_GTD = "GTD"
@@ -36,99 +37,137 @@ class OrderStatus(str, Enum):
     EXPIRED = "expired"
     CANCELLED = "cancelled"
 
+
 class ClobDB:
-    def __init__(self, api_key: str, chain_id: int):
+    def __init__(self, api_key: str, chain_id: int, full_path: Path):
         self.api_key = api_key
         self.chain_id = chain_id
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.db = sqlite3.connect('/tmp/x.db', check_same_thread=False)
-        self.db.row_factory = sqlite3.Row
+
+        # Initialize lock before DB operations
         self._lock = threading.Lock()
-        with self.db:
-            self.db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS orders
-                (
-                    api_key          TEXT,
-                    price            INTEGER,
-                    post_only        INTEGER,
-                    order_type       TEXT,
-                    salt             INTEGER,
-                    maker            TEXT,
-                    taker            TEXT,
-                    signer           TEXT,
-                    tokenId          TEXT,
-                    maker_amount     INTEGER,
-                    taker_amount     INTEGER,
-                    expiration       INTEGER,
-                    nonce            INTEGER,
-                    fee_rate_bps     INTEGER,
-                    side             TEXT,
-                    signature_type   TEXT,
-                    order_json       TEXT,
-                    status           TEXT DEFAULT 'live',
-                    remaining_amount INTEGER,
-                    order_id         TEXT NOT NULL UNIQUE
-                )
-                """
+
+        # sqlite3 accepts Path objects directly
+        self.db = sqlite3.connect(full_path, check_same_thread=False)
+        self.db.row_factory = sqlite3.Row
+
+        with self._lock:
+            with self.db:
+                self.create_orders_table()
+                self.create_trades_table()
+
+    def create_trades_table(self):
+        self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trades
+            (
+                trade_id
+                TEXT
+                PRIMARY
+                KEY,
+                taker_order_id
+                TEXT,
+                maker_orders
+                TEXT,
+                market
+                TEXT,
+                asset_id
+                TEXT,
+                price
+                INTEGER,
+                trade_size
+                INTEGER,
+                remaining_size
+                INTEGER,
+                side
+                TEXT,
+                status
+                TEXT,
+                match_time
+                INTEGER,
+                transaction_hash
+                TEXT,
+                bucket_index
+                INTEGER,
+                fee_rate_bps
+                INTEGER
             )
-            self.db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
+            """
+        )
+
+    def create_orders_table(self):
+        self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orders
+            (
+                api_key
+                TEXT,
+                price
+                INTEGER,
+                post_only
+                INTEGER,
+                order_type
+                TEXT,
+                salt
+                INTEGER,
+                maker
+                TEXT,
+                taker
+                TEXT,
+                signer
+                TEXT,
+                tokenId
+                TEXT,
+                maker_amount
+                INTEGER,
+                taker_amount
+                INTEGER,
+                expiration
+                INTEGER,
+                nonce
+                INTEGER,
+                fee_rate_bps
+                INTEGER,
+                side
+                TEXT,
+                signature_type
+                TEXT,
+                order_json
+                TEXT,
+                status
+                TEXT
+                DEFAULT
+                'live',
+                remaining_amount
+                INTEGER,
+                order_id
+                TEXT
+                NOT
+                NULL
+                UNIQUE
             )
-            self.db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)"
-            )
-            # new composite index for efficient expiration processing
-            self.db.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
-                    ON orders(order_type, status, expiration)
-                """
-            )
-            # optional helper index if you ever query just by status/expiration
-            self.db.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_orders_status_expiration
+            """
+        )
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
+        )
+        self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)"
+        )
+        # new composite index for efficient expiration processing
+        self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
+                ON orders(order_type, status, expiration)
+            """
+        )
+        # optional helper index if you ever query just by status/expiration
+        self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_orders_status_expiration
                 ON orders(status, expiration)
-                """
-            )
-            self.db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS trades
-                (
-                    trade_id
-                    TEXT
-                    PRIMARY
-                    KEY,
-                    taker_order_id
-                    TEXT,
-                    maker_orders
-                    TEXT,
-                    market
-                    TEXT,
-                    asset_id
-                    TEXT,
-                    price
-                    INTEGER,
-                    trade_size
-                    INTEGER,
-                    remaining_size
-                    INTEGER,
-                    side
-                    TEXT,
-                    status
-                    TEXT,
-                    match_time
-                    INTEGER,
-                    transaction_hash
-                    TEXT,
-                    bucket_index
-                    INTEGER,
-                    fee_rate_bps
-                    INTEGER
-                )
-                """
-            )
+            """
+        )
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
 
