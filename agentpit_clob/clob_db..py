@@ -18,6 +18,15 @@ from py_clob_client.signing.eip712 import get_clob_auth_domain
 from decimal import Decimal, ROUND_HALF_UP
 
 from py_clob_client.utilities import order_to_json
+from dataclasses import dataclass
+
+@dataclass
+class Match:
+    taker_order_id: str
+    maker_order_id: str
+    price: int
+    trade_size: int
+
 
 class ClobDB:
     def __init__(self, api_key: str, chain_id: int):
@@ -237,7 +246,7 @@ class ClobDB:
 
             candidates = self.get_sorted_candidates(taker_side, taker_price)
 
-            matches: list[dict[str, Any]] = []
+            matches: list[Match] = []
             for maker in candidates:
                 if taker_remaining <= 0:
                     break
@@ -296,19 +305,13 @@ class ClobDB:
         self.sort_candidates(candidates, taker_side)
         return candidates
 
-    def fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) ->  dict[str, str | Any]:
+    def fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) ->  Match :
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
 
         self.update_maker_remaining_in_db(maker["order_id"], maker_remaining)
 
-        match = {
-            "taker_order_id": taker["order_id"],
-            "maker_order_id": maker["order_id"],
-            "price": str(int(maker["price"])),
-            "trade_size": str(trade_size),
-        }
 
         self.insert_trade_row(
             taker_row=taker,
@@ -317,6 +320,12 @@ class ClobDB:
             remaining_taker=taker_remaining,
         )
 
+        match = Match(
+            taker_order_id=taker["order_id"],
+            maker_order_id=maker["order_id"],
+            price=int(maker["price"]),
+            trade_size=int(trade_size),
+        )
         return match
 
     def get_existing_order(self, order_id: str) -> Any:
@@ -467,8 +476,8 @@ def get_price_int(order: Order) -> int:
     BUY:  price = taker_amount / maker_amount
     SELL: price = maker_amount / taker_amount
     """
-    maker_amount = Decimal(order.makerAmount)
-    taker_amount = Decimal(order.takerAmount)
+    maker_amount = Decimal(str(int(order.makerAmount)))
+    taker_amount = Decimal(str(int(order.takerAmount)))
 
     if maker_amount <= 0 or taker_amount <= 0:
         raise ValueError("maker_amount and taker_amount must be positive")
