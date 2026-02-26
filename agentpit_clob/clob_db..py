@@ -1,3 +1,5 @@
+import threading
+
 from py_order_utils.model import SignedOrder, Order
 from py_clob_client import OrderType
 
@@ -30,6 +32,7 @@ class ClobDB:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.db = sqlite3.connect('/tmp/x.db')
         self.db.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         with self.db:
             self.db.execute(
                 """
@@ -128,14 +131,15 @@ class ClobDB:
             )
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
-        # use string order_id as the external order id
-        taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
 
-        matches: list[Match] = []
-        if not post_only:
-            matches, remaining = self.match_and_fill_order(taker_order_id)
-        else:
-            remaining = int(signed_order.order.makerAmount)
+        with self._lock:
+            taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
+
+            matches: list[Match] = []
+            if not post_only:
+                matches, remaining = self._match_and_fill_order(taker_order_id)
+            else:
+                remaining = int(signed_order.order.makerAmount)
 
         total_requested = int(signed_order.order.makerAmount)
         filled = total_requested - remaining
@@ -190,12 +194,12 @@ class ClobDB:
             post_only,
         )
 
-        order_id = self.compute_polymarket_compatible_order_id(order)
+        order_id = self._compute_polymarket_compatible_order_id(order)
 
         # Normalize order_type from py_clob_client.OrderType to a plain string.
-        order_type_str = self.order_type_as_str(order_type)
+        order_type_str = self._order_type_as_str(order_type)
 
-        side_str = self.side_as_str(order)
+        side_str = self._side_as_str(order)
 
         with self.db:
             self.db.execute(
@@ -224,7 +228,7 @@ class ClobDB:
                 """,
                 (
                     self.api_key,
-                    self.get_price_int(order),
+                    self._get_price_int(order),
                     int(post_only),
                     order_type_str,
                     int(order.salt),
@@ -238,7 +242,7 @@ class ClobDB:
                     int(order.nonce),
                     int(order.feeRateBps),
                     side_str,
-                    self.signature_type_as_str(order.signatureType),  # store as TEXT
+                    self._signature_type_as_str(order.signatureType),  # store as TEXT
                     serialized_body,
                     "open",
                     int(order.makerAmount),
@@ -249,7 +253,7 @@ class ClobDB:
         # always use order_id (hash) as canonical identifier
         return order_id
 
-    def side_as_str(self, order: Order) -> str:
+    def _side_as_str(self, order: Order) -> str:
         side_int = int(order.side)
         if side_int == 0:
             side_str = "BUY"
@@ -259,7 +263,7 @@ class ClobDB:
             raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
         return side_str
 
-    def signature_type_as_str(self, signature_type: int | str) -> str:
+    def _signature_type_as_str(self, signature_type: int | str) -> str:
         SIG_TYPE_MAP = {
             0: "EIP712",
             1: "ETHSIGN",
@@ -270,15 +274,15 @@ class ClobDB:
         except KeyError:
             raise ValueError(f"Unsupported signatureType: {sig_type_int}")
 
-    def match_and_fill_order(self, order_id: str):
+    def _match_and_fill_order(self, order_id: str):
         with self.db:
-            taker = self.get_existing_order(order_id)
+            taker = self._get_existing_order(order_id)
 
             taker_side = taker["side"]  # string "BUY"/"SELL"
             taker_price = int(taker["price"])
             taker_remaining = int(taker["remaining_amount"])
 
-            candidates = self.get_sorted_candidates(taker_side, taker_price)
+            candidates = self._get_sorted_candidates(taker_side, taker_price)
 
             matches: list[Match] = []
             for maker in candidates:
@@ -289,23 +293,23 @@ class ClobDB:
                 if maker_remaining <= 0:
                     continue
 
-                match = self.fill_order(maker, maker_remaining, taker, taker_remaining)
+                match = self._fill_order(maker, maker_remaining, taker, taker_remaining)
                 taker_remaining = taker_remaining - match.trade_size
                 matches.append(match)
 
             # update taker by external order_id as well
-            self.update_taker_remaining_in_db(taker["order_id"], taker_remaining)
+            self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
 
         return matches, taker_remaining
 
-    def sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
+    def _sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
         # price is INTEGER in DB; avoid noisy int(str(...)) casts
         candidates.sort(
             key=lambda m: (int(m["price"]), m["order_id"]) if taker_side == "BUY"
             else (-int(m["price"]), m["order_id"])
         )
 
-    def get_sorted_candidates(
+    def _get_sorted_candidates(
             self,
             taker_side: Literal["BUY", "SELL"],
             taker_price: int,
@@ -336,17 +340,17 @@ class ClobDB:
                   """
 
         candidates = self.db.execute(sql, (opposite_side, taker_price)).fetchall()
-        self.sort_candidates(candidates, taker_side)
+        self._sort_candidates(candidates, taker_side)
         return candidates
 
-    def fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) -> Match:
+    def _fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) -> Match:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
         with self.db:
-            self.update_maker_remaining_in_db(maker["order_id"], maker_remaining)
+            self._update_maker_remaining_in_db(maker["order_id"], maker_remaining)
 
-            self.insert_trade_row(
+            self._insert_trade_row(
                 taker_row=taker,
                 maker_row=maker,
                 trade_size=trade_size,
@@ -361,7 +365,7 @@ class ClobDB:
         )
         return match
 
-    def get_existing_order(self, order_id: str) -> Any:
+    def _get_existing_order(self, order_id: str) -> Any:
         taker = self.db.execute(
             """
             SELECT *
@@ -376,7 +380,7 @@ class ClobDB:
             raise RuntimeError(f"Taker order {order_id} not found or not open")
         return taker
 
-    def update_taker_remaining_in_db(self, order_id: str, taker_remaining: int):
+    def _update_taker_remaining_in_db(self, order_id: str, taker_remaining: int):
         """
         Update remaining amount and status for the taker order by external order_id.
         """
@@ -392,7 +396,7 @@ class ClobDB:
                 (remaining_int, remaining_int, order_id)
             )
 
-    def update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
+    def _update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
         remaining_int = int(maker_remaining)
         with self.db:
             self.db.execute(
@@ -406,17 +410,17 @@ class ClobDB:
             )
 
     # Keep old name for compatibility, but now it runs matching by external order_id
-    def find_matching_orders(self, orderId: str):
-        return self.match_and_fill_order(orderId)
+    def _find_matching_orders(self, orderId: str):
+        return self._match_and_fill_order(orderId)
 
-    def compute_polymarket_compatible_order_id(self, order: Order) -> str:
+    def _compute_polymarket_compatible_order_id(self, order: Order) -> str:
         # Polymarket currently uses the auth domain for order hashes
         domain = get_clob_auth_domain(self.chain_id)
         signable = order.signable_bytes(domain)
         struct_hash = keccak(signable)
         return prepend_zx(struct_hash.hex())
 
-    def insert_trade_row(
+    def _insert_trade_row(
             self,
             taker_row: sqlite3.Row,
             maker_row: sqlite3.Row,
@@ -504,7 +508,7 @@ class ClobDB:
             )
 
 
-    def get_price_int(self, order: Order) -> int:
+    def _get_price_int(self, order: Order) -> int:
 
         USDC_DECIMALS = 6
         USDC_SCALE = 10 ** USDC_DECIMALS
@@ -539,7 +543,7 @@ class ClobDB:
         return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
 
 
-    def order_type_as_str(self, order_type: OrderType):
+    def _order_type_as_str(self, order_type: OrderType):
         if order_type == OrderType.GTC:
             return "GTC"
         elif order_type == OrderType.FOK:
