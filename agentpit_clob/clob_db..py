@@ -1,4 +1,4 @@
-from py_order_utils.model import SignedOrder
+from py_order_utils.model import SignedOrder, Order
 from py_clob_client import OrderType
 
 import logging
@@ -9,17 +9,15 @@ from typing import Literal, Any
 from datetime import datetime
 
 from py_clob_client.clob_types import PostOrdersArgs
-from py_clob_client.utilities import order_to_json, price_valid
 from agentpit_clob.order_response import OrderResponse
 from agentpit_clob.trade import Trade
 
 from eth_utils import keccak
 from py_order_utils.utils import prepend_zx
-from py_order_utils.model import Order
 from py_clob_client.signing.eip712 import get_clob_auth_domain
 from decimal import Decimal, ROUND_HALF_UP
 
-tick_size = Decimal(0.01)
+from py_clob_client.utilities import order_to_json
 
 class ClobDB:
     def __init__(self, api_key: str, chain_id: int):
@@ -152,9 +150,7 @@ class ClobDB:
         if "." in order_type_str:
             order_type_str = order_type_str.split(".")[-1]
 
-        # convert on-chain numeric side (0/1) to Polymarket string side
-        # 0 -> BUY, 1 -> SELL
-        side_str = "BUY" if int(order.side) == 0 else "SELL"
+        side_str = self.side_as_str(order)
 
         with self.db:
             self.db.execute(
@@ -191,22 +187,43 @@ class ClobDB:
                     order.taker,
                     order.signer,
                     order.tokenId,
-                    int(order.maker_amount),
-                    int(order.taker_amount),
-                    order.expiration,
+                    int(order.makerAmount),
+                    int(order.takerAmount),
+                    int(order.expiration),
                     int(order.nonce),
-                    int(order.fee_rate_bps),
-                    side_str,  # <-- store string side
-                    order.signatureType,
+                    int(order.feeRateBps),
+                    side_str,
+                    self.signaturew_type_as_str(order.signatureType),  # store as TEXT
                     serialized_body,
                     "open",
-                    int(order.maker_amount),
+                    int(order.makerAmount),
                     order_id,
                 ),
             )
 
         # always use order_id (hash) as canonical identifier
         return order_id
+
+    def side_as_str(self, order: Order) -> str:
+        side_int = int(order.side)
+        if side_int == 0:
+            side_str = "BUY"
+        elif side_int == 1:
+            side_str = "SELL"
+        else:
+            raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
+        return side_str
+
+    def signaturew_type_as_str(self, order: Order) -> str:
+        sig_type_int = int(order.signatureType)
+        if sig_type_int == 0:
+            return "EIP712"
+        elif sig_type_int == 1:
+            return "ETHSIGN"
+        else:
+            raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
+
+
 
     def match_and_fill_order(self, order_id: str):
         with self.db:
@@ -454,13 +471,18 @@ def get_price_int(order: Order) -> int:
     if maker_amount <= 0 or taker_amount <= 0:
         raise ValueError("maker_amount and taker_amount must be positive")
 
-    side = "BUY" if int(order.side) == 0 else "SELL"
+    side_int = int(order.side)
+    if side_int == 0:
+        side = "BUY"
+    elif side_int == 1:
+        side = "SELL"
+    else:
+        raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
+
     if side == "BUY":
         price_dec = taker_amount / maker_amount
-    elif side == "SELL":
+    else:  # side == "SELL"
         price_dec = maker_amount / taker_amount
-    else:
-        raise ValueError(f"Unknown side: {order.side}")
 
     scaled = price_dec * USDC_SCALE
     return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))

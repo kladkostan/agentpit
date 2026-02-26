@@ -25,3 +25,4 @@ class Trade:
     @property
     def json(self):
         return dumps(self.__dict__)
+
