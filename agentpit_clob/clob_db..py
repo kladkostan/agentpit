@@ -66,7 +66,7 @@ class ClobDB:
                 maker_orders TEXT,
                 market TEXT,
                 asset_id TEXT,
-                price INTEGER,
+                price REAL,
                 trade_size INTEGER,
                 remaining_size INTEGER,
                 side TEXT,
@@ -365,8 +365,8 @@ class ClobDB:
             }
         ]
 
-        # normalize numeric fields to integer units for DB storage
-        price_int = int(maker_row["price"])
+        # price is stored as REAL in trades; convert maker_row["price"] (INTEGER) to float
+        price_real = float(maker_row["price"])
         trade_size_int = int(trade_size)
         remaining_int = int(remaining_taker)
         match_time_int = int(datetime.utcnow().timestamp() * 1000)
@@ -377,7 +377,7 @@ class ClobDB:
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
-            price=price_int,
+            price=price_real,
             trade_size=trade_size_int,
             remaining_size=remaining_int,
             side=taker_row["side"],
