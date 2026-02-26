@@ -12,7 +12,7 @@ class Trade:
     price: float
     trade_size: int
     remaining_size: int
-    side: str
+    side: str          # "BUY" or "SELL"
     match_time: int
     transaction_hash: str
     bucket_index: int

@@ -35,7 +35,7 @@ class ClobDB:
                 api_key TEXT,
                 price INTEGER,
                 post_only INTEGER,
-                order_type TEXT,
+                order_type INTEGER,
                 salt INTEGER,
                 maker TEXT,
                 taker TEXT,
@@ -147,14 +147,14 @@ class ClobDB:
 
         order_id = self.compute_polymarket_compatible_order_id(order)
 
-
-        # Normalize order_type to a plain string for DB storage.
-        # OrderType is defined as `class OrderType(enumerate)`, so we cannot
-        # rely on `.value`; instead, use str(order_type), which yields e.g. "OrderType.GTC"
-        # and then strip the prefix to store just "GTC".
+        # Normalize order_type from py_clob_client.OrderType to a plain string.
         order_type_str = str(order_type)
         if "." in order_type_str:
             order_type_str = order_type_str.split(".")[-1]
+
+        # convert on-chain numeric side (0/1) to Polymarket string side
+        # 0 -> BUY, 1 -> SELL
+        side_str = "BUY" if int(order.side) == 0 else "SELL"
 
         with self.db:
             self.db.execute(
@@ -183,9 +183,9 @@ class ClobDB:
                 """,
                 (
                     self.api_key,
-                    get_price_int(order),  # uses module-level helper
+                    get_price_int(order),
                     int(post_only),
-                    order_type_str,        # <‑‑ store as plain string, e.g. "GTC"
+                    order_type_str,
                     int(order.salt),
                     order.maker,
                     order.taker,
@@ -196,11 +196,11 @@ class ClobDB:
                     order.expiration,
                     int(order.nonce),
                     int(order.fee_rate_bps),
-                    str(order.side),
+                    side_str,  # <-- store string side
                     str(order.signatureType),
                     serialized_body,
                     "open",
-                    int(order.maker_amount),  # remaining_amount
+                    int(order.maker_amount),
                     order_id,
                 ),
             )
@@ -212,11 +212,10 @@ class ClobDB:
         with self.db:
             taker = self.get_existing_order(order_id)
 
-            taker_side = taker["side"]
+            taker_side = taker["side"]  # string "BUY"/"SELL"
             taker_price = int(taker["price"])
             taker_remaining = Decimal(int(taker["remaining_amount"]))
 
-            # use integer maker_amount / taker_amount semantics from DB
             candidates = self.get_sorted_candidates(taker_side, taker_price)
 
             matches: list[dict[str, Any]] = []
@@ -394,7 +393,7 @@ class ClobDB:
             price=price_int,
             trade_size=trade_size_int,
             remaining_size=remaining_int,
-            side=taker_row["side"],
+            side=taker_row["side"],  # string "BUY"/"SELL"
             match_time=match_time_int,
             transaction_hash="",
             bucket_index=0,
@@ -429,7 +428,7 @@ class ClobDB:
                 trade.price,
                 trade.trade_size,
                 trade.remaining_size,
-                trade.side,
+                trade.side,  # TEXT in DB
                 "CONFIRMED",
                 trade.match_time,
                 trade.transaction_hash,
@@ -455,7 +454,7 @@ def get_price_int(order: Order) -> int:
     if maker_amount <= 0 or taker_amount <= 0:
         raise ValueError("maker_amount and taker_amount must be positive")
 
-    side = str(order.side).upper()
+    side = "BUY" if int(order.side) == 0 else "SELL"
     if side == "BUY":
         price_dec = taker_amount / maker_amount
     elif side == "SELL":
