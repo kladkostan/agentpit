@@ -175,11 +175,13 @@ class ClobDB:
         _processed = self._process_expired_orders()
 
         matches: list[Match] = []
+        total_spent = int(0)
+        status = OrderStatus.LIVE
         with self._lock:
             with self.db:
                 taker_order_id = self.add_order_to_db(signed_order, order_type, post_only)
                 if not post_only:
-                    matches, remaining = self._match_and_fill_order(taker_order_id)
+                    total_spent, remaining, status = self._match_and_fill_order(taker_order_id)
                 else:
                     remaining = int(signed_order.order.makerAmount)
 
@@ -187,7 +189,6 @@ class ClobDB:
         filled = total_requested - remaining
 
         # compute volume‑weighted average price from matches
-        total_spent = int(0)
 
         for m in matches:
             size = int(m.trade_size)
@@ -203,7 +204,7 @@ class ClobDB:
         response = OrderResponse(
             success=True,
             orderID=taker_order_id,
-            status=OrderStatus.LIVE if remaining > 0 else OrderStatus.MATCHED,
+            status=status,
             filledSize=str(filled),
             remainingSize=str(remaining),
             avgPrice=avg_price,
@@ -317,7 +318,7 @@ class ClobDB:
         except KeyError:
             raise ValueError(f"Unsupported signatureType: {sig_type_int}")
 
-    def _match_and_fill_order(self, order_id: str):
+    def _match_and_fill_order(self, order_id: str) -> tuple[int, int, str]:
         taker = self._get_existing_order(order_id)
 
         taker_side = taker["side"]  # string "BUY"/"SELL"
@@ -342,7 +343,26 @@ class ClobDB:
         # update taker by external order_id as well
         self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
 
-        return matches, taker_remaining
+        total_spent = int(0)
+        for m in matches:
+            size = int(m.trade_size)
+            price = int(m.price)
+            total_spent += size * price
+
+
+        self.set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(order_id)
+
+        status = self.get_order_status(order_id)
+
+        return total_spent, taker_remaining, status
+
+    def get_order_status(self, order_id: str, status) -> Any:
+        row = self.db.execute(
+            "SELECT status FROM orders WHERE order_id = ?",
+            (order_id,)
+        ).fetchone()
+        status = row["status"]
+        return status
 
     def _sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
         """
@@ -461,9 +481,6 @@ class ClobDB:
             (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
 
-    # Keep old name for compatibility, but now it runs matching by external order_id
-    def _find_matching_orders(self, orderId: str):
-        return self._match_and_fill_order(orderId)
 
     def _compute_polymarket_compatible_order_id(self, order: Order) -> str:
         # Polymarket currently uses the auth domain for order hashes
@@ -624,3 +641,29 @@ class ClobDB:
                     ),
                 )
                 return cur.rowcount
+
+    def set_order_status(self, order_id: str, status: OrderStatus):
+        with self._lock:
+            with self.db:
+                self.db.execute(
+                    """
+                    UPDATE orders
+                    SET status = ?
+                    WHERE order_id = ?
+                    """,
+                    (status, order_id)
+                )
+
+    def set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(self, order_id: str):
+        with self._lock:
+            with self.db:
+                self.db.execute(
+                    """
+                    UPDATE orders
+                    SET status = ?
+                    WHERE order_id = ?
+                      AND order_type = ?
+                      AND status = ?
+                    """,
+                    (OrderStatus.CANCELLED, order_id, ORDER_TYPE_FAK, OrderStatus.LIVE)
+                )
