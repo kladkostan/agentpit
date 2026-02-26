@@ -30,7 +30,7 @@ class ClobDB:
             """
             CREATE TABLE IF NOT EXISTS orders (
                 api_key TEXT,
-                price TEXT,
+                price INTEGER,
                 post_only INTEGER,
                 order_type TEXT,
                 salt TEXT,
@@ -38,16 +38,16 @@ class ClobDB:
                 taker TEXT,
                 signer TEXT,
                 tokenId TEXT,
-                makerAmount TEXT,
-                takerAmount TEXT,
+                makes_amount INTEGER,
+                taker_amount INTEGER,
                 expiration TEXT,
-                nonce TEXT,
+                nonce INTEGER,
                 feeRateBps TEXT,
                 side TEXT,
                 signatureType TEXT,
                 order_json TEXT,
                 status TEXT DEFAULT 'open',
-                remaining_amount TEXT,
+                remaining_amount INTEGER,
                 order_id TEXT NOT NULL UNIQUE
             )
             """
@@ -87,16 +87,16 @@ class ClobDB:
         if not post_only:
             matches, remaining = self.match_and_fill_order(taker_order_id)
         else:
-            remaining = Decimal(signed_order.order.makerAmount)
+            remaining = Decimal(signed_order.order.maker_amount)
 
-        total_requested = Decimal(signed_order.order.makerAmount)
+        total_requested = Decimal(signed_order.order.maker_amount)
         filled = total_requested - remaining
 
         # compute volume‑weighted average price from matches
         notional = Decimal(0)
         total_size = Decimal(0)
         for m in matches:
-            size_dec = Decimal(m["size"])
+            size_dec = Decimal(m["trade_size"])
             price_dec = Decimal(m["price"])
             notional += size_dec * price_dec
             total_size += size_dec
@@ -134,8 +134,20 @@ class ClobDB:
             raise ValueError(f"Invalid price {order.price} for tick_size {tick_size}")
 
         order_type_str = str(order_type)
-        remaining_amount = str(order.makerAmount)
-        price_u256 = str(order.price)
+
+        # normalize maker_amount / taker_amount to integer units for DB storage
+        maker_amount_dec = Decimal(str(order.maker_amount))
+        taker_amount_dec = Decimal(str(order.taker_amount))
+        maker_amount_int = int(maker_amount_dec)
+        taker_amount_int = int(taker_amount_dec)
+
+        remaining_amount_int = maker_amount_int
+
+        # store price as integer (u256 as decimal fits into SQLite INTEGER)
+        price_int = int(order.price)
+
+        # normalize nonce to integer if it is not already
+        nonce_int = int(order.nonce)
 
         serialized_body = order_to_json(signed_order, self.api_key, order_type, post_only)
 
@@ -147,14 +159,14 @@ class ClobDB:
                 """
                 INSERT INTO orders (api_key, price, post_only, order_type,
                                     salt, maker, taker, signer, tokenId,
-                                    makerAmount, takerAmount, expiration, nonce,
+                                    maker_amount, taker_amount, expiration, nonce,
                                     feeRateBps, side, signatureType, order_json,
                                     status, remaining_amount, order_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self.api_key,
-                    price_u256,
+                    price_int,
                     int(post_only),
                     order_type_str,
                     order.salt,
@@ -162,16 +174,16 @@ class ClobDB:
                     order.taker,
                     order.signer,
                     order.tokenId,
-                    str(order.makerAmount),
-                    str(order.takerAmount),
+                    maker_amount_int,
+                    taker_amount_int,
                     order.expiration,
-                    order.nonce,
+                    nonce_int,
                     order.feeRateBps,
                     order.side,
                     order.signatureType,
                     serialized_body,
                     "open",
-                    remaining_amount,
+                    remaining_amount_int,
                     order_id,
                 ),
             )
@@ -179,18 +191,14 @@ class ClobDB:
         return order_id
 
     def match_and_fill_order(self, order_id: str):
-        """
-        Match a single taker order against the book.
-
-        order_id is the canonical external id (orders.order_id).
-        """
         with self.db:
             taker = self.get_existing_order(order_id)
 
             taker_side = taker["side"]
-            taker_price = int(str(taker["price"]))
-            taker_remaining = Decimal(taker["remaining_amount"])
+            taker_price = int(taker["price"])
+            taker_remaining = Decimal(int(taker["remaining_amount"]))
 
+            # use integer maker_amount / taker_amount semantics from DB
             candidates = self.get_sorted_candidates(taker_side, taker_price)
 
             matches: list[dict[str, Any]] = []
@@ -198,36 +206,82 @@ class ClobDB:
                 if taker_remaining <= 0:
                     break
 
-                maker_remaining = Decimal(maker["remaining_amount"])
+                maker_remaining = Decimal(int(maker["remaining_amount"]))
                 if maker_remaining <= 0:
                     continue
 
-                trade_size = min(taker_remaining, maker_remaining)
-                taker_remaining -= trade_size
-                maker_remaining -= trade_size
-
-                # update maker by external order_id to avoid mixing with nonexistent PK
-                self.update_maker_remaining(maker["order_id"], maker_remaining)
-
-                match = {
-                    "taker_order_id": taker["order_id"],
-                    "maker_order_id": maker["order_id"],
-                    "price": str(maker["price"]),
-                    "size": str(trade_size),
-                }
+                match = self.fill_order(maker, maker_remaining, taker, taker_remaining)
+                taker_remaining = taker_remaining - Decimal(match["trade_size"])
                 matches.append(match)
 
-                self._insert_trade_row(
-                    taker_row=taker,
-                    maker_row=maker,
-                    trade_size=trade_size,
-                    remaining_taker=taker_remaining,
-                )
-
             # update taker by external order_id as well
-            self.update_taker_remaining(taker["order_id"], taker_remaining)
+            self.update_taker_remaining_in_db(taker["order_id"], taker_remaining)
 
         return matches, taker_remaining
+
+    def sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
+        # price is INTEGER in DB; avoid noisy int(str(...)) casts
+        candidates.sort(
+            key=lambda m: (int(m["price"]), m["order_id"]) if taker_side == "BUY"
+            else (-int(m["price"]), m["order_id"])
+        )
+
+    def get_sorted_candidates(
+        self,
+        taker_side: Literal["BUY", "SELL"],
+        taker_price: int,
+    ) -> list[Any]:
+        """
+        Return maker orders on the opposite side that are price-acceptable
+        for the given taker side and limit price.
+
+        Price is stored as INTEGER (u256 decimal), so numeric comparisons
+        are done directly in SQL without CAST.
+        """
+        opposite_side = "SELL" if taker_side == "BUY" else "BUY"
+        if taker_side == "BUY":
+            sql = """
+                  SELECT *
+                  FROM orders
+                  WHERE side = ?
+                    AND status = 'open'
+                    AND price <= ?
+                  """
+        else:
+            sql = """
+                  SELECT *
+                  FROM orders
+                  WHERE side = ?
+                    AND status = 'open'
+                    AND price >= ?
+                  """
+
+        candidates = self.db.execute(sql, (opposite_side, taker_price)).fetchall()
+        self.sort_candidates(candidates, taker_side)
+        return candidates
+
+    def fill_order(self, maker, maker_remaining: Decimal, taker, taker_remaining: Decimal) ->  dict[str, str | Any]:
+        trade_size = min(taker_remaining, maker_remaining)
+        taker_remaining -= trade_size
+        maker_remaining -= trade_size
+
+        self.update_maker_remaining_in_db(maker["order_id"], maker_remaining)
+
+        match = {
+            "taker_order_id": taker["order_id"],
+            "maker_order_id": maker["order_id"],
+            "price": str(int(maker["price"])),
+            "trade_size": str(trade_size),
+        }
+
+        self.insert_trade_row(
+            taker_row=taker,
+            maker_row=maker,
+            trade_size=trade_size,
+            remaining_taker=taker_remaining,
+        )
+
+        return match
 
     def get_existing_order(self, order_id: str) -> Any:
         taker = self.db.execute(
@@ -244,47 +298,7 @@ class ClobDB:
             raise RuntimeError(f"Taker order {order_id} not found or not open")
         return taker
 
-    def sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
-        candidates.sort(
-            key=lambda m: (int(str(m["price"])), m["order_id"]) if taker_side == "BUY"
-            else (-int(str(m["price"])), m["order_id"])
-        )
-
-    def get_sorted_candidates(
-        self,
-        taker_side: Literal["BUY", "SELL"],
-        taker_price: int,
-    ) -> list[Any]:
-        """
-        Return maker orders on the opposite side that are price-acceptable
-        for the given taker side and limit price.
-
-        Price is stored as TEXT but represents an integer, so we cast it
-        to INTEGER in SQL for correct numeric comparison.
-        """
-        opposite_side = "SELL" if taker_side == "BUY" else "BUY"
-        if taker_side == "BUY":
-            sql = """
-                  SELECT *
-                  FROM orders
-                  WHERE side = ?
-                    AND status = 'open'
-                    AND CAST(price AS INTEGER) <= ?
-                  """
-        else:
-            sql = """
-                  SELECT *
-                  FROM orders
-                  WHERE side = ?
-                    AND status = 'open'
-                    AND CAST(price AS INTEGER) >= ?
-                  """
-
-        candidates = self.db.execute(sql, (opposite_side, taker_price)).fetchall()
-        self.sort_candidates(candidates, taker_side)
-        return candidates
-
-    def update_taker_remaining(self, order_id: str, taker_remaining: Decimal):
+    def update_taker_remaining_in_db(self, order_id: str, taker_remaining: Decimal):
         """
         Update remaining amount and status for the taker order by external order_id.
         """
@@ -296,13 +310,10 @@ class ClobDB:
                 status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
             WHERE order_id = ?
             """,
-            (str(taker_remaining), remaining_int, order_id)
+            (remaining_int, remaining_int, order_id)
         )
 
-    def update_maker_remaining(self, order_id: str, maker_remaining: Decimal):
-        """
-        Update remaining amount and status for a maker order by external order_id.
-        """
+    def update_maker_remaining_in_db(self, order_id: str, maker_remaining: Decimal):
         remaining_int = int(maker_remaining)
         self.db.execute(
             """
@@ -311,7 +322,7 @@ class ClobDB:
                 status           = CASE WHEN ? = 0 THEN 'filled' ELSE 'open' END
             WHERE order_id = ?
             """,
-            (str(maker_remaining), remaining_int, order_id)
+            (remaining_int, remaining_int, order_id)
         )
 
     # Keep old name for compatibility, but now it runs matching by external order_id
@@ -328,7 +339,7 @@ class ClobDB:
 
 
 
-    def _insert_trade_row(
+    def insert_trade_row(
         self,
         taker_row: sqlite3.Row,
         maker_row: sqlite3.Row,
@@ -357,9 +368,10 @@ class ClobDB:
             maker_orders=maker_orders_payload,
             market=taker_row["tokenId"],
             asset_id=taker_row["tokenId"],
-            price=str(maker_row["price"]),
+            price=str(int(maker_row["price"])),
             trade_size=str(trade_size),
-            remaining_size=str(remaining_taker),
+            # remaining_taker is Decimal; normalize to string of integer units
+            remaining_size=str(int(remaining_taker)),
             side=taker_row["side"],
             match_time=datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
             transaction_hash="",
