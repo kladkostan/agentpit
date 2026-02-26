@@ -140,6 +140,8 @@ class ClobDB:
                 'live',
                 remaining_amount
                 INTEGER,
+                created_at
+                INTEGER,
                 order_id
                 TEXT
                 NOT
@@ -154,20 +156,19 @@ class ClobDB:
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)"
         )
-        # new composite index for efficient expiration processing
         self.db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
                 ON orders(order_type, status, expiration)
             """
         )
-        # optional helper index if you ever query just by status/expiration
         self.db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_status_expiration
                 ON orders(status, expiration)
             """
         )
+
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
 
@@ -236,12 +237,11 @@ class ClobDB:
         )
 
         order_id = self._compute_polymarket_compatible_order_id(order)
-
-        # Normalize order_type from py_clob_client.OrderType to a plain string.
         order_type_str = self._order_type_as_str(order_type)
-
         side_str = self._side_as_str(order)
 
+        # Capture creation time
+        created_at = int(datetime.utcnow().timestamp())
 
         self.db.execute(
             """
@@ -264,6 +264,7 @@ class ClobDB:
                                 order_json,
                                 status,
                                 remaining_amount,
+                                created_at,
                                 order_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -287,11 +288,11 @@ class ClobDB:
                 serialized_body,
                 OrderStatus.LIVE,
                 int(order.makerAmount),
+                created_at,
                 order_id,
             ),
         )
 
-        # always use order_id (hash) as canonical identifier
         return order_id
 
     def _side_as_str(self, order: Order) -> str:
@@ -344,10 +345,17 @@ class ClobDB:
         return matches, taker_remaining
 
     def _sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
-        # price is INTEGER in DB; avoid noisy int(str(...)) casts
+        """
+        Sorts candidates for Price-Time priority.
+        1. Price:
+           - Taker BUY (wants SELLs): Lowest price first (Ascending).
+           - Taker SELL (wants BUYs): Highest price first (Descending).
+        2. Time (created_at):
+           - Oldest orders first (Ascending) for both sides.
+        """
         candidates.sort(
-            key=lambda m: (int(m["price"]), m["order_id"]) if taker_side == "BUY"
-            else (-int(m["price"]), m["order_id"])
+            key=lambda m: (int(m["price"]), int(m["created_at"])) if taker_side == "BUY"
+            else (-int(m["price"]), int(m["created_at"]))
         )
 
     def _get_sorted_candidates(
