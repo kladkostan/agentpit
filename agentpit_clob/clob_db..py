@@ -193,7 +193,7 @@ class ClobDB:
                     int(order.nonce),
                     int(order.feeRateBps),
                     side_str,
-                    self.signaturew_type_as_str(order.signatureType),  # store as TEXT
+                    self.signaturew_type_as_str(order),  # store as TEXT
                     serialized_body,
                     "open",
                     int(order.makerAmount),
@@ -214,14 +214,18 @@ class ClobDB:
             raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
         return side_str
 
-    def signaturew_type_as_str(self, order: Order) -> str:
-        sig_type_int = int(order.signatureType)
-        if sig_type_int == 0:
-            return "EIP712"
-        elif sig_type_int == 1:
-            return "ETHSIGN"
-        else:
-            raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
+
+
+    def signature_type_as_str(self, signature_type: int | str) -> str:
+        SIG_TYPE_MAP = {
+            0: "EIP712",
+            1: "ETHSIGN",
+        }
+        sig_type_int = int(signature_type)
+        try:
+            return SIG_TYPE_MAP[sig_type_int]
+        except KeyError:
+            raise ValueError(f"Unsupported signatureType: {sig_type_int}")
 
 
 
@@ -465,8 +469,8 @@ def get_price_int(order: Order) -> int:
     BUY:  price = taker_amount / maker_amount
     SELL: price = maker_amount / taker_amount
     """
-    maker_amount = Decimal(str(order.maker_amount))
-    taker_amount = Decimal(str(order.taker_amount))
+    maker_amount = Decimal(str(order.makerAmount))
+    taker_amount = Decimal(str(order.takerAmount))
 
     if maker_amount <= 0 or taker_amount <= 0:
         raise ValueError("maker_amount and taker_amount must be positive")
