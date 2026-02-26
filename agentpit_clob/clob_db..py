@@ -88,9 +88,9 @@ class ClobDB:
         if not post_only:
             matches, remaining = self.match_and_fill_order(taker_order_id)
         else:
-            remaining = Decimal(signed_order.order.maker_amount)
+            remaining = Decimal(signed_order.order.makerAmount)
 
-        total_requested = Decimal(signed_order.order.maker_amount)
+        total_requested = Decimal(signed_order.order.makerAmount)
         filled = total_requested - remaining
 
         # compute volume‑weighted average price from matches
@@ -193,7 +193,7 @@ class ClobDB:
                     int(order.nonce),
                     int(order.feeRateBps),
                     side_str,
-                    self.signaturew_type_as_str(order),  # store as TEXT
+                    self.signature_type_as_str(order.signatureType),  # store as TEXT
                     serialized_body,
                     "open",
                     int(order.makerAmount),
@@ -469,8 +469,8 @@ def get_price_int(order: Order) -> int:
     BUY:  price = taker_amount / maker_amount
     SELL: price = maker_amount / taker_amount
     """
-    maker_amount = Decimal(str(order.makerAmount))
-    taker_amount = Decimal(str(order.takerAmount))
+    maker_amount = Decimal(order.makerAmount)
+    taker_amount = Decimal(order.takerAmount)
 
     if maker_amount <= 0 or taker_amount <= 0:
         raise ValueError("maker_amount and taker_amount must be positive")
