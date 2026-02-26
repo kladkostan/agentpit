@@ -4,7 +4,7 @@ from py_clob_client import OrderType
 import logging
 import sqlite3
 import json
-from decimal import Decimal
+
 from typing import Literal, Any
 from datetime import datetime
 
@@ -233,7 +233,7 @@ class ClobDB:
 
             taker_side = taker["side"]  # string "BUY"/"SELL"
             taker_price = int(taker["price"])
-            taker_remaining = Decimal(int(taker["remaining_amount"]))
+            taker_remaining = int(taker["remaining_amount"])
 
             candidates = self.get_sorted_candidates(taker_side, taker_price)
 
@@ -242,12 +242,12 @@ class ClobDB:
                 if taker_remaining <= 0:
                     break
 
-                maker_remaining = Decimal(int(maker["remaining_amount"]))
+                maker_remaining = int(maker["remaining_amount"])
                 if maker_remaining <= 0:
                     continue
 
                 match = self.fill_order(maker, maker_remaining, taker, taker_remaining)
-                taker_remaining = taker_remaining - Decimal(match["trade_size"])
+                taker_remaining = taker_remaining - match["trade_size"]
                 matches.append(match)
 
             # update taker by external order_id as well
@@ -271,7 +271,7 @@ class ClobDB:
         Return maker orders on the opposite side that are price-acceptable
         for the given taker side and limit price.
 
-        Price is stored as INTEGER (u256 decimal), so numeric comparisons
+
         are done directly in SQL without CAST.
         """
         opposite_side = "SELL" if taker_side == "BUY" else "BUY"
@@ -296,7 +296,7 @@ class ClobDB:
         self.sort_candidates(candidates, taker_side)
         return candidates
 
-    def fill_order(self, maker, maker_remaining: Decimal, taker, taker_remaining: Decimal) ->  dict[str, str | Any]:
+    def fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int) ->  dict[str, str | Any]:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
         maker_remaining -= trade_size
@@ -334,7 +334,7 @@ class ClobDB:
             raise RuntimeError(f"Taker order {order_id} not found or not open")
         return taker
 
-    def update_taker_remaining_in_db(self, order_id: str, taker_remaining: Decimal):
+    def update_taker_remaining_in_db(self, order_id: str, taker_remaining: int):
         """
         Update remaining amount and status for the taker order by external order_id.
         """
@@ -349,7 +349,7 @@ class ClobDB:
             (remaining_int, remaining_int, order_id)
         )
 
-    def update_maker_remaining_in_db(self, order_id: str, maker_remaining: Decimal):
+    def update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
         remaining_int = int(maker_remaining)
         self.db.execute(
             """
@@ -379,8 +379,8 @@ class ClobDB:
         self,
         taker_row: sqlite3.Row,
         maker_row: sqlite3.Row,
-        trade_size: Decimal,
-        remaining_taker: Decimal,
+        trade_size: int,
+        remaining_taker: int,
     ) -> None:
         """
         Insert a single trade into the trades table.
