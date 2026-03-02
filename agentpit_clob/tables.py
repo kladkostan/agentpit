@@ -129,22 +129,15 @@ class Tables:
     @staticmethod
     def _hex_u256_to_int(value: object) -> int:
         if not isinstance(value, str):
-            return 0
-        s = value.strip()
+            raise TypeError(f"Expected hex string, got {type(value)}")
+        s = value.strip().lower()
         if not s:
-            return 0
-
-        # Web3.to_int expects either an int-like value or a hexstr with 0x prefix.
-        if not s.startswith("0x") and not s.startswith("0X"):
+            raise ValueError("Empty hex string")
+        if not s.startswith("0x"):
             s = "0x" + s
-
-        try:
-            n = Web3.to_int(hexstr=s)
-        except (TypeError, ValueError):
-            return 0
-
+        n = int(s, 16)
         if n < 0 or n >= (1 << 256):
-            return 0
+            raise ValueError("Value out of u256 range")
         return n
 
     @staticmethod
@@ -159,33 +152,32 @@ class Tables:
             "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
             (norm_eth,),
         ).fetchone()
+
         if row is None or row[0] is None:
             return 0
 
         try:
-            ownership_map: object = json.loads(row[0])
-        except (TypeError, json.JSONDecodeError):
-            return 0
+            ownership_map = json.loads(row[0])
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Corrupted OWNERSHIP JSON for {norm_eth}: {row[0]}"
+            ) from e
 
         if not isinstance(ownership_map, dict):
-            return 0
-
-        # At this point ownership_map should be dict[str, str]
-        ownership_map_typed: dict[str, str] = {
-            k: v
-            for k, v in ownership_map.items()
-            if isinstance(k, str) and isinstance(v, str)
-        }
+            raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {norm_eth}")
 
         norm_asset = Tables._normalize_eth_address(asset_address)
         if norm_asset is None:
             return 0
 
-        # ownership_map is expected to be: { "<asset_eth_address_hex>": "<u256_hex>" }
-        if norm_asset in ownership_map_typed:
-            return Tables._hex_u256_to_int(ownership_map_typed[norm_asset])
+        # Exact match preferred
+        if norm_asset in ownership_map:
+            return Tables._hex_u256_to_int(ownership_map[norm_asset])
 
-        for k, v in ownership_map_typed.items():
+        # Fallback for case-insensitivity (though stored keys should be canonical)
+        for k, v in ownership_map.items():
+            if not isinstance(k, str):
+                continue
             nk = Tables._normalize_eth_address(k)
             if nk == norm_asset:
                 return Tables._hex_u256_to_int(v)
@@ -243,3 +235,144 @@ class Tables:
         acct: LocalAccount = Tables.get_private_key_for_api_key(db, api_key)
         return acct.address
 
+    @staticmethod
+    def mint(
+        db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
+    ) -> None:
+        norm_eth: str | None = Tables._normalize_eth_address(eth_address)
+        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
+        if norm_eth is None or norm_asset is None:
+            raise ValueError("Invalid eth_address or asset_address")
+
+        if not isinstance(value, int):
+            raise TypeError("value must be int")
+        if value < 0 or value >= (1 << 256):
+            raise ValueError("value must be a u256 (0 <= value < 2**256)")
+        if value == 0:
+            return
+
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            # Ensure row exists
+            db.execute(
+                "INSERT OR IGNORE INTO token_ownership (ETH_ADDRESS, OWNERSHIP) VALUES (?, ?)",
+                (norm_eth, "{}"),
+            )
+
+            row = db.execute(
+                "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+                (norm_eth,),
+            ).fetchone()
+
+            if row is None or row[0] is None:
+                raise ValueError(f"Failed to fetch ownership row for {norm_eth}")
+
+            try:
+                ownership_map = json.loads(row[0])
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"Corrupted OWNERSHIP JSON for {norm_eth}: {row[0]}"
+                ) from e
+
+            if not isinstance(ownership_map, dict):
+                raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {norm_eth}")
+
+            current = 0
+            if norm_asset in ownership_map:
+                current = Tables._hex_u256_to_int(ownership_map[norm_asset])
+
+            new_value = current + value
+            if new_value >= (1 << 256):
+                raise OverflowError("u256 overflow")
+
+            ownership_map[norm_asset] = Web3.to_hex(new_value).lower()
+
+            db.execute(
+                "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+                (json.dumps(ownership_map, separators=(",", ":")), norm_eth),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def transfer(
+        db: sqlite3.Connection,
+        src_address: str,
+        destination_address: str,
+        value: int,
+        asset_address: str,
+    ) -> None:
+        norm_src: str | None = Tables._normalize_eth_address(src_address)
+        norm_dst: str | None = Tables._normalize_eth_address(destination_address)
+        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
+        if norm_src is None or norm_dst is None or norm_asset is None:
+            raise ValueError("Invalid src_address, destination_address, or asset_address")
+
+        if not isinstance(value, int):
+            raise TypeError("value must be int")
+        if value < 0 or value >= (1 << 256):
+            raise ValueError("value must be a u256 (0 <= value < 2**256)")
+        if value == 0 or norm_src == norm_dst:
+            return
+
+        def _get_map(addr: str) -> dict[str, str]:
+            db.execute(
+                "INSERT OR IGNORE INTO token_ownership (ETH_ADDRESS, OWNERSHIP) VALUES (?, ?)",
+                (addr, "{}"),
+            )
+            row = db.execute(
+                "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+                (addr,),
+            ).fetchone()
+
+            if row is None or row[0] is None:
+                raise ValueError(f"Failed to fetch ownership row for {addr}")
+
+            try:
+                data = json.loads(row[0])
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Corrupted OWNERSHIP JSON for {addr}") from e
+
+            if not isinstance(data, dict):
+                raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {addr}")
+
+            return {
+                k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)
+            }
+
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            src_map = _get_map(norm_src)
+            dst_map = _get_map(norm_dst)
+
+            raw_src_bal = src_map.get(norm_asset)
+            src_bal = 0 if raw_src_bal is None else Tables._hex_u256_to_int(raw_src_bal)
+
+            if src_bal < value:
+                raise ValueError(f"Insufficient balance: {src_bal} < {value}")
+
+            raw_dst_bal = dst_map.get(norm_asset)
+            dst_bal = 0 if raw_dst_bal is None else Tables._hex_u256_to_int(raw_dst_bal)
+
+            new_src = src_bal - value
+            new_dst = dst_bal + value
+            if new_dst >= (1 << 256):
+                raise OverflowError("u256 overflow")
+
+            src_map[norm_asset] = Web3.to_hex(new_src).lower()
+            dst_map[norm_asset] = Web3.to_hex(new_dst).lower()
+
+            db.execute(
+                "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+                (json.dumps(src_map, separators=(",", ":")), norm_src),
+            )
+            db.execute(
+                "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+                (json.dumps(dst_map, separators=(",", ":")), norm_dst),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
