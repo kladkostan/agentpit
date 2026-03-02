@@ -172,7 +172,9 @@ class Tables:
 
         # At this point ownership_map should be dict[str, str]
         ownership_map_typed: dict[str, str] = {
-            k: v for k, v in ownership_map.items() if isinstance(k, str) and isinstance(v, str)
+            k: v
+            for k, v in ownership_map.items()
+            if isinstance(k, str) and isinstance(v, str)
         }
 
         norm_asset = Tables._normalize_eth_address(asset_address)
@@ -223,16 +225,16 @@ class Tables:
         # Missing/invalid: generate, persist, return (atomic).
         acct: LocalAccount = Account.create()
         key_hex: str = Web3.to_hex(acct.key)
-        db.execute(
-            """
-            INSERT INTO keys (API_KEY, ETH_PRIVATE_KEY)
-            VALUES (?, ?)
-            ON CONFLICT(API_KEY) DO UPDATE SET ETH_PRIVATE_KEY = excluded.ETH_PRIVATE_KEY
-            """,
-            (api_key, key_hex),
-        )
 
-
+        with db:
+            db.execute(
+                """
+                INSERT INTO keys (API_KEY, ETH_PRIVATE_KEY)
+                VALUES (?, ?)
+                ON CONFLICT(API_KEY) DO UPDATE SET ETH_PRIVATE_KEY = excluded.ETH_PRIVATE_KEY
+                """,
+                (api_key, key_hex),
+            )
 
         return acct
 
@@ -257,48 +259,49 @@ class Tables:
         if value == 0:
             return
 
-        # Ensure row exists.
-        db.execute(
-            """
-            INSERT INTO token_ownership (ETH_ADDRESS, OWNERSHIP)
-            VALUES (?, ?)
-            ON CONFLICT(ETH_ADDRESS) DO NOTHING
-            """,
-            (norm_eth, "{}"),
-        )
+        with db:
+            # Ensure row exists.
+            db.execute(
+                """
+                INSERT INTO token_ownership (ETH_ADDRESS, OWNERSHIP)
+                VALUES (?, ?)
+                ON CONFLICT(ETH_ADDRESS) DO NOTHING
+                """,
+                (norm_eth, "{}"),
+            )
 
-        row = db.execute(
-            "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
-            (norm_eth,),
-        ).fetchone()
-        ownership_json: str = "{}" if row is None or row[0] is None else row[0]
+            row = db.execute(
+                "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+                (norm_eth,),
+            ).fetchone()
+            ownership_json: str = "{}" if row is None or row[0] is None else row[0]
 
-        try:
-            ownership_map_obj: object = json.loads(ownership_json)
-        except (TypeError, json.JSONDecodeError):
-            ownership_map_obj = {}
+            try:
+                ownership_map_obj: object = json.loads(ownership_json)
+            except (TypeError, json.JSONDecodeError):
+                ownership_map_obj = {}
 
-        ownership_map: dict[str, str] = (
-            ownership_map_obj
-            if isinstance(ownership_map_obj, dict)
-            else {}
-        )
-        # Drop any non-str keys/values defensively.
-        ownership_map = {
-            k: v for k, v in ownership_map.items() if isinstance(k, str) and isinstance(v, str)
-        }
+            ownership_map: dict[str, str] = (
+                ownership_map_obj if isinstance(ownership_map_obj, dict) else {}
+            )
+            # Drop any non-str keys/values defensively.
+            ownership_map = {
+                k: v
+                for k, v in ownership_map.items()
+                if isinstance(k, str) and isinstance(v, str)
+            }
 
-        current: int = Tables._hex_u256_to_int(ownership_map.get(norm_asset))
-        new_value: int = current + value
-        if new_value >= (1 << 256):
-            raise OverflowError("u256 overflow")
+            current: int = Tables._hex_u256_to_int(ownership_map.get(norm_asset))
+            new_value: int = current + value
+            if new_value >= (1 << 256):
+                raise OverflowError("u256 overflow")
 
-        ownership_map[norm_asset] = Web3.to_hex(new_value).lower()
+            ownership_map[norm_asset] = Web3.to_hex(new_value).lower()
 
-        db.execute(
-            "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
-            (json.dumps(ownership_map, separators=(",", ":")), norm_eth),
-        )
+            db.execute(
+                "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+                (json.dumps(ownership_map, separators=(",", ":")), norm_eth),
+            )
 
     @staticmethod
     def transfer(
@@ -341,12 +344,15 @@ class Tables:
                 m_obj: object = json.loads(raw)
             except (TypeError, json.JSONDecodeError):
                 m_obj = {}
+
             if not isinstance(m_obj, dict):
                 return {}
-            m: dict[str, str] = {
-                k: v for k, v in m_obj.items() if isinstance(k, str) and isinstance(v, str)
+
+            return {
+                k: v
+                for k, v in m_obj.items()
+                if isinstance(k, str) and isinstance(v, str)
             }
-            return m
 
         def _store_map(addr: str, m: dict[str, str]) -> None:
             db.execute(
@@ -354,26 +360,26 @@ class Tables:
                 (json.dumps(m, separators=(",", ":")), addr),
             )
 
+        with db:
+            _ensure_row(norm_src)
+            _ensure_row(norm_dst)
 
-        _ensure_row(norm_src)
-        _ensure_row(norm_dst)
+            src_map: dict[str, str] = _load_map(norm_src)
+            dst_map: dict[str, str] = _load_map(norm_dst)
 
-        src_map: dict[str, str] = _load_map(norm_src)
-        dst_map: dict[str, str] = _load_map(norm_dst)
+            src_bal: int = Tables._hex_u256_to_int(src_map.get(norm_asset))
+            if src_bal < value:
+                raise ValueError("insufficient balance")
 
-        src_bal: int = Tables._hex_u256_to_int(src_map.get(norm_asset))
-        if src_bal < value:
-            raise ValueError("insufficient balance")
+            dst_bal: int = Tables._hex_u256_to_int(dst_map.get(norm_asset))
 
-        dst_bal: int = Tables._hex_u256_to_int(dst_map.get(norm_asset))
+            new_src: int = src_bal - value
+            new_dst: int = dst_bal + value
+            if new_dst >= (1 << 256):
+                raise OverflowError("u256 overflow")
 
-        new_src: int = src_bal - value
-        new_dst: int = dst_bal + value
-        if new_dst >= (1 << 256):
-            raise OverflowError("u256 overflow")
+            src_map[norm_asset] = Web3.to_hex(new_src).lower()
+            dst_map[norm_asset] = Web3.to_hex(new_dst).lower()
 
-        src_map[norm_asset] = Web3.to_hex(new_src).lower()
-        dst_map[norm_asset] = Web3.to_hex(new_dst).lower()
-
-        _store_map(norm_src, src_map)
-        _store_map(norm_dst, dst_map)
+            _store_map(norm_src, src_map)
+            _store_map(norm_dst, dst_map)
