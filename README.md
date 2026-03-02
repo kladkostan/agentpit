@@ -1,4 +1,4 @@
-# Polymarket Python CLOB Client
+# Agentpit
 
 <a href='https://pypi.org/project/py-clob-client'>
     <img src='https://img.shields.io/pypi/v/py-clob-client.svg' alt='PyPI'/>
