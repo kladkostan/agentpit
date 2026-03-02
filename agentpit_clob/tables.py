@@ -163,23 +163,28 @@ class Tables:
             return 0
 
         try:
-            ownership_map = json.loads(row[0])
+            ownership_map: object = json.loads(row[0])
         except (TypeError, json.JSONDecodeError):
             return 0
 
         if not isinstance(ownership_map, dict):
             return 0
 
+        # At this point ownership_map should be dict[str, str]
+        ownership_map_typed: dict[str, str] = {
+            k: v for k, v in ownership_map.items() if isinstance(k, str) and isinstance(v, str)
+        }
+
         norm_asset = Tables._normalize_eth_address(asset_address)
         if norm_asset is None:
             return 0
 
         # ownership_map is expected to be: { "<asset_eth_address_hex>": "<u256_hex>" }
-        if norm_asset in ownership_map:
-            return Tables._hex_u256_to_int(ownership_map[norm_asset])
+        if norm_asset in ownership_map_typed:
+            return Tables._hex_u256_to_int(ownership_map_typed[norm_asset])
 
-        for k, v in ownership_map.items():
-            nk = Tables._normalize_eth_address(k) if isinstance(k, str) else None
+        for k, v in ownership_map_typed.items():
+            nk = Tables._normalize_eth_address(k)
             if nk == norm_asset:
                 return Tables._hex_u256_to_int(v)
 
@@ -201,20 +206,23 @@ class Tables:
         return b if len(b) == 32 else None
 
     @staticmethod
-    def get_private_key_for_api_key(db: sqlite3.Connection, api_key: str) -> LocalAccount:
+    def get_private_key_for_api_key(
+        db: sqlite3.Connection, api_key: str
+    ) -> LocalAccount:
         row = db.execute(
             "SELECT ETH_PRIVATE_KEY FROM keys WHERE API_KEY = ? LIMIT 1",
             (api_key,),
         ).fetchone()
 
-        existing_key = None if row is None else Tables._parse_32b_hex_private_key(row[0])
+        existing_key: bytes | None = (
+            None if row is None else Tables._parse_32b_hex_private_key(row[0])
+        )
         if existing_key is not None:
             return Account.from_key(existing_key)
 
-        # Missing/invalid: generate, persist, return.
+        # Missing/invalid: generate, persist, return (atomic).
         acct: LocalAccount = Account.create()
         key_hex: str = Web3.to_hex(acct.key)
-
         db.execute(
             """
             INSERT INTO keys (API_KEY, ETH_PRIVATE_KEY)
@@ -223,19 +231,22 @@ class Tables:
             """,
             (api_key, key_hex),
         )
+
+
+
         return acct
 
     @staticmethod
-    def get_eth_address_for_api_keys(db: sqlite3.Connection, api_key: str) -> str:
-        acct = Tables.get_private_key_for_api_key(db, api_key)
+    def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
+        acct: LocalAccount = Tables.get_private_key_for_api_key(db, api_key)
         return acct.address
 
     @staticmethod
     def mint(
         db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
     ) -> None:
-        norm_eth = Tables._normalize_eth_address(eth_address)
-        norm_asset = Tables._normalize_eth_address(asset_address)
+        norm_eth: str | None = Tables._normalize_eth_address(eth_address)
+        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
         if norm_eth is None or norm_asset is None:
             raise ValueError("Invalid eth_address or asset_address")
 
@@ -243,6 +254,8 @@ class Tables:
             raise TypeError("value must be int")
         if value < 0 or value >= (1 << 256):
             raise ValueError("value must be a u256 (0 <= value < 2**256)")
+        if value == 0:
+            return
 
         # Ensure row exists.
         db.execute(
@@ -258,25 +271,28 @@ class Tables:
             "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
             (norm_eth,),
         ).fetchone()
-        ownership_json = "{}" if row is None or row[0] is None else row[0]
+        ownership_json: str = "{}" if row is None or row[0] is None else row[0]
 
         try:
-            ownership_map = json.loads(ownership_json)
+            ownership_map_obj: object = json.loads(ownership_json)
         except (TypeError, json.JSONDecodeError):
-            ownership_map = {}
+            ownership_map_obj = {}
 
-        if not isinstance(ownership_map, dict):
-            ownership_map = {}
+        ownership_map: dict[str, str] = (
+            ownership_map_obj
+            if isinstance(ownership_map_obj, dict)
+            else {}
+        )
+        # Drop any non-str keys/values defensively.
+        ownership_map = {
+            k: v for k, v in ownership_map.items() if isinstance(k, str) and isinstance(v, str)
+        }
 
-        current = 0
-        if norm_asset in ownership_map:
-            current = Tables._hex_u256_to_int(ownership_map.get(norm_asset))
-
-        new_value = current + value
+        current: int = Tables._hex_u256_to_int(ownership_map.get(norm_asset))
+        new_value: int = current + value
         if new_value >= (1 << 256):
             raise OverflowError("u256 overflow")
 
-        # Store as canonical 0x-prefixed lowercase hex string.
         ownership_map[norm_asset] = Web3.to_hex(new_value).lower()
 
         db.execute(
@@ -292,9 +308,9 @@ class Tables:
         value: int,
         asset_address: str,
     ) -> None:
-        norm_src = Tables._normalize_eth_address(src_address)
-        norm_dst = Tables._normalize_eth_address(destination_address)
-        norm_asset = Tables._normalize_eth_address(asset_address)
+        norm_src: str | None = Tables._normalize_eth_address(src_address)
+        norm_dst: str | None = Tables._normalize_eth_address(destination_address)
+        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
         if norm_src is None or norm_dst is None or norm_asset is None:
             raise ValueError("Invalid src_address, destination_address, or asset_address")
 
@@ -305,7 +321,7 @@ class Tables:
         if value == 0 or norm_src == norm_dst:
             return
 
-        def _load_map_for(addr: str) -> dict:
+        def _ensure_row(addr: str) -> None:
             db.execute(
                 """
                 INSERT INTO token_ownership (ETH_ADDRESS, OWNERSHIP)
@@ -314,46 +330,50 @@ class Tables:
                 """,
                 (addr, "{}"),
             )
+
+        def _load_map(addr: str) -> dict[str, str]:
             row = db.execute(
                 "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
                 (addr,),
             ).fetchone()
-            raw = "{}" if row is None or row[0] is None else row[0]
+            raw: str = "{}" if row is None or row[0] is None else row[0]
             try:
-                m = json.loads(raw)
+                m_obj: object = json.loads(raw)
             except (TypeError, json.JSONDecodeError):
-                m = {}
-            return m if isinstance(m, dict) else {}
+                m_obj = {}
+            if not isinstance(m_obj, dict):
+                return {}
+            m: dict[str, str] = {
+                k: v for k, v in m_obj.items() if isinstance(k, str) and isinstance(v, str)
+            }
+            return m
 
-        def _store_map_for(addr: str, m: dict) -> None:
+        def _store_map(addr: str, m: dict[str, str]) -> None:
             db.execute(
                 "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
                 (json.dumps(m, separators=(",", ":")), addr),
             )
 
-        def _get_balance(m: dict) -> int:
-            return Tables._hex_u256_to_int(m.get(norm_asset))
 
-        def _set_balance(m: dict, amount: int) -> None:
-            if amount < 0 or amount >= (1 << 256):
-                raise OverflowError("u256 overflow/underflow")
-            m[norm_asset] = Web3.to_hex(amount).lower()
+        _ensure_row(norm_src)
+        _ensure_row(norm_dst)
 
-            src_map = _load_map_for(norm_src)
-            dst_map = _load_map_for(norm_dst)
+        src_map: dict[str, str] = _load_map(norm_src)
+        dst_map: dict[str, str] = _load_map(norm_dst)
 
-            src_bal = _get_balance(src_map)
-            if src_bal < value:
-                raise ValueError("insufficient balance")
+        src_bal: int = Tables._hex_u256_to_int(src_map.get(norm_asset))
+        if src_bal < value:
+            raise ValueError("insufficient balance")
 
-            dst_bal = _get_balance(dst_map)
-            new_src = src_bal - value
-            new_dst = dst_bal + value
-            if new_dst >= (1 << 256):
-                raise OverflowError("u256 overflow")
+        dst_bal: int = Tables._hex_u256_to_int(dst_map.get(norm_asset))
 
-            _set_balance(src_map, new_src)
-            _set_balance(dst_map, new_dst)
+        new_src: int = src_bal - value
+        new_dst: int = dst_bal + value
+        if new_dst >= (1 << 256):
+            raise OverflowError("u256 overflow")
 
-            _store_map_for(norm_src, src_map)
-            _store_map_for(norm_dst, dst_map)
+        src_map[norm_asset] = Web3.to_hex(new_src).lower()
+        dst_map[norm_asset] = Web3.to_hex(new_dst).lower()
+
+        _store_map(norm_src, src_map)
+        _store_map(norm_dst, dst_map)
