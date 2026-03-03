@@ -3,7 +3,7 @@ import sqlite3
 
 from web3 import Web3  # pip install web3
 
-from agentpit_clob.parse import normalize_eth_address, hex_u256_to_int
+from agentpit_clob.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit_clob.db.table_utils import TableUtils
 
 
@@ -23,6 +23,7 @@ class ERC115Simulator:
             return
 
         # use context manager for atomic transaction; any exception rolls back
+        # errors propagate; no exception handling here
         with db:
             TableUtils.ensure_erc155_ownership_row(db, norm_token_id)
             ownership_map = TableUtils.load_erc155_ownership_map(db, norm_token_id)
@@ -59,6 +60,7 @@ class ERC115Simulator:
             return
 
         # use context manager for atomic transaction; any exception rolls back
+        # errors propagate; no exception handling here
         with db:
             TableUtils.ensure_erc155_ownership_row(db, norm_src_token)
             TableUtils.ensure_erc155_ownership_row(db, norm_dst_token)

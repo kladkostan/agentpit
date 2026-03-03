@@ -107,6 +107,7 @@ class TableCreate:
 
     @staticmethod
     def create_markets_table(db: sqlite3.Connection) -> None:
+        # errors propagate; no exception handling here
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS markets (
@@ -120,6 +121,7 @@ class TableCreate:
 
     @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
+        # errors propagate; no exception handling here
         TableCreate.create_orders_table(db)
         TableCreate.create_trades_table(db)
         TableCreate.create_erc20_token_ownership_table(db)

@@ -18,17 +18,13 @@ class TableUtils:
     def load_erc20_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
+        # errors propagate; no exception handling here
         row = db.execute(
             "SELECT OWNERSHIP FROM erc20_token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
             (eth_address,),
         ).fetchone()
         raw: str = "{}" if row is None or row[0] is None else row[0]
-        try:
-            m_obj: object = json.loads(raw)
-        except (TypeError, json.JSONDecodeError) as e:
-            raise ValueError(
-                f"Corrupted OWNERSHIP JSON for {eth_address}: {raw!r}"
-            ) from e
+        m_obj: object = json.loads(raw)
 
         if not isinstance(m_obj, dict):
             raise ValueError(
@@ -74,17 +70,13 @@ class TableUtils:
     def load_erc155_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
+        # errors propagate; no exception handling here
         row = db.execute(
             "SELECT OWNERSHIP FROM erc155_token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
             (eth_address,),
         ).fetchone()
         raw: str = "{}" if row is None or row[0] is None else row[0]
-        try:
-            m_obj: object = json.loads(raw)
-        except (TypeError, json.JSONDecodeError) as e:
-            raise ValueError(
-                f"Corrupted OWNERSHIP JSON for {eth_address}: {raw!r}"
-            ) from e
+        m_obj: object = json.loads(raw)
 
         if not isinstance(m_obj, dict):
             raise ValueError(

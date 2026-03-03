@@ -4,7 +4,7 @@ from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
-from agentpit_clob.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
+from agentpit_clob.utils.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
 from .table_utils import TableUtils
 from agentpit_clob.datastructures.market import Market
 
@@ -104,7 +104,7 @@ class TableRead:
 
         market_id_val, condition_id, description, erc155_tokens_json = row
 
-        # Do not catch JSON errors; let them propagate.
+        # JSON errors propagate; no exception handling here
         erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
 
         return Market(

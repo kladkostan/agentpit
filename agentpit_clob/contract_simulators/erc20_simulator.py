@@ -3,7 +3,7 @@ import sqlite3
 
 from web3 import Web3  # pip install web3
 
-from agentpit_clob.parse import normalize_eth_address, hex_u256_to_int
+from agentpit_clob.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit_clob.db.table_utils import TableUtils
 
 
@@ -22,6 +22,7 @@ class ERC20Simulator:
         if value == 0:
             return
 
+        # errors propagate; no exception handling here
         with db:
             TableUtils.ensure_erc20_ownership_row(db, norm_eth)
             ownership_map = TableUtils.load_erc20_ownership_map(db, norm_eth)
@@ -57,6 +58,7 @@ class ERC20Simulator:
         if value == 0 or norm_src == norm_dst:
             return
 
+        # errors propagate; no exception handling here
         with db:
             TableUtils.ensure_erc20_ownership_row(db, norm_src)
             TableUtils.ensure_erc20_ownership_row(db, norm_dst)
