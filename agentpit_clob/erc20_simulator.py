@@ -23,8 +23,8 @@ class ERC20Simulator:
         if value == 0:
             return
 
-        db.execute("BEGIN IMMEDIATE")
-        try:
+        # use context manager for atomic transaction; any exception rolls back
+        with db:
             TableUtils.ensure_ownership_row(db, norm_eth)
             ownership_map = TableUtils.load_ownership_map(db, norm_eth)
 
@@ -39,10 +39,6 @@ class ERC20Simulator:
             ownership_map[norm_asset] = Web3.to_hex(new_value).lower()
 
             TableUtils.store_ownership_map(db, norm_eth, ownership_map)
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
 
     @staticmethod
     def transfer(
@@ -63,8 +59,8 @@ class ERC20Simulator:
         if value == 0 or norm_src == norm_dst:
             return
 
-        db.execute("BEGIN IMMEDIATE")
-        try:
+        # use context manager for atomic transaction; any exception rolls back
+        with db:
             TableUtils.ensure_ownership_row(db, norm_src)
             TableUtils.ensure_ownership_row(db, norm_dst)
             src_map = TableUtils.load_ownership_map(db, norm_src)
@@ -89,6 +85,3 @@ class ERC20Simulator:
 
             TableUtils.store_ownership_map(db, norm_src, src_map)
             TableUtils.store_ownership_map(db, norm_dst, dst_map)
-            db.commit()
-        except Exception:
-            db.rollback()
