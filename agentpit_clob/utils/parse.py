@@ -63,3 +63,10 @@ def hex_u256_to_int(value: object) -> int:
     if n < 0 or n >= (1 << 256):
         raise ValueError("Value out of u256 range")
     return n
+
+
+def is_hex256(value: str) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    token_hex = value[2:] if value.lower().startswith("0x") else value
+    return len(token_hex) == 64 and all(c in "0123456789abcdefABCDEF" for c in token_hex)

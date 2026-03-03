@@ -11,15 +11,15 @@ from typing import Literal, Any
 from datetime import datetime
 
 from py_clob_client.clob_types import PostOrdersArgs
-from agentpit_clob.order_response import OrderResponse
-from datastructures.trade import Trade
+from agentpit_clob.datastructures.order_response import OrderResponse
+from agentpit_clob.datastructures.trade import Trade
 
 from eth_utils import keccak
 from py_order_utils.utils import prepend_zx
 from py_clob_client.signing.eip712 import get_clob_auth_domain
 from decimal import Decimal, ROUND_HALF_UP
 
-from datastructures.match import Match
+from agentpit_clob.datastructures.match import Match
 
 from py_clob_client.utilities import order_to_json
 from enum import Enum
