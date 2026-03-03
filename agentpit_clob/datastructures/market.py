@@ -37,3 +37,6 @@ class Market:
         self.condition_id = condition_id
         self.description = description
         self.erc155_tokens = erc155_tokens
+
+
+
