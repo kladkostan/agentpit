@@ -4,6 +4,8 @@ from web3 import Web3  # pip install web3
 import json
 import sqlite3
 
+from .parse import parse_32b_hex_private_key, normalize_eth_address
+
 
 class Tables:
     @staticmethod
@@ -109,24 +111,6 @@ class Tables:
         Tables.create_keys_table(db)
 
     @staticmethod
-    def _normalize_eth_address(addr: str) -> str | None:
-        if not isinstance(addr, str):
-            return None
-        a = addr.strip().lower()
-        if not a:
-            return None
-        if not a.startswith("0x"):
-            a = "0x" + a
-        # Strict: 20-byte address => 40 hex chars after 0x
-        if len(a) != 42:
-            return None
-        try:
-            int(a[2:], 16)
-        except ValueError:
-            return None
-        return a
-
-    @staticmethod
     def _hex_u256_to_int(value: object) -> int:
         if not isinstance(value, str):
             raise TypeError(f"Expected hex string, got {type(value)}")
@@ -144,7 +128,7 @@ class Tables:
     def get_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
     ) -> int:
-        norm_eth = Tables._normalize_eth_address(eth_address)
+        norm_eth = normalize_eth_address(eth_address)
         if norm_eth is None:
             return 0
 
@@ -166,7 +150,7 @@ class Tables:
         if not isinstance(ownership_map, dict):
             raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {norm_eth}")
 
-        norm_asset = Tables._normalize_eth_address(asset_address)
+        norm_asset = normalize_eth_address(asset_address)
         if norm_asset is None:
             return 0
 
@@ -178,26 +162,11 @@ class Tables:
         for k, v in ownership_map.items():
             if not isinstance(k, str):
                 continue
-            nk = Tables._normalize_eth_address(k)
+            nk = normalize_eth_address(k)
             if nk == norm_asset:
                 return Tables._hex_u256_to_int(v)
 
         return 0
-
-    @staticmethod
-    def _parse_32b_hex_private_key(value: object) -> bytes | None:
-        if not isinstance(value, str):
-            return None
-        s = value.strip()
-        if not s:
-            return None
-        if not s.startswith(("0x", "0X")):
-            s = "0x" + s
-        try:
-            b = Web3.to_bytes(hexstr=s)
-        except (TypeError, ValueError):
-            return None
-        return b if len(b) == 32 else None
 
     @staticmethod
     def get_private_key_for_api_key(
@@ -209,7 +178,7 @@ class Tables:
         ).fetchone()
 
         existing_key: bytes | None = (
-            None if row is None else Tables._parse_32b_hex_private_key(row[0])
+            None if row is None else parse_32b_hex_private_key(row[0])
         )
         if existing_key is not None:
             return Account.from_key(existing_key)
@@ -236,11 +205,37 @@ class Tables:
         return acct.address
 
     @staticmethod
+    def _get_ownership_map(db: sqlite3.Connection, addr: str) -> dict[str, str]:
+        db.execute(
+            "INSERT OR IGNORE INTO token_ownership (ETH_ADDRESS, OWNERSHIP) VALUES (?, ?)",
+            (addr, "{}"),
+        )
+        row = db.execute(
+            "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+            (addr,),
+        ).fetchone()
+
+        if row is None or row[0] is None:
+            raise ValueError(f"Failed to fetch ownership row for {addr}")
+
+        try:
+            data = json.loads(row[0])
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Corrupted OWNERSHIP JSON for {addr}") from e
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {addr}")
+
+        return {
+            k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)
+        }
+
+    @staticmethod
     def mint(
         db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
     ) -> None:
-        norm_eth: str | None = Tables._normalize_eth_address(eth_address)
-        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
+        norm_eth: str | None = normalize_eth_address(eth_address)
+        norm_asset: str | None = normalize_eth_address(asset_address)
         if norm_eth is None or norm_asset is None:
             raise ValueError("Invalid eth_address or asset_address")
 
@@ -253,29 +248,7 @@ class Tables:
 
         db.execute("BEGIN IMMEDIATE")
         try:
-            # Ensure row exists
-            db.execute(
-                "INSERT OR IGNORE INTO token_ownership (ETH_ADDRESS, OWNERSHIP) VALUES (?, ?)",
-                (norm_eth, "{}"),
-            )
-
-            row = db.execute(
-                "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
-                (norm_eth,),
-            ).fetchone()
-
-            if row is None or row[0] is None:
-                raise ValueError(f"Failed to fetch ownership row for {norm_eth}")
-
-            try:
-                ownership_map = json.loads(row[0])
-            except json.JSONDecodeError as e:
-                raise ValueError(
-                    f"Corrupted OWNERSHIP JSON for {norm_eth}: {row[0]}"
-                ) from e
-
-            if not isinstance(ownership_map, dict):
-                raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {norm_eth}")
+            ownership_map = Tables._get_ownership_map(db, norm_eth)
 
             current = 0
             if norm_asset in ownership_map:
@@ -304,9 +277,9 @@ class Tables:
         value: int,
         asset_address: str,
     ) -> None:
-        norm_src: str | None = Tables._normalize_eth_address(src_address)
-        norm_dst: str | None = Tables._normalize_eth_address(destination_address)
-        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
+        norm_src: str | None = normalize_eth_address(src_address)
+        norm_dst: str | None = normalize_eth_address(destination_address)
+        norm_asset: str | None = normalize_eth_address(asset_address)
         if norm_src is None or norm_dst is None or norm_asset is None:
             raise ValueError("Invalid src_address, destination_address, or asset_address")
 
@@ -317,35 +290,10 @@ class Tables:
         if value == 0 or norm_src == norm_dst:
             return
 
-        def _get_map(addr: str) -> dict[str, str]:
-            db.execute(
-                "INSERT OR IGNORE INTO token_ownership (ETH_ADDRESS, OWNERSHIP) VALUES (?, ?)",
-                (addr, "{}"),
-            )
-            row = db.execute(
-                "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
-                (addr,),
-            ).fetchone()
-
-            if row is None or row[0] is None:
-                raise ValueError(f"Failed to fetch ownership row for {addr}")
-
-            try:
-                data = json.loads(row[0])
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Corrupted OWNERSHIP JSON for {addr}") from e
-
-            if not isinstance(data, dict):
-                raise ValueError(f"Corrupted OWNERSHIP data (not dict) for {addr}")
-
-            return {
-                k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)
-            }
-
         db.execute("BEGIN IMMEDIATE")
         try:
-            src_map = _get_map(norm_src)
-            dst_map = _get_map(norm_dst)
+            src_map = Tables._get_ownership_map(db, norm_src)
+            dst_map = Tables._get_ownership_map(db, norm_dst)
 
             raw_src_bal = src_map.get(norm_asset)
             src_bal = 0 if raw_src_bal is None else Tables._hex_u256_to_int(raw_src_bal)
