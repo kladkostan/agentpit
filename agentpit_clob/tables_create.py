@@ -71,6 +71,7 @@ class TablesCreate:
                 ON orders(status, expiration)
             """
         )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
 
     @staticmethod
     def create_erc20_token_ownership_table(db: sqlite3.Connection) -> None:
@@ -120,8 +121,6 @@ class TablesCreate:
         TablesCreate.create_orders_table(db)
         TablesCreate.create_trades_table(db)
         TablesCreate.create_erc20_token_ownership_table(db)
-        # If/when you want ERC155, remember to call:
-        # TablesCreate.create_erc155_token_ownership_table(db)
+        TablesCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
         TablesCreate.create_keys_table(db)
-
 

@@ -223,7 +223,7 @@ class ClobDB:
         taker_side = taker["side"]  # string "BUY"/"SELL"
         taker_price = int(taker["price"])
         taker_remaining = int(taker["remaining_amount"])
-        token_id = taker["token_id"]
+        token_id = taker["tokenId"]
 
         candidates = self._get_sorted_candidates(taker_side, taker_price, token_id)
 
@@ -255,7 +255,7 @@ class ClobDB:
 
         return total_spent, taker_remaining, status
 
-    def get_order_status(self, order_id: str, status) -> Any:
+    def get_order_status(self, order_id: str) -> Any:
         row = self.db.execute(
             "SELECT status FROM orders WHERE order_id = ?",
             (order_id,)

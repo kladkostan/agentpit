@@ -1,4 +1,3 @@
-import json
 import sqlite3
 from eth_account import Account
 from eth_account.signers.local import LocalAccount

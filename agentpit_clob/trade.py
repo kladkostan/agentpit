@@ -19,9 +19,9 @@ class Trade:
     fee_rate_bps: int
 
     @property
-    def __dict__(self):
+    def dict(self):
         return asdict(self)
 
     @property
     def json(self):
-        return dumps(self.__dict__)
+        return dumps(self.dict)
