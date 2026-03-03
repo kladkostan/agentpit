@@ -58,7 +58,6 @@ class TablesCreate:
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
         )
-        db.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)")
         db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
@@ -83,10 +82,6 @@ class TablesCreate:
             )
             """
         )
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_erc20_token_ownership_eth_address "
-            "ON erc20_token_ownership(ETH_ADDRESS)"
-        )
 
     @staticmethod
     def create_erc155_token_ownership_table(db: sqlite3.Connection) -> None:
@@ -97,10 +92,6 @@ class TablesCreate:
                 OWNERSHIP TEXT NOT NULL
             )
             """
-        )
-        db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_erc155_token_ownership_eth_address "
-            "ON erc155_token_ownership(ETH_ADDRESS)"
         )
 
     @staticmethod
@@ -113,8 +104,6 @@ class TablesCreate:
             )
             """
         )
-        db.execute("CREATE INDEX IF NOT EXISTS idx_keys_api_key ON keys(API_KEY)")
-
 
     @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
