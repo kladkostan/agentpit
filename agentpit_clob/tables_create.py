@@ -123,3 +123,5 @@ class TablesCreate:
         # If/when you want ERC155, remember to call:
         # TablesCreate.create_erc155_token_ownership_table(db)
         TablesCreate.create_keys_table(db)
+
+
