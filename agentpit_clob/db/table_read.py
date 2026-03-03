@@ -7,7 +7,7 @@ from agentpit_clob.parse import normalize_eth_address, hex_u256_to_int, parse_32
 from .table_utils import TableUtils
 
 
-class TablesRead:
+class TableRead:
     @staticmethod
     def get_erc20_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
@@ -77,5 +77,5 @@ class TablesRead:
 
     @staticmethod
     def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
-        acct = TablesRead.get_private_key_for_api_key(db, api_key)
+        acct = TableRead.get_private_key_for_api_key(db, api_key)
         return acct.address

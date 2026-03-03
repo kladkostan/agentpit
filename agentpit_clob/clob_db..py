@@ -26,7 +26,7 @@ from enum import Enum
 import uuid
 from pathlib import Path
 
-from agentpit_clob.db.tables_create import TablesCreate
+from agentpit_clob.db.table_create import TableCreate
 
 ORDER_TYPE_GTC = "GTC"
 ORDER_TYPE_GTD = "GTD"
@@ -56,7 +56,7 @@ class ClobDB:
 
         with self._lock:
             with self.db:
-                TablesCreate.create_all_tables(self.db)
+                TableCreate.create_all_tables(self.db)
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
         # All DB / matching errors propagate; no swallowing.

@@ -2,7 +2,7 @@
 import sqlite3
 
 
-class TablesCreate:
+class TableCreate:
     @staticmethod
     def create_trades_table(db: sqlite3.Connection) -> None:
         db.execute(
@@ -107,9 +107,9 @@ class TablesCreate:
 
     @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
-        TablesCreate.create_orders_table(db)
-        TablesCreate.create_trades_table(db)
-        TablesCreate.create_erc20_token_ownership_table(db)
-        TablesCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
-        TablesCreate.create_keys_table(db)
+        TableCreate.create_orders_table(db)
+        TableCreate.create_trades_table(db)
+        TableCreate.create_erc20_token_ownership_table(db)
+        TableCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
+        TableCreate.create_keys_table(db)
 
