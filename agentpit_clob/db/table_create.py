@@ -113,7 +113,7 @@ class TableCreate:
                 MARKET_ID INTEGER PRIMARY KEY,
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
-                TOKEN_IDS TEXT NOT NULL      -- JSON map of u256 hex token IDs
+                ERC155_TOKENS TEXT NOT NULL -- JSON array of [tokenId, label] pairs
             )
             """
         )
