@@ -4,47 +4,49 @@ import sqlite3
 
 class TableUtils:
     @staticmethod
-    def ensure_ownership_row(db: sqlite3.Connection, token_id: str) -> None:
+    def ensure_erc20_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
         db.execute(
             """
-            INSERT INTO token_ownership (TOKEN_ID, OWNERSHIP)
+            INSERT INTO erc20_token_ownership (ETH_ADDRESS, OWNERSHIP)
             VALUES (?, ?)
-            ON CONFLICT(TOKEN_ID) DO NOTHING
+            ON CONFLICT(ETH_ADDRESS) DO NOTHING
             """,
-            (token_id, "{}"),
+            (eth_address, "{}"),
         )
 
     @staticmethod
-    def load_ownership_map(db: sqlite3.Connection, token_id: str) -> dict[str, str]:
+    def load_erc20_ownership_map(
+        db: sqlite3.Connection, eth_address: str
+    ) -> dict[str, str]:
         row = db.execute(
-            "SELECT OWNERSHIP FROM token_ownership WHERE TOKEN_ID = ? LIMIT 1",
-            (token_id,),
+            "SELECT OWNERSHIP FROM erc20_token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+            (eth_address,),
         ).fetchone()
         raw: str = "{}" if row is None or row[0] is None else row[0]
         try:
             m_obj: object = json.loads(raw)
         except (TypeError, json.JSONDecodeError) as e:
             raise ValueError(
-                f"Corrupted OWNERSHIP JSON for {token_id}: {raw!r}"
+                f"Corrupted OWNERSHIP JSON for {eth_address}: {raw!r}"
             ) from e
 
         if not isinstance(m_obj, dict):
             raise ValueError(
-                f"Corrupted OWNERSHIP data for {token_id}: expected dict, got {type(m_obj)}"
+                f"Corrupted OWNERSHIP data for {eth_address}: expected dict, got {type(m_obj)}"
             )
 
         m: dict[str, str] = {}
         for k, v in m_obj.items():
             if not isinstance(k, str) or not isinstance(v, str):
                 raise ValueError(
-                    f"Corrupted OWNERSHIP map for {token_id}: non-str entry {k!r}: {v!r}"
+                    f"Corrupted OWNERSHIP map for {eth_address}: non-str entry {k!r}: {v!r}"
                 )
             m[k] = v
         return m
 
     @staticmethod
-    def store_ownership_map(
-        db: sqlite3.Connection, token_id: str, m: dict[str, str]
+    def store_erc20_ownership_map(
+        db: sqlite3.Connection, eth_address: str, m: dict[str, str]
     ) -> None:
         # Validate map shape before writing
         for k, v in m.items():
@@ -53,6 +55,62 @@ class TableUtils:
                     f"OWNERSHIP map must be dict[str, str], got entry {k!r}: {v!r}"
                 )
         db.execute(
-            "UPDATE token_ownership SET OWNERSHIP = ? WHERE TOKEN_ID = ?",
-            (json.dumps(m, separators=(",", ":")), token_id),
+            "UPDATE erc20_token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+            (json.dumps(m, separators=(",", ":")), eth_address),
+        )
+
+    @staticmethod
+    def ensure_erc155_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
+        db.execute(
+            """
+            INSERT INTO erc155_token_ownership (ETH_ADDRESS, OWNERSHIP)
+            VALUES (?, ?)
+            ON CONFLICT(ETH_ADDRESS) DO NOTHING
+            """,
+            (eth_address, "{}"),
+        )
+
+    @staticmethod
+    def load_erc155_ownership_map(
+        db: sqlite3.Connection, eth_address: str
+    ) -> dict[str, str]:
+        row = db.execute(
+            "SELECT OWNERSHIP FROM erc155_token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+            (eth_address,),
+        ).fetchone()
+        raw: str = "{}" if row is None or row[0] is None else row[0]
+        try:
+            m_obj: object = json.loads(raw)
+        except (TypeError, json.JSONDecodeError) as e:
+            raise ValueError(
+                f"Corrupted OWNERSHIP JSON for {eth_address}: {raw!r}"
+            ) from e
+
+        if not isinstance(m_obj, dict):
+            raise ValueError(
+                f"Corrupted OWNERSHIP data for {eth_address}: expected dict, got {type(m_obj)}"
+            )
+
+        m: dict[str, str] = {}
+        for k, v in m_obj.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                raise ValueError(
+                    f"Corrupted OWNERSHIP map for {eth_address}: non-str entry {k!r}: {v!r}"
+                )
+            m[k] = v
+        return m
+
+    @staticmethod
+    def store_erc155_ownership_map(
+        db: sqlite3.Connection, eth_address: str, m: dict[str, str]
+    ) -> None:
+        # Validate map shape before writing
+        for k, v in m.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                raise TypeError(
+                    f"OWNERSHIP map must be dict[str, str], got entry {k!r}: {v!r}"
+                )
+        db.execute(
+            "UPDATE erc155_token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+            (json.dumps(m, separators=(",", ":")), eth_address),
         )

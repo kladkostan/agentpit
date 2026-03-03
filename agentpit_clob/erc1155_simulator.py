@@ -24,8 +24,8 @@ class ERC115Simulator:
 
         # use context manager for atomic transaction; any exception rolls back
         with db:
-            TableUtils.ensure_ownership_row(db, norm_token_id)
-            ownership_map = TableUtils.load_ownership_map(db, norm_token_id)
+            TableUtils.ensure_erc155_ownership_row(db, norm_token_id)
+            ownership_map = TableUtils.load_erc155_ownership_map(db, norm_token_id)
 
             current = 0
             if norm_key in ownership_map:
@@ -37,7 +37,7 @@ class ERC115Simulator:
 
             ownership_map[norm_key] = Web3.to_hex(new_value).lower()
 
-            TableUtils.store_ownership_map(db, norm_token_id, ownership_map)
+            TableUtils.store_erc155_ownership_map(db, norm_token_id, ownership_map)
 
     @staticmethod
     def transfer(
@@ -60,10 +60,10 @@ class ERC115Simulator:
 
         # use context manager for atomic transaction; any exception rolls back
         with db:
-            TableUtils.ensure_ownership_row(db, norm_src_token)
-            TableUtils.ensure_ownership_row(db, norm_dst_token)
-            src_map = TableUtils.load_ownership_map(db, norm_src_token)
-            dst_map = TableUtils.load_ownership_map(db, norm_dst_token)
+            TableUtils.ensure_erc155_ownership_row(db, norm_src_token)
+            TableUtils.ensure_erc155_ownership_row(db, norm_dst_token)
+            src_map = TableUtils.load_erc155_ownership_map(db, norm_src_token)
+            dst_map = TableUtils.load_erc155_ownership_map(db, norm_dst_token)
 
             raw_src_bal = src_map.get(norm_key)
             src_bal = 0 if raw_src_bal is None else hex_u256_to_int(raw_src_bal)
@@ -82,5 +82,5 @@ class ERC115Simulator:
             src_map[norm_key] = Web3.to_hex(new_src).lower()
             dst_map[norm_key] = Web3.to_hex(new_dst).lower()
 
-            TableUtils.store_ownership_map(db, norm_src_token, src_map)
-            TableUtils.store_ownership_map(db, norm_dst_token, dst_map)
+            TableUtils.store_erc155_ownership_map(db, norm_src_token, src_map)
+            TableUtils.store_erc155_ownership_map(db, norm_dst_token, dst_map)

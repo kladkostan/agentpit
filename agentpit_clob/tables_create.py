@@ -73,17 +73,33 @@ class TablesCreate:
         )
 
     @staticmethod
-    def create_token_ownership_table(db: sqlite3.Connection) -> None:
+    def create_erc20_token_ownership_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
-            CREATE TABLE IF NOT EXISTS token_ownership (
+            CREATE TABLE IF NOT EXISTS erc20_token_ownership (
                 ETH_ADDRESS TEXT PRIMARY KEY,
                 OWNERSHIP TEXT NOT NULL
             )
             """
         )
         db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_token_ownership_eth_address ON token_ownership(ETH_ADDRESS)"
+            "CREATE INDEX IF NOT EXISTS idx_erc20_token_ownership_eth_address "
+            "ON erc20_token_ownership(ETH_ADDRESS)"
+        )
+
+    @staticmethod
+    def create_erc155_token_ownership_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS erc155_token_ownership (
+                ETH_ADDRESS TEXT PRIMARY KEY,
+                OWNERSHIP TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_erc155_token_ownership_eth_address "
+            "ON erc155_token_ownership(ETH_ADDRESS)"
         )
 
     @staticmethod
@@ -103,5 +119,7 @@ class TablesCreate:
     def create_all_tables(db: sqlite3.Connection) -> None:
         TablesCreate.create_orders_table(db)
         TablesCreate.create_trades_table(db)
-        TablesCreate.create_token_ownership_table(db)
+        TablesCreate.create_erc20_token_ownership_table(db)
+        # If/when you want ERC155, remember to call:
+        # TablesCreate.create_erc155_token_ownership_table(db)
         TablesCreate.create_keys_table(db)
