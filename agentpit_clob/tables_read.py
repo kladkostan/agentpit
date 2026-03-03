@@ -12,6 +12,7 @@ class TablesRead:
     def get_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
     ) -> int:
+        # Use ETH address as the row key into token_ownership
         norm_eth = normalize_eth_address(eth_address)
         norm_asset = normalize_eth_address(asset_address)
 

@@ -7,7 +7,7 @@ from .parse import normalize_eth_address, hex_u256_to_int
 from .table_utils import TableUtils
 
 
-class ERC20Simulator:
+class ERC115Simulator:
     @staticmethod
     def mint(
         db: sqlite3.Connection, eth_address: str, asset_address: str, value: int

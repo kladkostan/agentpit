@@ -98,6 +98,7 @@ class TablesCreate:
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_keys_api_key ON keys(API_KEY)")
 
+
     @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
         TablesCreate.create_orders_table(db)
