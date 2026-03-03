@@ -75,44 +75,6 @@ class ERC20Simulator:
     ) -> None:
 
 
-        def _ensure_row(addr: str) -> None:
-            db.execute(
-                """
-                INSERT INTO token_ownership (ETH_ADDRESS, OWNERSHIP)
-                VALUES (?, ?)
-                ON CONFLICT(ETH_ADDRESS) DO NOTHING
-                """,
-                (addr, "{}"),
-            )
-
-        def _load_map(addr: str) -> dict[str, str]:
-            row = db.execute(
-                "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
-                (addr,),
-            ).fetchone()
-            raw: str = "{}" if row is None or row[0] is None else row[0]
-            try:
-                m_obj: object = json.loads(raw)
-            except (TypeError, json.JSONDecodeError):
-                m_obj = {}
-
-            if not isinstance(m_obj, dict):
-                return {}
-
-            return {
-                k: v
-                for k, v in m_obj.items()
-                if isinstance(k, str) and isinstance(v, str)
-            }
-
-        def _store_map(addr: str, m: dict[str, str]) -> None:
-            db.execute(
-                "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
-                (json.dumps(m, separators=(",", ":")), addr),
-            )
-
-
-
         norm_src: str | None = TablesCreate._normalize_eth_address(src_address)
         norm_dst: str | None = TablesCreate._normalize_eth_address(destination_address)
         norm_asset: str | None = TablesCreate._normalize_eth_address(asset_address)
