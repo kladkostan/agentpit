@@ -45,3 +45,17 @@ def normalize_eth_address(addr: str) -> str | None:
     except ValueError:
         return None
     return a
+
+
+def hex_u256_to_int(value: object) -> int:
+    if not isinstance(value, str):
+        raise TypeError(f"Expected hex string, got {type(value)}")
+    s = value.strip().lower()
+    if not s:
+        raise ValueError("Empty hex string")
+    if not s.startswith("0x"):
+        s = "0x" + s
+    n = int(s, 16)
+    if n < 0 or n >= (1 << 256):
+        raise ValueError("Value out of u256 range")
+    return n

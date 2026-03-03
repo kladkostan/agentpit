@@ -26,7 +26,7 @@ from enum import Enum
 import uuid
 from pathlib import Path
 
-from agentpit_clob.tables import Tables
+from agentpit_clob.tables_create import TablesCreate
 
 ORDER_TYPE_GTC = "GTC"
 ORDER_TYPE_GTD = "GTD"
@@ -56,7 +56,7 @@ class ClobDB:
 
         with self._lock:
             with self.db:
-                Tables.create_all_tables(self.db)
+                TablesCreate.create_all_tables(self.db)
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
 

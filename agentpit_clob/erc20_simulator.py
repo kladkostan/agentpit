@@ -2,7 +2,7 @@ from web3 import Web3  # pip install web3
 import json
 import sqlite3
 
-from agentpit_clob.tables import Tables
+from agentpit_clob.tables_create import TablesCreate
 
 
 class ERC20Simulator:
@@ -10,8 +10,8 @@ class ERC20Simulator:
     def mint(
         db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
     ) -> None:
-        norm_eth: str | None = Tables._normalize_eth_address(eth_address)
-        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
+        norm_eth: str | None = TablesCreate._normalize_eth_address(eth_address)
+        norm_asset: str | None = TablesCreate._normalize_eth_address(asset_address)
         if norm_eth is None or norm_asset is None:
             raise ValueError("Invalid eth_address or asset_address")
 
@@ -53,7 +53,7 @@ class ERC20Simulator:
             if isinstance(k, str) and isinstance(v, str)
         }
 
-        current: int = Tables._hex_u256_to_int(ownership_map.get(norm_asset))
+        current: int = TablesCreate._hex_u256_to_int(ownership_map.get(norm_asset))
         new_value: int = current + value
         if new_value >= (1 << 256):
             raise OverflowError("u256 overflow")
@@ -113,9 +113,9 @@ class ERC20Simulator:
 
 
 
-        norm_src: str | None = Tables._normalize_eth_address(src_address)
-        norm_dst: str | None = Tables._normalize_eth_address(destination_address)
-        norm_asset: str | None = Tables._normalize_eth_address(asset_address)
+        norm_src: str | None = TablesCreate._normalize_eth_address(src_address)
+        norm_dst: str | None = TablesCreate._normalize_eth_address(destination_address)
+        norm_asset: str | None = TablesCreate._normalize_eth_address(asset_address)
         if norm_src is None or norm_dst is None or norm_asset is None:
             raise ValueError("Invalid src_address, destination_address, or asset_address")
 
@@ -132,11 +132,11 @@ class ERC20Simulator:
         src_map: dict[str, str] = _load_map(norm_src)
         dst_map: dict[str, str] = _load_map(norm_dst)
 
-        src_bal: int = Tables._hex_u256_to_int(src_map.get(norm_asset))
+        src_bal: int = TablesCreate._hex_u256_to_int(src_map.get(norm_asset))
         if src_bal < value:
             raise ValueError("insufficient balance")
 
-        dst_bal: int = Tables._hex_u256_to_int(dst_map.get(norm_asset))
+        dst_bal: int = TablesCreate._hex_u256_to_int(dst_map.get(norm_asset))
 
         new_src: int = src_bal - value
         new_dst: int = dst_bal + value
