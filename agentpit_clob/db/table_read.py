@@ -104,10 +104,8 @@ class TableRead:
 
         market_id_val, condition_id, description, erc155_tokens_json = row
 
-        try:
-            erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
-        except json.JSONDecodeError:
-            erc155_tokens = []
+        # Do not catch JSON errors; let them propagate.
+        erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
 
         return Market(
             market_id=market_id_val,

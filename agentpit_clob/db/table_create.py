@@ -107,11 +107,6 @@ class TableCreate:
 
     @staticmethod
     def create_markets_table(db: sqlite3.Connection) -> None:
-        # markets: one row per market
-        # MARKET_ID       : INTEGER primary key
-        # CONDITION_ID    : u256 hex string
-        # DESCRIPTION     : human-readable description
-        # ERC155_TOKENS   : JSON array of [tokenId, label] pairs
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS markets (
