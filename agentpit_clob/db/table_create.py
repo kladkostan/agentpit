@@ -106,10 +106,23 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_markets_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS markets (
+                MARKET_ID INTEGER PRIMARY KEY,
+                CONDITION_ID TEXT NOT NULL, -- u256 hex string
+                DESCRIPTION TEXT NOT NULL,  -- human-readable description
+                TOKEN_IDS TEXT NOT NULL      -- JSON map of u256 hex token IDs
+            )
+            """
+        )
+
+    @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
         TableCreate.create_orders_table(db)
         TableCreate.create_trades_table(db)
         TableCreate.create_erc20_token_ownership_table(db)
         TableCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
         TableCreate.create_keys_table(db)
-
+        TableCreate.create_markets_table(db)
