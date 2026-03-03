@@ -1,10 +1,12 @@
 import sqlite3
+import json
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from agentpit_clob.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
 from .table_utils import TableUtils
+from agentpit_clob.datastructures.market import Market
 
 
 class TableRead:
@@ -79,3 +81,37 @@ class TableRead:
     def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
         acct = TableRead.get_private_key_for_api_key(db, api_key)
         return acct.address
+
+    @staticmethod
+    def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:
+        """
+        Fetch a single market by MARKET_ID.
+
+        Returns:
+            Market instance if found, otherwise None.
+        """
+        cur = db.execute(
+            """
+            SELECT MARKET_ID, CONDITION_ID, DESCRIPTION, ERC155_TOKENS
+            FROM markets
+            WHERE MARKET_ID = ?
+            """,
+            (market_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+
+        market_id_val, condition_id, description, erc155_tokens_json = row
+
+        try:
+            erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
+        except json.JSONDecodeError:
+            erc155_tokens = []
+
+        return Market(
+            market_id=market_id_val,
+            condition_id=condition_id,
+            description=description,
+            erc155_tokens=erc155_tokens,
+        )

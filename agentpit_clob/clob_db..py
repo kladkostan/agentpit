@@ -12,14 +12,14 @@ from datetime import datetime
 
 from py_clob_client.clob_types import PostOrdersArgs
 from agentpit_clob.order_response import OrderResponse
-from agentpit_clob.trade import Trade
+from datastructures.trade import Trade
 
 from eth_utils import keccak
 from py_order_utils.utils import prepend_zx
 from py_clob_client.signing.eip712 import get_clob_auth_domain
 from decimal import Decimal, ROUND_HALF_UP
 
-from agentpit_clob.match import Match
+from datastructures.match import Match
 
 from py_clob_client.utilities import order_to_json
 from enum import Enum
