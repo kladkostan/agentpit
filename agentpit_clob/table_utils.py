@@ -4,7 +4,7 @@ import sqlite3
 
 class TableUtils:
     @staticmethod
-    def ensure_row(db: sqlite3.Connection, addr: str) -> None:
+    def ensure_ownership_row(db: sqlite3.Connection, addr: str) -> None:
         db.execute(
             """
             INSERT INTO token_ownership (ETH_ADDRESS, OWNERSHIP)
@@ -15,7 +15,7 @@ class TableUtils:
         )
 
     @staticmethod
-    def load_map(db: sqlite3.Connection, addr: str) -> dict[str, str]:
+    def load_ownership_map(db: sqlite3.Connection, addr: str) -> dict[str, str]:
         row = db.execute(
             "SELECT OWNERSHIP FROM token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
             (addr,),
@@ -36,7 +36,7 @@ class TableUtils:
         }
 
     @staticmethod
-    def store_map(db: sqlite3.Connection, addr: str, m: dict[str, str]) -> None:
+    def store_ownership_map(db: sqlite3.Connection, addr: str, m: dict[str, str]) -> None:
         db.execute(
             "UPDATE token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
             (json.dumps(m, separators=(",", ":")), addr),

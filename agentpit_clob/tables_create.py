@@ -161,8 +161,8 @@ class TablesCreate:
 
         db.execute("BEGIN IMMEDIATE")
         try:
-            TableUtils.ensure_row(db, norm_eth)
-            ownership_map = TableUtils.load_map(db, norm_eth)
+            TableUtils.ensure_ownership_row(db, norm_eth)
+            ownership_map = TableUtils.load_ownership_map(db, norm_eth)
 
             current = 0
             if norm_asset in ownership_map:
@@ -174,7 +174,7 @@ class TablesCreate:
 
             ownership_map[norm_asset] = Web3.to_hex(new_value).lower()
 
-            TableUtils.store_map(db, norm_eth, ownership_map)
+            TableUtils.store_ownership_map(db, norm_eth, ownership_map)
             db.commit()
         except Exception:
             db.rollback()
@@ -203,10 +203,10 @@ class TablesCreate:
 
         db.execute("BEGIN IMMEDIATE")
         try:
-            TableUtils.ensure_row(db, norm_src)
-            TableUtils.ensure_row(db, norm_dst)
-            src_map = TableUtils.load_map(db, norm_src)
-            dst_map = TableUtils.load_map(db, norm_dst)
+            TableUtils.ensure_ownership_row(db, norm_src)
+            TableUtils.ensure_ownership_row(db, norm_dst)
+            src_map = TableUtils.load_ownership_map(db, norm_src)
+            dst_map = TableUtils.load_ownership_map(db, norm_dst)
 
             raw_src_bal = src_map.get(norm_asset)
             src_bal = 0 if raw_src_bal is None else hex_u256_to_int(raw_src_bal)
@@ -225,8 +225,8 @@ class TablesCreate:
             src_map[norm_asset] = Web3.to_hex(new_src).lower()
             dst_map[norm_asset] = Web3.to_hex(new_dst).lower()
 
-            TableUtils.store_map(db, norm_src, src_map)
-            TableUtils.store_map(db, norm_dst, dst_map)
+            TableUtils.store_ownership_map(db, norm_src, src_map)
+            TableUtils.store_ownership_map(db, norm_dst, dst_map)
             db.commit()
         except Exception:
             db.rollback()
