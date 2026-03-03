@@ -1,11 +1,9 @@
-from eth_account import Account
-from eth_account.signers.local import LocalAccount
-from web3 import Web3  # pip install web3
-import json
+# Assumptions : aLL database methods will be called holding a global lock
 import sqlite3
 
+from web3 import Web3  # pip install web3
+
 from .parse import normalize_eth_address, hex_u256_to_int
-from .tables_read import TablesRead
 from .table_utils import TableUtils
 
 
@@ -113,44 +111,11 @@ class TablesCreate:
         TablesCreate.create_keys_table(db)
 
     @staticmethod
-    def get_private_key_for_api_key(
-        db: sqlite3.Connection, api_key: str
-    ) -> LocalAccount:
-        row = db.execute(
-            "SELECT ETH_PRIVATE_KEY FROM keys WHERE API_KEY = ? LIMIT 1",
-            (api_key,),
-        ).fetchone()
-
-        existing_key: bytes | None = (
-            None if row is None else parse_32b_hex_private_key(row[0])
-        )
-        if existing_key is not None:
-            return Account.from_key(existing_key)
-
-        # Missing/invalid: generate, persist, return (atomic).
-        acct: LocalAccount = Account.create()
-        key_hex: str = Web3.to_hex(acct.key)
-
-        with db:
-            db.execute(
-                """
-                INSERT INTO keys (API_KEY, ETH_PRIVATE_KEY)
-                VALUES (?, ?)
-                ON CONFLICT(API_KEY) DO UPDATE SET ETH_PRIVATE_KEY = excluded.ETH_PRIVATE_KEY
-                """,
-                (api_key, key_hex),
-            )
-
-        return acct
-
-    @staticmethod
     def mint(
         db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
     ) -> None:
-        norm_eth: str | None = normalize_eth_address(eth_address)
-        norm_asset: str | None = normalize_eth_address(asset_address)
-        if norm_eth is None or norm_asset is None:
-            raise ValueError("Invalid eth_address or asset_address")
+        norm_eth = normalize_eth_address(eth_address)
+        norm_asset = normalize_eth_address(asset_address)
 
         if not isinstance(value, int):
             raise TypeError("value must be int")
@@ -188,11 +153,9 @@ class TablesCreate:
         value: int,
         asset_address: str,
     ) -> None:
-        norm_src: str | None = normalize_eth_address(src_address)
-        norm_dst: str | None = normalize_eth_address(destination_address)
-        norm_asset: str | None = normalize_eth_address(asset_address)
-        if norm_src is None or norm_dst is None or norm_asset is None:
-            raise ValueError("Invalid src_address, destination_address, or asset_address")
+        norm_src = normalize_eth_address(src_address)
+        norm_dst = normalize_eth_address(destination_address)
+        norm_asset = normalize_eth_address(asset_address)
 
         if not isinstance(value, int):
             raise TypeError("value must be int")

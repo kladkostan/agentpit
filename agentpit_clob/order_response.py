@@ -10,4 +10,3 @@ class OrderResponse:
     remainingSize: str
     avgPrice: Optional[str]
     errorMsg: Optional[str]
-

@@ -59,6 +59,7 @@ class ClobDB:
                 TablesCreate.create_all_tables(self.db)
 
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
+        # All DB / matching errors propagate; no swallowing.
 
         _processed = self._process_expired_orders()
 
