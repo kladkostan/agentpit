@@ -26,7 +26,7 @@ from enum import Enum
 import uuid
 from pathlib import Path
 
-from agentpit_clob.tables_create import TablesCreate
+from agentpit_clob.db.tables_create import TablesCreate
 
 ORDER_TYPE_GTC = "GTC"
 ORDER_TYPE_GTD = "GTD"
@@ -87,8 +87,7 @@ class ClobDB:
         total_requested = int(signed_order.order.makerAmount)
         filled = total_requested - remaining
 
-        # compute volume‑weighted average price from matches
-
+        # matches is never populated here; VWAP is effectively based only on total_spent
         for m in matches:
             size = int(m.trade_size)
             price = int(m.price)

@@ -3,7 +3,7 @@ from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
-from .parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
+from agentpit_clob.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
 from .table_utils import TableUtils
 
 
