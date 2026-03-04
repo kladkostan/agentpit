@@ -1,7 +1,7 @@
 import json
 import sqlite3
 
-from agentpit_clob.datastructures.market import Market
+from agentpit.datastructures.market import Market
 
 
 class TableWrite:

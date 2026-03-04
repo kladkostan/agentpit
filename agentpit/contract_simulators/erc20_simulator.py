@@ -3,8 +3,8 @@ import sqlite3
 
 from web3 import Web3  # pip install web3
 
-from agentpit_clob.utils.parse import normalize_eth_address, hex_u256_to_int
-from agentpit_clob.db.table_utils import TableUtils
+from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
+from agentpit.db.table_utils import TableUtils
 
 
 class ERC20Simulator:

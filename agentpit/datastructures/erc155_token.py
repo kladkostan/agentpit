@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from agentpit_clob.utils.parse import is_hex256
+from agentpit.utils.parse import is_hex256
 
 
 @dataclass(slots=True, init=False)

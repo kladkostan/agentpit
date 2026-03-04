@@ -4,9 +4,9 @@ from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
-from agentpit_clob.utils.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
+from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
 from .table_utils import TableUtils
-from agentpit_clob.datastructures.market import Market
+from agentpit.datastructures.market import Market
 
 
 class TableRead:
