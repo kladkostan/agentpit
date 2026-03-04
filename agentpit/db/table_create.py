@@ -1,6 +1,8 @@
 # Assumptions : aLL database methods will be called holding a global lock
 import sqlite3
 
+from agentpit.datastructures.market_state import MarketState
+
 
 class TableCreate:
     @staticmethod
@@ -105,16 +107,19 @@ class TableCreate:
             """
         )
 
+
     @staticmethod
     def create_markets_table(db: sqlite3.Connection) -> None:
-        # errors propagate; no exception handling here
+        allowed_states = ", ".join(f"'{s.value}'" for s in MarketState)
         db.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS markets (
                 MARKET_ID INTEGER PRIMARY KEY,
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
-                ERC155_TOKENS TEXT NOT NULL -- JSON array of [tokenId, label] pairs
+                ERC155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
+                MARKET_STATE TEXT NOT NULL DEFAULT '{MarketState.DRAFT.value}'
+                    CHECK (MARKET_STATE IN ({allowed_states}))
             )
             """
         )
@@ -128,3 +133,4 @@ class TableCreate:
         TableCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
         TableCreate.create_keys_table(db)
         TableCreate.create_markets_table(db)
+
