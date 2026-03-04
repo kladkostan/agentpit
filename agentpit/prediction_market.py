@@ -1,4 +1,4 @@
-from agentpit_clob.contract_simulators.erc20_simulator import ERC20Simulator
+from agentpit.contract_simulators.erc20_simulator import ERC20Simulator
 
 USDC_TOKEN_ADDRESS: str = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 
@@ -10,4 +10,6 @@ class PredictionMarket:
             raise ValueError("market must have exactly 2 erc155 tokens to split USDC token into them")
 
         owner_usdc_holding = ERC20Simulator.get_balance(self.db, owner_address, USDC_TOKEN_ADDRESS)
+
+
 
