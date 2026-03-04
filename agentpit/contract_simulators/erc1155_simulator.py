@@ -8,7 +8,7 @@ from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit.db.table_utils import TableUtils
 
 
-class ERC115Simulator:
+class ERC1155Simulator:
     @staticmethod
     @validate_arguments(config={"arbitrary_types_allowed": True})
     def mint(
