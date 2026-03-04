@@ -1,28 +1,21 @@
-from dataclasses import dataclass
+from pydantic import BaseModel, field_validator
 
-@dataclass(slots=True, init=False)
-class Match:
+class Match(BaseModel):
     taker_order_id: str
     maker_order_id: str
     price: int
     trade_size: int
 
-    def __init__(
-        self,
-        taker_order_id: str,
-        maker_order_id: str,
-        price: int,
-        trade_size: int,
-    ) -> None:
-        if not isinstance(taker_order_id, str) or not taker_order_id:
-            raise ValueError("taker_order_id must be a non-empty string")
-        if not isinstance(maker_order_id, str) or not maker_order_id:
-            raise ValueError("maker_order_id must be a non-empty string")
-        if not isinstance(price, int) or price < 0:
-            raise ValueError("price must be a non-negative int")
-        if not isinstance(trade_size, int) or trade_size < 0:
-            raise ValueError("trade_size must be a non-negative int")
-        self.taker_order_id = taker_order_id
-        self.maker_order_id = maker_order_id
-        self.price = price
-        self.trade_size = trade_size
+    @field_validator("taker_order_id", "maker_order_id")
+    @classmethod
+    def check_non_empty_str(cls, v: str) -> str:
+        if not isinstance(v, str) or not v:
+            raise ValueError("must be a non-empty string")
+        return v
+
+    @field_validator("price", "trade_size")
+    @classmethod
+    def check_non_negative_int(cls, v: int) -> int:
+        if not isinstance(v, int) or v < 0:
+            raise ValueError("must be a non-negative int")
+        return v

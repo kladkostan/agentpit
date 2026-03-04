@@ -1,4 +1,6 @@
 
+from enum import StrEnum
+
 class MarketState(StrEnum):
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"

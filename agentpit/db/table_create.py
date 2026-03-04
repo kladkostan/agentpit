@@ -107,7 +107,6 @@ class TableCreate:
             """
         )
 
-
     @staticmethod
     def create_markets_table(db: sqlite3.Connection) -> None:
         allowed_states = ", ".join(f"'{s.value}'" for s in MarketState)
@@ -118,6 +117,9 @@ class TableCreate:
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
                 ERC155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
+                START_DATE INTEGER, -- unix timestamp
+                END_DATE INTEGER,   -- unix timestamp
+                RESOLVED_OUTCOME INTEGER, -- index of the winning outcome
                 MARKET_STATE TEXT NOT NULL DEFAULT '{MarketState.DRAFT.value}'
                     CHECK (MARKET_STATE IN ({allowed_states}))
             )
