@@ -31,7 +31,7 @@ def create_lifespan_manager(app: FastAPI, app_settings: Settings):
         yield
         # --- Shutdown ---
         print("Application shutdown...")
-        agentpit_server.clear()
+        agentpit_server.shutdown()
         agentpit_server = None
     return lifespan
 
