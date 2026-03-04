@@ -1,48 +1,41 @@
 # agentpit/fastapi/main.py
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Request
 from pydantic_settings import BaseSettings
 
-from agentpit.common import check_state
 from agentpit.fastapi.agentpit_server import AgentPitServer
-
-# The server will hold long-lived objects
-agentpit_server = None
 
 
 class Settings(BaseSettings):
     model_version: str = "default-model-v1"
 
 
-# Default settings
 settings = Settings()
 
 
-# --- 2. Create a factory for the lifespan manager ---
-def create_lifespan_manager(app: FastAPI, app_settings: Settings):
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        global agentpit_server
-        # --- Startup ---
-        print("Application startup...")
-        print(f"Loading model version: {app_settings.model_version}")
-        agentpit_server = AgentPitServer()
-        yield
-        # --- Shutdown ---
-        print("Application shutdown...")
-        agentpit_server.shutdown()
-        agentpit_server = None
-    return lifespan
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup ---
+    print("Application startup...")
+    print(f"Loading model version: {settings.model_version}")
+    app.state.agentpit_server = AgentPitServer()
+    yield
+    # --- Shutdown ---
+    print("Application shutdown...")
+    app.state.agentpit_server.shutdown()
 
-# --- 3. Create and configure the FastAPI app ---
-app = FastAPI(lifespan=create_lifespan_manager(None, settings))
+
+app = FastAPI(lifespan=lifespan)
+
 
 @app.get("/")
-async def read_root():
-    return {"version": agentpit_server.get_version()}
+def get_version(request: Request):
+    server: AgentPitServer = request.app.state.agentpit_server
+    return {"version": server.get_version()}
 
-# This part is now only for running the app directly
+
+# This part is for running the app directly
 if __name__ == "__main__":
     # pydantic-settings will automatically override defaults with
     # environment variables. For example, run:
