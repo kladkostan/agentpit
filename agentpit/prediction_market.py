@@ -10,14 +10,12 @@ MARKET_TREASURY_ADDRESS: str = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
 
 class PredictionMarket:
     @staticmethod
-    def splitInDBUSDCTokenIntoEIP155TokenForMarket(
+    def splitInDBUSDCTokenIntoEIP155Tokens(
         db: sqlite3.Connection,
         owner_address: str,
         market_id: int,
         usdc_amount: int,
     ) -> None:
-
-        _market = TableRead.read_market(db, market_id)
 
         check_state(usdc_amount > 0, "usdc_amount must be positive")
 
@@ -25,5 +23,9 @@ class PredictionMarket:
         check_state(owner_usdc_holding >= usdc_amount, "Not enough USDC balance to split into market tokens")
 
         ERC20Simulator.transfer(db, owner_address, MARKET_TREASURY_ADDRESS, usdc_amount, USDC_TOKEN_ADDRESS)
+
+        _market = TableRead.read_market(db, market_id)
+
+
 
 
