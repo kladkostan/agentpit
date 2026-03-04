@@ -1,43 +1,50 @@
-import argparse
+# agentpit/fastapi/main.py
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
+from pydantic_settings import BaseSettings
 
-# --- 1. Define and parse command-line arguments ---
-parser = argparse.ArgumentParser()
-parser.add_argument("--model-version", default="default-model-v1", help="Version of the model to load")
-args = parser.parse_args()
+from agentpit.common import check_state
+from agentpit.fastapi.agentpit_server import AgentPitServer
 
-# This dictionary will hold your long-lived objects
-long_lived_objects = {}
+# The server will hold long-lived objects
+agentpit_server = None
+
+
+class Settings(BaseSettings):
+    model_version: str = "default-model-v1"
+
+
+# Default settings
+settings = Settings()
+
 
 # --- 2. Create a factory for the lifespan manager ---
-def create_lifespan_manager(model_version: str):
+def create_lifespan_manager(app: FastAPI, app_settings: Settings):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Code to run on startup
+        global agentpit_server
+        # --- Startup ---
         print("Application startup...")
-        # Use the argument passed from the command line
-        print(f"Loading model version: {model_version}")
-        long_lived_objects["model"] = model_version
+        print(f"Loading model version: {app_settings.model_version}")
+        agentpit_server = AgentPitServer()
         yield
-        # Code to run on shutdown
+        # --- Shutdown ---
         print("Application shutdown...")
-        long_lived_objects.clear()
+        agentpit_server.clear()
+        agentpit_server = None
     return lifespan
 
-# --- 3. Create the app and pass the lifespan manager ---
-# The factory is called with the parsed argument
-lifespan_manager = create_lifespan_manager(args.model_version)
-app = FastAPI(lifespan=lifespan_manager)
-
+# --- 3. Create and configure the FastAPI app ---
+app = FastAPI(lifespan=create_lifespan_manager(None, settings))
 
 @app.get("/")
-async def root():
-    model = long_lived_objects.get("model")
-    return {"message": f"Hello World, using {model}"}
+async def read_root():
+    return {"version": agentpit_server.get_version()}
 
-# --- 4. Run the app programmatically ---
-# This part is needed to handle argument parsing before uvicorn starts
+# This part is now only for running the app directly
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # pydantic-settings will automatically override defaults with
+    # environment variables. For example, run:
+    # MODEL_VERSION="custom-model-v2" python agentpit/fastapi/main.py
+    uvicorn.run("agentpit.fastapi.main:app", host="0.0.0.0", port=8000, reload=True)
