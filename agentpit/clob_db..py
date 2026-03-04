@@ -43,7 +43,7 @@ class OrderStatus(str, Enum):
 
 
 class ClobDB:
-    _STRICT = ConfigDict(strict=True)
+    _STRICT = ConfigDict(strict=True, arbitrary_types_allowed=True)
 
     @validate_call(config=_STRICT)
     def __init__(self, api_key: str, chain_id: int, full_path: Path):
@@ -201,6 +201,7 @@ class ClobDB:
 
         return order_id
 
+    @validate_call(config=_STRICT)
     def _side_as_str(self, order: Order) -> str:
         side_int = int(order.side)
         if side_int == 0:
@@ -211,6 +212,7 @@ class ClobDB:
             raise ValueError(f"Invalid order.side value: {order.side!r} (expected 0=BUY or 1=SELL)")
         return side_str
 
+    @validate_call(config=_STRICT)
     def _signature_type_as_str(self, signature_type: int | str) -> str:
         SIG_TYPE_MAP = {
             0: "EIP712",
@@ -223,6 +225,7 @@ class ClobDB:
         except KeyError:
             raise ValueError(f"Unsupported signatureType: {sig_type_int}")
 
+    @validate_call(config=_STRICT)
     def _match_and_fill_order(self, order_id: str, dry_run: bool = False) -> tuple[int, int, str]:
         taker = self._get_existing_order(order_id)
 
@@ -270,6 +273,7 @@ class ClobDB:
         status = row["status"]
         return status
 
+    @validate_call(config=_STRICT)
     def _sort_candidates(self, candidates: list[Any], taker_side: Literal["BUY", "SELL"]):
         """
         Sorts candidates for Price-Time priority.
@@ -284,6 +288,7 @@ class ClobDB:
             else (-int(m["price"]), int(m["created_at"]))
         )
 
+    @validate_call(config=_STRICT)
     def _get_sorted_candidates(
             self,
             taker_side: Literal["BUY", "SELL"],
@@ -326,6 +331,7 @@ class ClobDB:
         self._sort_candidates(candidates, taker_side)
         return candidates
 
+    @validate_call(config=_STRICT)
     def _fill_order(self, maker, maker_remaining: int, taker, taker_remaining: int, dry_run: bool = False) -> Match:
         trade_size = min(taker_remaining, maker_remaining)
         taker_remaining -= trade_size
@@ -349,6 +355,7 @@ class ClobDB:
         )
         return match
 
+    @validate_call(config=_STRICT)
     def _get_existing_order(self, order_id: str) -> Any:
         taker = self.db.execute(
             """
@@ -364,6 +371,7 @@ class ClobDB:
             raise RuntimeError(f"Taker order {order_id} not found or not live")
         return taker
 
+    @validate_call(config=_STRICT)
     def _update_taker_remaining_in_db(self, order_id: str, taker_remaining: int):
         """
         Update remaining amount and status for the taker order by external order_id.
@@ -379,6 +387,7 @@ class ClobDB:
             (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
 
+    @validate_call(config=_STRICT)
     def _update_maker_remaining_in_db(self, order_id: str, maker_remaining: int):
         remaining_int = int(maker_remaining)
         self.db.execute(
@@ -391,6 +400,7 @@ class ClobDB:
             (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
 
+    @validate_call(config=_STRICT)
     def _compute_polymarket_compatible_order_id(self, order: Order) -> str:
         # Polymarket currently uses the auth domain for order hashes
         domain = get_clob_auth_domain(self.chain_id)
@@ -398,6 +408,7 @@ class ClobDB:
         struct_hash = keccak(signable)
         return prepend_zx(struct_hash.hex())
 
+    @validate_call(config=_STRICT)
     def _insert_trade_row(
             self,
             taker_row: sqlite3.Row,
@@ -477,6 +488,7 @@ class ClobDB:
             ),
         )
 
+    @validate_call(config=_STRICT)
     def _get_price_int(self, order: Order) -> int:
         USDC_DECIMALS = 6
         USDC_SCALE = Decimal(10 ** USDC_DECIMALS)
@@ -505,6 +517,7 @@ class ClobDB:
         scaled = price_dec * USDC_SCALE
         return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
 
+    @validate_call(config=_STRICT)
     def _order_type_as_str(self, order_type: OrderType) -> str:
         if order_type == OrderType.GTC:
             return ORDER_TYPE_GTC
@@ -517,6 +530,7 @@ class ClobDB:
         else:
             raise ValueError(f"Unsupported OrderType: {order_type}")
 
+    @validate_call(config=_STRICT)
     def _process_expired_orders(self) -> int:
         """
         Move all GTD orders that are currently 'live' and whose expiration

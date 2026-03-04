@@ -2,15 +2,17 @@ import sqlite3
 
 
 from web3 import Web3  # pip install web3
-from pydantic import StrictStr, conint, validate_arguments
+from pydantic import ConfigDict, StrictStr, conint, validate_call
 
 from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit.db.table_utils import TableUtils
 
+_STRICT = ConfigDict(strict=True, arbitrary_types_allowed=True)
+
 
 class ERC20Simulator:
     @staticmethod
-    @validate_arguments(config={"arbitrary_types_allowed": True})
+    @validate_call(config=_STRICT)
     def mint(
         db: sqlite3.Connection,
         eth_address: StrictStr,
@@ -41,7 +43,7 @@ class ERC20Simulator:
             TableUtils.store_erc20_ownership_map(db, norm_eth, ownership_map)
 
     @staticmethod
-    @validate_arguments(config={"arbitrary_types_allowed": True})
+    @validate_call(config=_STRICT)
     def transfer(
         db: sqlite3.Connection,
         src_address: StrictStr,
@@ -70,7 +72,7 @@ class ERC20Simulator:
                 raise ValueError(f"Insufficient balance: {src_bal} < {value}")
 
             raw_dst_bal = dst_map.get(norm_asset)
-            dst_bal = 0 if raw_dst_bal is None else hex_u256_to_int(rawDst_bal)
+            dst_bal = 0 if raw_dst_bal is None else hex_u256_to_int(raw_dst_bal)
 
             new_src = src_bal - value
             new_dst = dst_bal + value

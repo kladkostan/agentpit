@@ -1,17 +1,13 @@
 from pydantic import ConfigDict, validate_call
-
 from agentpit.contract_simulators.contract_addresses import EASYNET_USDC_TOKEN_ADDRESS, EASYNET_MARKET_TREASURY_ADDRESS
-
-_STRICT = ConfigDict(strict=True)
-
-
 import sqlite3
 
 from agentpit.common import check_state
 from agentpit.contract_simulators.erc1155_simulator import ERC1155Simulator
 from agentpit.contract_simulators.erc20_simulator import ERC20Simulator
 from agentpit.db.table_read import TableRead
-from pydantic import ConfigDict, validate_call
+
+_STRICT = ConfigDict(strict=True)
 
 class PredictionMarket:
     @staticmethod
@@ -64,7 +60,3 @@ class PredictionMarket:
         ERC20Simulator.transfer(
             db, EASYNET_MARKET_TREASURY_ADDRESS, owner_address, outcome_token_amount, EASYNET_USDC_TOKEN_ADDRESS
         )
-
-
-
-

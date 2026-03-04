@@ -2,15 +2,17 @@ import sqlite3
 
 
 from web3 import Web3  # pip install web3
-from pydantic import StrictStr, conint, validate_arguments
+from pydantic import ConfigDict, StrictStr, conint, validate_call
 
 from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit.db.table_utils import TableUtils
 
+_STRICT = ConfigDict(strict=True, arbitrary_types_allowed=True)
+
 
 class ERC1155Simulator:
     @staticmethod
-    @validate_arguments(config={"arbitrary_types_allowed": True})
+    @validate_call(config=_STRICT)
     def mint(
         db: sqlite3.Connection,
         eth_address: StrictStr,
@@ -42,7 +44,7 @@ class ERC1155Simulator:
             TableUtils.store_erc155_ownership_map(db, norm_token_id, ownership_map)
 
     @staticmethod
-    @validate_arguments(config={"arbitrary_types_allowed": True})
+    @validate_call(config=_STRICT)
     def transfer(
         db: sqlite3.Connection,
         src_address: StrictStr,

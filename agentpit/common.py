@@ -1,6 +1,10 @@
 import inspect
+from pydantic import ConfigDict, validate_call
+
+_STRICT = ConfigDict(strict=True)
 
 
+@validate_call(config=_STRICT)
 def check_state(expression: bool, expr_text: str, msg: str = "") -> None:
     """
     Raises LogicError if `expression` is False, formatting a message similar to the C++ macro.

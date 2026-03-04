@@ -1,2 +1,7 @@
+from pydantic import StrictStr, TypeAdapter
+
 EASYNET_USDC_TOKEN_ADDRESS: str = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
 EASYNET_MARKET_TREASURY_ADDRESS: str = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+
+TypeAdapter(StrictStr).validate_python(EASYNET_USDC_TOKEN_ADDRESS)
+TypeAdapter(StrictStr).validate_python(EASYNET_MARKET_TREASURY_ADDRESS)

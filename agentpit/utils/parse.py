@@ -8,7 +8,7 @@ from eth_typing import HexStr
 from web3 import Web3
 from pydantic import ConfigDict, validate_call
 
-_STRICT = ConfigDict(strict=True)
+_STRICT = ConfigDict(strict=True, validate_default=True)
 
 
 @validate_call(config=_STRICT)
