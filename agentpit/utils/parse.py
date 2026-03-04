@@ -6,9 +6,13 @@ from typing import cast
 
 from eth_typing import HexStr
 from web3 import Web3
+from pydantic import ConfigDict, validate_call
+
+_STRICT = ConfigDict(strict=True)
 
 
-def parse_32b_hex_private_key(value: object) -> bytes:
+@validate_call(config=_STRICT)
+def parse_32b_hex_private_key(value: str) -> bytes:
     """Parse a 32-byte hex-encoded private key.
 
     Accepts strings with or without a 0x prefix.
@@ -30,6 +34,7 @@ def parse_32b_hex_private_key(value: object) -> bytes:
     return b
 
 
+@validate_call(config=_STRICT)
 def normalize_eth_address(addr: str) -> str:
     if not isinstance(addr, str):
         raise TypeError(f"Expected string for ETH address, got {type(addr)}")
@@ -48,7 +53,8 @@ def normalize_eth_address(addr: str) -> str:
     return a
 
 
-def hex_u256_to_int(value: object) -> int:
+@validate_call(config=_STRICT)
+def hex_u256_to_int(value: str) -> int:
     if not isinstance(value, str):
         raise TypeError(f"Expected hex string, got {type(value)}")
     s = value.strip().lower()
@@ -65,6 +71,7 @@ def hex_u256_to_int(value: object) -> int:
     return n
 
 
+@validate_call(config=_STRICT)
 def is_hex256(value: str) -> bool:
     if not isinstance(value, str) or not value:
         return False

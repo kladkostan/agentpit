@@ -2,6 +2,7 @@ import sqlite3
 
 
 from web3 import Web3  # pip install web3
+from pydantic import StrictStr, conint, validate_arguments
 
 from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit.db.table_utils import TableUtils
@@ -9,16 +10,16 @@ from agentpit.db.table_utils import TableUtils
 
 class ERC20Simulator:
     @staticmethod
+    @validate_arguments(config={"arbitrary_types_allowed": True})
     def mint(
-        db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
+        db: sqlite3.Connection,
+        eth_address: StrictStr,
+        asset_address: StrictStr,
+        value: conint(ge=0, lt=1 << 256),
     ) -> None:
         norm_eth = normalize_eth_address(eth_address)
         norm_asset = normalize_eth_address(asset_address)
 
-        if not isinstance(value, int):
-            raise TypeError("value must be int")
-        if value < 0 or value >= (1 << 256):
-            raise ValueError("value must be a u256 (0 <= value < 2**256)")
         if value == 0:
             return
 
@@ -40,21 +41,18 @@ class ERC20Simulator:
             TableUtils.store_erc20_ownership_map(db, norm_eth, ownership_map)
 
     @staticmethod
+    @validate_arguments(config={"arbitrary_types_allowed": True})
     def transfer(
         db: sqlite3.Connection,
-        src_address: str,
-        destination_address: str,
-        value: int,
-        asset_address: str,
+        src_address: StrictStr,
+        destination_address: StrictStr,
+        value: conint(ge=0, lt=1 << 256),
+        asset_address: StrictStr,
     ) -> None:
         norm_src = normalize_eth_address(src_address)
         norm_dst = normalize_eth_address(destination_address)
         norm_asset = normalize_eth_address(asset_address)
 
-        if not isinstance(value, int):
-            raise TypeError("value must be int")
-        if value < 0 or value >= (1 << 256):
-            raise ValueError("value must be a u256 (0 <= value < 2**256)")
         if value == 0 or norm_src == norm_dst:
             return
 
@@ -72,7 +70,7 @@ class ERC20Simulator:
                 raise ValueError(f"Insufficient balance: {src_bal} < {value}")
 
             raw_dst_bal = dst_map.get(norm_asset)
-            dst_bal = 0 if raw_dst_bal is None else hex_u256_to_int(raw_dst_bal)
+            dst_bal = 0 if raw_dst_bal is None else hex_u256_to_int(rawDst_bal)
 
             new_src = src_bal - value
             new_dst = dst_bal + value

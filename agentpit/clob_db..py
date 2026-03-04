@@ -25,6 +25,7 @@ from py_clob_client.utilities import order_to_json
 from enum import Enum
 import uuid
 from pathlib import Path
+from pydantic import ConfigDict, validate_call
 
 from agentpit.db.table_create import TableCreate
 
@@ -42,6 +43,9 @@ class OrderStatus(str, Enum):
 
 
 class ClobDB:
+    _STRICT = ConfigDict(strict=True)
+
+    @validate_call(config=_STRICT)
     def __init__(self, api_key: str, chain_id: int, full_path: Path):
         self.api_key = api_key
         self.chain_id = chain_id
@@ -58,6 +62,7 @@ class ClobDB:
             with self.db:
                 TableCreate.create_all_tables(self.db)
 
+    @validate_call(config=_STRICT)
     def process_new_order(self, signed_order: SignedOrder, order_type: OrderType, post_only: bool):
         # All DB / matching errors propagate; no swallowing.
 
@@ -110,6 +115,7 @@ class ClobDB:
         )
         return json.dumps(response.__dict__)
 
+    @validate_call(config=_STRICT)
     def process_new_orders(self, args: list[PostOrdersArgs]) -> str:
         responses = []
         for arg in args:
@@ -119,6 +125,7 @@ class ClobDB:
             responses.append(response_dict)
         return json.dumps(responses)
 
+    @validate_call(config=_STRICT)
     def add_order_to_db(
             self,
             signed_order: SignedOrder,
@@ -254,6 +261,7 @@ class ClobDB:
 
         return total_spent, taker_remaining, status
 
+    @validate_call(config=_STRICT)
     def get_order_status(self, order_id: str) -> Any:
         row = self.db.execute(
             "SELECT status FROM orders WHERE order_id = ?",
@@ -534,6 +542,7 @@ class ClobDB:
                 )
                 return cur.rowcount
 
+    @validate_call(config=_STRICT)
     def set_order_status(self, order_id: str, status: OrderStatus):
         with self._lock:
             with self.db:
@@ -546,6 +555,7 @@ class ClobDB:
                     (status, order_id)
                 )
 
+    @validate_call(config=_STRICT)
     def set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(self, order_id: str):
         with self._lock:
             with self.db:
@@ -560,6 +570,7 @@ class ClobDB:
                     (OrderStatus.CANCELLED, order_id, ORDER_TYPE_FAK, OrderStatus.LIVE)
                 )
 
+    @validate_call(config=_STRICT)
     def cancel_order(self, order_id: str) -> bool:
         """
         Cancels an order if it is currently LIVE.
@@ -579,6 +590,7 @@ class ClobDB:
                 return cursor.rowcount > 0
 
 
+    @validate_call(config=_STRICT)
     def cancel_orders(self, order_ids: list[str]) -> list[bool]:
         """
         Cancels a batch of orders by calling cancel_order for each ID.

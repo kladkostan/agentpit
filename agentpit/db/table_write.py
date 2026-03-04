@@ -1,24 +1,19 @@
 import json
 import sqlite3
+from pydantic import validate_call
 
 from agentpit.datastructures.market import Market
 
 
 class TableWrite:
     @staticmethod
+    @validate_call
     def create_market(
         db: sqlite3.Connection,
         condition_id: str,
         description: str,
         erc155_tokens: list,
     ) -> Market:
-        if not isinstance(condition_id, str):
-            raise TypeError("condition_id must be str")
-        if not isinstance(description, str):
-            raise TypeError("description must be str")
-        if not isinstance(erc155_tokens, list):
-            raise TypeError("erc155_tokens must be list")
-
         erc155_tokens_json = json.dumps(erc155_tokens, separators=(",", ":"))
 
         with db:

@@ -2,6 +2,7 @@ import sqlite3
 
 
 from web3 import Web3  # pip install web3
+from pydantic import StrictStr, conint, validate_arguments
 
 from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 from agentpit.db.table_utils import TableUtils
@@ -9,16 +10,16 @@ from agentpit.db.table_utils import TableUtils
 
 class ERC115Simulator:
     @staticmethod
+    @validate_arguments(config={"arbitrary_types_allowed": True})
     def mint(
-        db: sqlite3.Connection, eth_address: str, asset_address: str, value: int
+        db: sqlite3.Connection,
+        eth_address: StrictStr,
+        asset_address: StrictStr,
+        value: conint(ge=0, lt=1 << 256),
     ) -> None:
         norm_token_id = normalize_eth_address(eth_address)
         norm_key = normalize_eth_address(asset_address)
 
-        if not isinstance(value, int):
-            raise TypeError("value must be int")
-        if value < 0 or value >= (1 << 256):
-            raise ValueError("value must be a u256 (0 <= value < 2**256)")
         if value == 0:
             return
 
@@ -41,21 +42,18 @@ class ERC115Simulator:
             TableUtils.store_erc155_ownership_map(db, norm_token_id, ownership_map)
 
     @staticmethod
+    @validate_arguments(config={"arbitrary_types_allowed": True})
     def transfer(
         db: sqlite3.Connection,
-        src_address: str,
-        destination_address: str,
-        value: int,
-        asset_address: str,
+        src_address: StrictStr,
+        destination_address: StrictStr,
+        value: conint(ge=0, lt=1 << 256),
+        asset_address: StrictStr,
     ) -> None:
         norm_src_token = normalize_eth_address(src_address)
         norm_dst_token = normalize_eth_address(destination_address)
         norm_key = normalize_eth_address(asset_address)
 
-        if not isinstance(value, int):
-            raise TypeError("value must be int")
-        if value < 0 or value >= (1 << 256):
-            raise ValueError("value must be a u256 (0 <= value < 2**256)")
         if value == 0 or norm_src_token == norm_dst_token:
             return
 

@@ -1,9 +1,11 @@
 import json
 import sqlite3
+from pydantic import validate_call
 
 
 class TableUtils:
     @staticmethod
+    @validate_call
     def ensure_erc20_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
         db.execute(
             """
@@ -15,6 +17,7 @@ class TableUtils:
         )
 
     @staticmethod
+    @validate_call
     def load_erc20_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
@@ -41,21 +44,17 @@ class TableUtils:
         return m
 
     @staticmethod
+    @validate_call
     def store_erc20_ownership_map(
         db: sqlite3.Connection, eth_address: str, m: dict[str, str]
     ) -> None:
-        # Validate map shape before writing
-        for k, v in m.items():
-            if not isinstance(k, str) or not isinstance(v, str):
-                raise TypeError(
-                    f"OWNERSHIP map must be dict[str, str], got entry {k!r}: {v!r}"
-                )
         db.execute(
             "UPDATE erc20_token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
             (json.dumps(m, separators=(",", ":")), eth_address),
         )
 
     @staticmethod
+    @validate_call
     def ensure_erc155_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
         db.execute(
             """
@@ -67,6 +66,7 @@ class TableUtils:
         )
 
     @staticmethod
+    @validate_call
     def load_erc155_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
@@ -93,15 +93,10 @@ class TableUtils:
         return m
 
     @staticmethod
+    @validate_call
     def store_erc155_ownership_map(
         db: sqlite3.Connection, eth_address: str, m: dict[str, str]
     ) -> None:
-        # Validate map shape before writing
-        for k, v in m.items():
-            if not isinstance(k, str) or not isinstance(v, str):
-                raise TypeError(
-                    f"OWNERSHIP map must be dict[str, str], got entry {k!r}: {v!r}"
-                )
         db.execute(
             "UPDATE erc155_token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
             (json.dumps(m, separators=(",", ":")), eth_address),
