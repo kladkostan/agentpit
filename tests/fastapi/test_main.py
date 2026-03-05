@@ -329,4 +329,67 @@ def test_merge_positions_insufficient_tokens():
         assert "Insufficient balance of token" in merge_resp.json()["detail"]
 
 
+def test_resolve_market():
+    with TestClient(main.server) as client:
+        # Create a market
+        market_payload = {
+            "question": "Will the test pass?",
+            "description": "Testing market resolution",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        assert market_resp.status_code == 200
+        market_id = market_resp.json()["market_id"]
 
+        # Verify market is initially in DRAFT state
+        get_resp = client.get(f"/markets/{market_id}")
+        assert get_resp.json()["market_state"] == "DRAFT"
+        assert get_resp.json()["resolved_outcome"] is None
+
+        # Resolve the market with winning outcome index 0 (Yes)
+        resolve_payload = {
+            "winning_outcome_index": 0,
+        }
+        resolve_resp = client.post(f"/markets/{market_id}/resolve", json=resolve_payload)
+        assert resolve_resp.status_code == 200
+        resolved_market = resolve_resp.json()
+        assert resolved_market["market_id"] == market_id
+        assert resolved_market["market_state"] == "RESOLVED"
+        # Print for debugging
+        print(f"Resolved market response: {resolved_market}")
+        assert resolved_market["resolved_outcome"] == 0
+
+        # Verify market state persists
+        get_resp2 = client.get(f"/markets/{market_id}")
+        fetched_market = get_resp2.json()
+        # Print for debugging
+        print(f"Fetched market after resolution: {fetched_market}")
+        assert fetched_market["market_state"] == "RESOLVED"
+        assert fetched_market["resolved_outcome"] == 0
+
+
+def test_resolve_market_invalid_outcome():
+    with TestClient(main.server) as client:
+        # Create a market with 2 outcomes
+        market_payload = {
+            "question": "Test question?",
+            "description": "Test description",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        # Try to resolve with invalid outcome index (out of range)
+        resolve_payload = {
+            "winning_outcome_index": 5,
+        }
+        resolve_resp = client.post(f"/markets/{market_id}/resolve", json=resolve_payload)
+        assert resolve_resp.status_code == 400
+        assert "detail" in resolve_resp.json()
+
+        # Try to resolve with negative outcome index
+        resolve_payload2 = {
+            "winning_outcome_index": -1,
+        }
+        resolve_resp2 = client.post(f"/markets/{market_id}/resolve", json=resolve_payload2)
+        assert resolve_resp2.status_code == 400

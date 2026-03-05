@@ -93,7 +93,9 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS, MARKET_STATE
+            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS,
+                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
+                   RESOLVED_OUTCOME
             FROM markets
             WHERE MARKET_ID = ?
             """,
@@ -103,7 +105,7 @@ class TableRead:
         if row is None:
             return None
 
-        market_id_val, condition_id, question, description, erc155_tokens_json, market_state = row
+        market_id_val, condition_id, question, description, erc155_tokens_json, market_state, resolved_outcome = row
 
         # JSON errors propagate; no exception handling here
         erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
@@ -115,6 +117,7 @@ class TableRead:
             description=description,
             erc155_tokens=erc155_tokens,
             market_state=MarketState(market_state),
+            resolved_outcome=resolved_outcome,
         )
 
     @staticmethod
@@ -137,9 +140,11 @@ class TableRead:
         # Get paginated markets
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS, MARKET_STATE
+            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS,
+                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
+                   RESOLVED_OUTCOME
             FROM markets
-            ORDER BY MARKET_ID DESC
+            ORDER BY MARKET_ID
             LIMIT ? OFFSET ?
             """,
             (limit, offset),
@@ -147,7 +152,7 @@ class TableRead:
 
         markets = []
         for row in cur.fetchall():
-            market_id_val, condition_id, question, description, erc155_tokens_json, market_state = row
+            market_id_val, condition_id, question, description, erc155_tokens_json, market_state, resolved_outcome = row
             erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
             markets.append(Market(
                 question=question,
@@ -156,6 +161,7 @@ class TableRead:
                 description=description,
                 erc155_tokens=erc155_tokens,
                 market_state=MarketState(market_state),
+                resolved_outcome=resolved_outcome,
             ))
 
         return markets, total

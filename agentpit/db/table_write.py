@@ -45,36 +45,38 @@ class TableWrite:
 
     @staticmethod
     def resolve_market(
-        db: sqlite3.Connection, market_id: int, winning_outcome_index: int
+        db: sqlite3.Connection,
+        market_id: int,
+        winning_outcome_index: int,
     ) -> Market:
-        """
-        Resolve a market by setting the winning outcome and updating state to RESOLVED.
-        """
-        with db:
-            # Validate market exists and get its info
-            from agentpit.db.table_read import TableRead
-            market = TableRead.read_market(db, market_id)
-            if market is None:
-                raise ValueError(f"Market {market_id} not found")
+        """Resolve a market with a winning outcome."""
+        # First, read the market to validate
+        from agentpit.db.table_read import TableRead
+        market = TableRead.read_market(db, market_id)
+        if market is None:
+            raise ValueError(f"Market {market_id} not found")
 
-            # Validate winning outcome index is within bounds
-            if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc155_tokens):
-                raise ValueError(
-                    f"Invalid winning outcome index {winning_outcome_index}. "
-                    f"Market has {len(market.erc155_tokens)} outcomes (indices 0-{len(market.erc155_tokens)-1})"
-                )
+        if market.market_state == "RESOLVED":
+            raise ValueError(f"Market {market_id} is already resolved")
 
-            # Update market state and resolved outcome
-            db.execute(
-                """
-                UPDATE markets
-                SET MARKET_STATE = ?, RESOLVED_OUTCOME = ?
-                WHERE MARKET_ID = ?
-                """,
-                (MarketState.RESOLVED.value, winning_outcome_index, market_id),
+        # Validate winning outcome index
+        if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc155_tokens):
+            raise ValueError(
+                f"Invalid winning outcome index {winning_outcome_index}. "
+                f"Market has {len(market.erc155_tokens)} outcomes (indices 0-{len(market.erc155_tokens)-1})"
             )
 
-        # Return updated market
-        from agentpit.db.table_read import TableRead
-        return TableRead.read_market(db, market_id)
+        # Update the market state and resolved outcome
+        db.execute(
+            """
+            UPDATE markets
+            SET market_state = 'RESOLVED',
+                resolved_outcome = ?
+            WHERE market_id = ?
+            """,
+            (winning_outcome_index, market_id),
+        )
+        db.commit()
 
+        # Return the updated market
+        return TableRead.read_market(db, market_id)
