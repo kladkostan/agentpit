@@ -120,7 +120,7 @@ class TableCreate:
                 SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
                 erc1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
-                START_DATE INTEGER, -- unix timestamp
+                START_DATE INTEGER NOT NULL, -- unix timestamp
                 END_DATE INTEGER,   -- unix timestamp
                 RESOLVED_OUTCOME INTEGER, -- index of the winning outcome
                 MARKET_STATE TEXT NOT NULL DEFAULT '{MarketState.DRAFT.value}'

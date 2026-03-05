@@ -9,6 +9,6 @@ class CreateMarketRequest(BaseModel):
     erc1155_tokens: list[tuple[str, str]]
     slug: str
     start_date: int
-    end_date: int
+    end_date: int | None = None
     polymarket_id: int | None = None
 

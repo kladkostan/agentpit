@@ -46,7 +46,7 @@ class TableWrite:
                 request.slug,
                 request.start_date,
                 request.end_date,
-                request.erc1155_tokens_json,
+                erc1155_tokens_json
             ),
         )
 
@@ -56,6 +56,7 @@ class TableWrite:
             polymarket_id=request.polymarket_id,
             condition_id=condition_id_hex,
             description=request.description,
+            slug=request.slug,
             erc1155_tokens=request.erc1155_tokens,
             market_state=MarketState.ACTIVE,
             start_date=request.start_date,

@@ -331,6 +331,13 @@ def sync_polymarket_markets(
         start_date = pm_market.get("startDate")
         end_date = pm_market.get("endDate")
 
+        if (end_date is not None) :
+            date = _iso_to_unix(end_date)
+        else:
+            date = None
+
+
+
         request = CreateMarketRequest(
             question=question,
             description=description,
@@ -338,7 +345,7 @@ def sync_polymarket_markets(
             erc1155_tokens=erc1155_tokens,
             slug=slug,
             start_date=_iso_to_unix(start_date),
-            end_date=_iso_to_unix(end_date)
+            end_date=date
         )
 
         # Skip markets with missing or invalid data

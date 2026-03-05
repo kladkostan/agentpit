@@ -13,7 +13,7 @@ class Market(BaseModel):
     description: str
     erc1155_tokens: list[tuple[str, str]]
     start_date: int
-    end_date: int
+    end_date: Optional[int | None]
     resolved_outcome: Optional[int] = None
     market_state: MarketState
 
