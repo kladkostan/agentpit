@@ -17,6 +17,7 @@ from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
 from agentpit.datastructures.redeem_position_request import RedeemPositionRequest
 from agentpit.datastructures.redeem_position_response import RedeemPositionResponse
 from agentpit.datastructures.cancel_market_response import CancelMarketResponse
+from agentpit.datastructures.portfolio_response import PortfolioResponse, Position
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -110,6 +111,12 @@ class AgentPitServer(FastAPI):
             self.cancel_market,
             methods=["POST"],
             response_model=CancelMarketResponse,
+        )
+        self.add_api_route(
+            "/portfolio/{api_key}",
+            self.get_portfolio,
+            methods=["GET"],
+            response_model=PortfolioResponse,
         )
 
     def _connect_db(self) -> None:
@@ -451,6 +458,57 @@ class AgentPitServer(FastAPI):
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    def get_portfolio(self, api_key: str) -> PortfolioResponse:
+        """
+        Get a summary of a user's holdings, including USDC and outcome tokens.
+        """
+        self._ensure_db()
+        eth_address = TableRead.get_eth_address_for_api_key(self._db, api_key)
+
+        # 1. Get USDC Balance
+        usdc_balance = ERC20Simulator.get_balance(
+            self._db,
+            eth_address=eth_address,
+            asset_address=EASYNET_USDC_TOKEN_ADDRESS,
+        )
+
+        # 2. Get ERC1155 Positions
+        positions = []
+        norm_address = normalize_eth_address(eth_address)
+
+        # Load user's token map. Handle case where user has no entry yet.
+        try:
+            ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+        except sqlite3.OperationalError: # More specific exception
+            ownership_map = {}
+
+        if ownership_map:
+            # We have some tokens. We need to match token_ids to markets.
+            # For simplicity in this simulation, we scan all markets.
+            # In a production DB, we'd have a joinable table for tokens.
+            all_markets, _ = TableRead.list_markets(self._db, limit=10000)
+
+            for market in all_markets:
+                outcomes = market.erc155_tokens
+                for idx, (token_id, label) in enumerate(outcomes):
+                    if token_id in ownership_map:
+                        balance = hex_u256_to_int(ownership_map[token_id])
+                        if balance > 0:
+                            positions.append(Position(
+                                market_id=market.market_id,
+                                question=market.question,
+                                token_id=token_id,
+                                outcome_label=label,
+                                outcome_index=idx,
+                                balance=balance
+                            ))
+
+        return PortfolioResponse(
+            eth_address=eth_address,
+            usdc_balance=usdc_balance,
+            positions=positions
+        )
 
     def shutdown(self) -> None:
         if hasattr(self, "_db") and self._db is not None:

@@ -444,6 +444,38 @@ Get the USDC balance for an API key.
 }
 ```
 
+### GET /portfolio/{api_key}
+Get a summary of a user's holdings, including their USDC balance and outcome token balances across all markets.
+
+**Path Parameters:**
+- `api_key` (required): Your API key
+
+**Response:**
+```json
+{
+  "eth_address": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+  "usdc_balance": 900,
+  "positions": [
+    {
+      "market_id": 1,
+      "question": "Will it rain?",
+      "token_id": "1",
+      "outcome_label": "Yes",
+      "outcome_index": 0,
+      "balance": 100
+    },
+    {
+      "market_id": 1,
+      "question": "Will it rain?",
+      "token_id": "2",
+      "outcome_label": "No",
+      "outcome_index": 1,
+      "balance": 100
+    }
+  ]
+}
+```
+
 ---
 
 ### POST /transfer_usdc

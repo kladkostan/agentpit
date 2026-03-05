@@ -12,6 +12,7 @@ from .test_usdc import *
 from .test_positions import *
 from .test_resolution import *
 from .test_lifecycle import *
+from .test_portfolio import *
 
 
 def test_all():
