@@ -1,6 +1,5 @@
 import json
 import sqlite3
-from pydantic import validate_call
 
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
@@ -8,7 +7,6 @@ from agentpit.datastructures.market_state import MarketState
 
 class TableWrite:
     @staticmethod
-    @validate_call
     def create_market(
         db: sqlite3.Connection,
         condition_id: str,

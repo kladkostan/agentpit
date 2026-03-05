@@ -1,11 +1,9 @@
 import json
 import sqlite3
-from pydantic import validate_call
 
 
 class TableUtils:
     @staticmethod
-    @validate_call
     def ensure_erc20_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
         db.execute(
             """
@@ -17,7 +15,6 @@ class TableUtils:
         )
 
     @staticmethod
-    @validate_call
     def load_erc20_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
@@ -44,7 +41,6 @@ class TableUtils:
         return m
 
     @staticmethod
-    @validate_call
     def store_erc20_ownership_map(
         db: sqlite3.Connection, eth_address: str, m: dict[str, str]
     ) -> None:
@@ -54,7 +50,6 @@ class TableUtils:
         )
 
     @staticmethod
-    @validate_call
     def ensure_erc155_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
         db.execute(
             """
@@ -66,7 +61,6 @@ class TableUtils:
         )
 
     @staticmethod
-    @validate_call
     def load_erc155_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
@@ -93,7 +87,6 @@ class TableUtils:
         return m
 
     @staticmethod
-    @validate_call
     def store_erc155_ownership_map(
         db: sqlite3.Connection, eth_address: str, m: dict[str, str]
     ) -> None:

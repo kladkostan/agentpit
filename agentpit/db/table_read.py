@@ -1,6 +1,5 @@
 import sqlite3
 import json
-from pydantic import validate_call
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
@@ -13,7 +12,6 @@ from agentpit.datastructures.market_state import MarketState
 
 class TableRead:
     @staticmethod
-    @validate_call
     def get_erc20_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
     ) -> int:
@@ -36,7 +34,6 @@ class TableRead:
         return 0
 
     @staticmethod
-    @validate_call
     def get_erc155_asset_ownership(
         db: sqlite3.Connection, eth_address: str, token_id: str
     ) -> int:
@@ -52,7 +49,6 @@ class TableRead:
         return 0
 
     @staticmethod
-    @validate_call
     def get_private_key_for_api_key(
         db: sqlite3.Connection, api_key: str
     ) -> LocalAccount:
@@ -83,13 +79,11 @@ class TableRead:
         return acct
 
     @staticmethod
-    @validate_call
     def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
         acct = TableRead.get_private_key_for_api_key(db, api_key)
         return acct.address
 
     @staticmethod
-    @validate_call
     def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:
         """
         Fetch a single market by MARKET_ID.

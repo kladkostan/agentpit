@@ -1,7 +1,7 @@
 
-from enum import StrEnum
+from enum import Enum
 
-class MarketState(StrEnum):
+class MarketState(str, Enum):
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"

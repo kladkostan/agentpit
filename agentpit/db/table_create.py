@@ -1,13 +1,11 @@
 # Assumptions : aLL database methods will be called holding a global lock
 import sqlite3
-from pydantic import validate_call
 
 from agentpit.datastructures.market_state import MarketState
 
 
 class TableCreate:
     @staticmethod
-    @validate_call
     def create_trades_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
@@ -31,7 +29,6 @@ class TableCreate:
         )
 
     @staticmethod
-    @validate_call
     def create_orders_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
@@ -78,7 +75,6 @@ class TableCreate:
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
 
     @staticmethod
-    @validate_call
     def create_erc20_token_ownership_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
@@ -90,7 +86,6 @@ class TableCreate:
         )
 
     @staticmethod
-    @validate_call
     def create_erc155_token_ownership_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
@@ -102,7 +97,6 @@ class TableCreate:
         )
 
     @staticmethod
-    @validate_call
     def create_keys_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
@@ -114,7 +108,6 @@ class TableCreate:
         )
 
     @staticmethod
-    @validate_call
     def create_markets_table(db: sqlite3.Connection) -> None:
         allowed_states = ", ".join(f"'{s.value}'" for s in MarketState)
         db.execute(
@@ -134,7 +127,6 @@ class TableCreate:
         )
 
     @staticmethod
-    @validate_call
     def create_all_tables(db: sqlite3.Connection) -> None:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(db)
