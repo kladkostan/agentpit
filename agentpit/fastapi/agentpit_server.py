@@ -13,6 +13,9 @@ from agentpit.datastructures.transfer_usdc_response import TransferUsdcResponse
 from agentpit.datastructures.list_markets_response import ListMarketsResponse
 from agentpit.datastructures.split_position_request import SplitPositionRequest
 from agentpit.datastructures.position_response import PositionResponse
+from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
+from agentpit.datastructures.redeem_position_request import RedeemPositionRequest
+from agentpit.datastructures.redeem_position_response import RedeemPositionResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -76,6 +79,18 @@ class AgentPitServer(FastAPI):
             self.merge_positions,
             methods=["POST"],
             response_model=PositionResponse,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/resolve",
+            self.resolve_market,
+            methods=["POST"],
+            response_model=Market,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/redeem_position",
+            self.redeem_position,
+            methods=["POST"],
+            response_model=RedeemPositionResponse,
         )
 
     def _connect_db(self) -> None:
@@ -311,6 +326,82 @@ class AgentPitServer(FastAPI):
             amount=payload.amount,
             collateral_amount=collateral_amount,
             token_balances=token_balances,
+        )
+
+    def resolve_market(self, market_id: int, payload: ResolveMarketRequest) -> Market:
+        """
+        Resolve a market by specifying the winning outcome.
+        After resolution, users can redeem their winning tokens for USDC.
+        """
+        self._ensure_db()
+
+        try:
+            return TableWrite.resolve_market(
+                self._db,
+                market_id=market_id,
+                winning_outcome_index=payload.winning_outcome_index,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    def redeem_position(self, market_id: int, payload: RedeemPositionRequest) -> RedeemPositionResponse:
+        """
+        Redeem outcome tokens for USDC after a market has been resolved.
+        Burns all outcome tokens held by the user.
+        Winning tokens are redeemed at 1 USDC per token, losing tokens get nothing.
+        """
+        self._ensure_db()
+
+        # Get market to check if it's resolved
+        market = TableRead.read_market(self._db, market_id)
+        if not market:
+            raise HTTPException(status_code=404, detail="Market not found")
+
+        if market.market_state != "RESOLVED":
+            raise HTTPException(status_code=400, detail="Market is not resolved yet")
+
+        if market.resolved_outcome is None:
+            raise HTTPException(status_code=400, detail="Market has no resolved outcome")
+
+        # Get user's ETH address
+        eth_address = TableRead.get_eth_address_for_api_key(self._db, payload.api_key)
+
+        # Load user's token balances
+        norm_address = normalize_eth_address(eth_address)
+        TableUtils.ensure_erc155_ownership_row(self._db, norm_address)
+        ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+
+        # Calculate payout and burn all tokens
+        payout_usdc = 0
+        tokens_redeemed = {}
+        winning_token_id = market.erc155_tokens[market.resolved_outcome][0]
+
+        for token_id, _label in market.erc155_tokens:
+            balance = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
+            if balance > 0:
+                tokens_redeemed[token_id] = balance
+                # Only winning tokens get USDC payout
+                if token_id == winning_token_id:
+                    payout_usdc += balance
+                # Burn all tokens (set to 0)
+                ownership_map[token_id] = "0x0"
+
+        # Store updated ownership map (with all tokens burned)
+        TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
+
+        # Mint USDC payout to user if they had winning tokens
+        if payout_usdc > 0:
+            ERC20Simulator.mint(
+                self._db,
+                eth_address=eth_address,
+                asset_address=EASYNET_USDC_TOKEN_ADDRESS,
+                value=payout_usdc,
+            )
+
+        return RedeemPositionResponse(
+            market_id=market_id,
+            payout_usdc=payout_usdc,
+            tokens_redeemed=tokens_redeemed,
         )
 
     def shutdown(self) -> None:
