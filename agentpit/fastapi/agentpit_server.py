@@ -41,7 +41,7 @@ class AgentPitServer(FastAPI):
         self._ensure_db()
         return TableWrite.create_market(
             self._db,
-            condition_id=payload.condition_id,
+            question=payload.question,
             description=payload.description,
             erc155_tokens=payload.erc155_tokens,
         )

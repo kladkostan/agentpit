@@ -115,6 +115,7 @@ class TableCreate:
             CREATE TABLE IF NOT EXISTS markets (
                 MARKET_ID INTEGER PRIMARY KEY,
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
+                QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
                 ERC155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
                 START_DATE INTEGER, -- unix timestamp

@@ -13,7 +13,7 @@ def test_read_root_returns_version():
 def test_create_market():
     with TestClient(main.server) as client:
         payload = {
-            "condition_id": "0x" + "1" * 64,
+            "question": "Will it rain tomorrow?",
             "description": "Will it rain tomorrow?",
             "erc155_tokens": [["1", "Yes"], ["2", "No"]],
         }
@@ -21,8 +21,8 @@ def test_create_market():
         assert resp.status_code == 200
         body = resp.json()
         assert body["market_id"] == 1
-        assert body["condition_id"] == payload["condition_id"]
+        assert body["condition_id"]  # condition_id is computed, just check it exists
         assert body["description"] == payload["description"]
         assert body["erc155_tokens"] == payload["erc155_tokens"]
-        assert body["question"] == payload["description"]
+        assert body["question"] == payload["question"]
         assert body["market_state"] == "DRAFT"

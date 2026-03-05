@@ -4,17 +4,15 @@ from agentpit.utils.parse import is_hex256
 
 
 class CreateMarketRequest(BaseModel):
-    condition_id: str
+    question: str
     description: str
     erc155_tokens: list[tuple[str, str]]
 
-    @field_validator("condition_id")
+    @field_validator("question")
     @classmethod
-    def validate_condition_id(cls, v: str) -> str:
+    def validate_question(cls, v: str) -> str:
         if not isinstance(v, str) or not v:
             raise ValueError("must be a non-empty string")
-        if not is_hex256(v):
-            raise ValueError("must be a 256-bit hex string (64 hex chars, optional 0x prefix)")
         return v
 
     @field_validator("description")

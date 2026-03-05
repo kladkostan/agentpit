@@ -3,16 +3,21 @@ import sqlite3
 
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
+from agentpit.utils.condition_id import compute_condition_id
 
 
 class TableWrite:
     @staticmethod
     def create_market(
         db: sqlite3.Connection,
-        condition_id: str,
+        question: str,
         description: str,
         erc155_tokens: list,
     ) -> Market:
+        # Compute condition_id from question and number of outcomes
+        condition_id = compute_condition_id(question, len(erc155_tokens))
+        condition_id_hex = "0x" + condition_id.hex()
+
         erc155_tokens_json = json.dumps(erc155_tokens, separators=(",", ":"))
 
         with db:
@@ -23,16 +28,16 @@ class TableWrite:
 
             db.execute(
                 """
-                INSERT INTO markets (MARKET_ID, CONDITION_ID, DESCRIPTION, ERC155_TOKENS)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO markets (MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (next_market_id, condition_id, description, erc155_tokens_json),
+                (next_market_id, condition_id_hex, question, description, erc155_tokens_json),
             )
 
         return Market(
-            question=description,
+            question=question,
             market_id=next_market_id,
-            condition_id=condition_id,
+            condition_id=condition_id_hex,
             description=description,
             erc155_tokens=erc155_tokens,
             market_state=MarketState.DRAFT,
