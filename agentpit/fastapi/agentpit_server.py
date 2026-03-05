@@ -11,8 +11,8 @@ from agentpit.datastructures.get_usdc_balance_response import GetUsdcBalanceResp
 from agentpit.datastructures.transfer_usdc_request import TransferUsdcRequest
 from agentpit.datastructures.transfer_usdc_response import TransferUsdcResponse
 from agentpit.datastructures.list_markets_response import ListMarketsResponse
-from agentpit.datastructures.mint_shares_request import MintSharesRequest
-from agentpit.datastructures.shares_response import SharesResponse
+from agentpit.datastructures.split_position_request import SplitPositionRequest
+from agentpit.datastructures.position_response import PositionResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -66,16 +66,16 @@ class AgentPitServer(FastAPI):
             response_model=TransferUsdcResponse,
         )
         self.add_api_route(
-            "/markets/{market_id}/mint_shares",
-            self.mint_shares,
+            "/markets/{market_id}/split_position",
+            self.split_position,
             methods=["POST"],
-            response_model=SharesResponse,
+            response_model=PositionResponse,
         )
         self.add_api_route(
-            "/markets/{market_id}/redeem_shares",
-            self.redeem_shares,
+            "/markets/{market_id}/merge_positions",
+            self.merge_positions,
             methods=["POST"],
-            response_model=SharesResponse,
+            response_model=PositionResponse,
         )
 
     def _connect_db(self) -> None:
@@ -202,10 +202,10 @@ class AgentPitServer(FastAPI):
             new_balance=new_balance,
         )
 
-    def mint_shares(self, market_id: int, payload: MintSharesRequest) -> SharesResponse:
+    def split_position(self, market_id: int, payload: SplitPositionRequest) -> PositionResponse:
         """
-        Mint complete sets of outcome tokens for a market.
-        Burns USDC collateral and mints 1 of each outcome token per set.
+        Split a position into outcome tokens for a market.
+        Burns USDC collateral and mints 1 of each outcome token per complete set.
         """
         self._ensure_db()
 
@@ -250,16 +250,16 @@ class AgentPitServer(FastAPI):
         # Store updated ownership map
         TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
 
-        return SharesResponse(
+        return PositionResponse(
             market_id=market_id,
             amount=payload.amount,
             collateral_amount=collateral_amount,
             token_balances=token_balances,
         )
 
-    def redeem_shares(self, market_id: int, payload: MintSharesRequest) -> SharesResponse:
+    def merge_positions(self, market_id: int, payload: SplitPositionRequest) -> PositionResponse:
         """
-        Redeem complete sets of outcome tokens back to USDC collateral.
+        Merge complete sets of outcome tokens back to USDC collateral.
         Burns 1 of each outcome token per set and mints USDC.
         """
         self._ensure_db()
@@ -306,7 +306,7 @@ class AgentPitServer(FastAPI):
             value=collateral_amount,
         )
 
-        return SharesResponse(
+        return PositionResponse(
             market_id=market_id,
             amount=payload.amount,
             collateral_amount=collateral_amount,
