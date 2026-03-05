@@ -8,6 +8,7 @@ from web3 import Web3
 from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
 from .table_utils import TableUtils
 from agentpit.datastructures.market import Market
+from agentpit.datastructures.market_state import MarketState
 
 
 class TableRead:
@@ -98,7 +99,7 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, DESCRIPTION, ERC155_TOKENS
+            SELECT MARKET_ID, CONDITION_ID, DESCRIPTION, ERC155_TOKENS, MARKET_STATE
             FROM markets
             WHERE MARKET_ID = ?
             """,
@@ -108,14 +109,16 @@ class TableRead:
         if row is None:
             return None
 
-        market_id_val, condition_id, description, erc155_tokens_json = row
+        market_id_val, condition_id, description, erc155_tokens_json, market_state = row
 
         # JSON errors propagate; no exception handling here
         erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
 
         return Market(
+            question=description,
             market_id=market_id_val,
             condition_id=condition_id,
             description=description,
             erc155_tokens=erc155_tokens,
+            market_state=MarketState(market_state),
         )

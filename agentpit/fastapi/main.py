@@ -14,10 +14,6 @@ async def lifespan(server: AgentPitServer):
 
 server = AgentPitServer(lifespan=lifespan)
 
-@server.get("/")
-def get_version():
-    return server.get_version()
-
 # This part is for running the app directly
 if __name__ == "__main__":
     uvicorn.run("agentpit.fastapi.main:app", host="0.0.0.0", port=8000, reload=True)

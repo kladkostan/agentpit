@@ -3,6 +3,7 @@ import sqlite3
 from pydantic import validate_call
 
 from agentpit.datastructures.market import Market
+from agentpit.datastructures.market_state import MarketState
 
 
 class TableWrite:
@@ -31,8 +32,10 @@ class TableWrite:
             )
 
         return Market(
+            question=description,
             market_id=next_market_id,
             condition_id=condition_id,
             description=description,
             erc155_tokens=erc155_tokens,
+            market_state=MarketState.DRAFT,
         )
