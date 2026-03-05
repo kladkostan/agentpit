@@ -16,6 +16,13 @@ from agentpit.datastructures.market import Market
 
 logger = logging.getLogger(__name__)
 
+
+# Silence noisy per-request INFO logs like:
+# "httpx:_client.py:1026 HTTP Request: GET ... 'HTTP/2 200 OK'"
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
 CONDITION_ID_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
 
@@ -134,6 +141,7 @@ def fetch_all_polymarket_markets(
     closed: bool = False,
     active: bool = True,
     archived: bool = False,
+    liquidity_threshold: float = 1000000
 ) -> list[dict]:
     """
     Fetch all markets from Polymarket's Gamma API, paginating through all pages.
@@ -150,6 +158,8 @@ def fetch_all_polymarket_markets(
     all_markets = []
     limit = 500
     offset = 0
+
+    logger.info("Started fetching markets from Polymarket")
 
     # Build query parameters
     query_parts = [f"limit={limit}"]
@@ -186,6 +196,12 @@ def fetch_all_polymarket_markets(
             if not m.get("condition_id"):
                 continue
 
+
+            liquidity = float(m.get("liquidity") or 0)
+
+            if liquidity < liquidity_threshold:
+                continue
+
             # Filter archived if not requested (API might leak them or mock data includes them)
             if not archived and m.get("archived", False):
                 raise ValueError(
@@ -200,11 +216,10 @@ def fetch_all_polymarket_markets(
             # (Test expectations require client-side filtering of expired markets)
             if not closed and _is_market_expired(m):
                 continue
-            logger.info("Market details: %r", m)
             filtered_data.append(m)
 
         all_markets.extend(filtered_data)
-        logger.info(
+        logger.debug(
             "Fetched %d markets (total so far: %d)", len(data), len(all_markets)
         )
 
@@ -282,7 +297,7 @@ def sync_polymarket_markets(
     for pm_market in pm_markets:
         question = pm_market.get("question", "").strip()
         description = pm_market.get("description", "").strip()
-        polymarket_id = pm_market.get("polymarket_id")
+        polymarket_id = pm_market.get("id")
         erc1155_tokens = _polymarket_to_erc1155_tokens(pm_market)
 
         # Skip markets with missing or invalid data
