@@ -10,9 +10,8 @@ from pydantic import validate_call
 
 class TableWrite:
     @staticmethod
-    @validate_call
     def create_market(
-            db,
+            db : sqlite3.Connection,
             request: CreateMarketRequest
     ) -> Market:
         # Compute condition_id from question and number of outcomes
@@ -39,8 +38,8 @@ class TableWrite:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                request.next_market_id,
-                request.condition_id_hex,
+                next_market_id,
+                condition_id_hex,
                 request.polymarket_id,
                 request.question,
                 request.description,

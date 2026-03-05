@@ -1,8 +1,8 @@
-"""Small parsing helpers used across the server implementation."""
-
 from __future__ import annotations
 
+import re
 from typing import cast
+from datetime import datetime, timezone
 
 from eth_typing import HexStr
 from web3 import Web3
@@ -77,3 +77,27 @@ def is_hex256(value: str) -> bool:
         return False
     token_hex = value[2:] if value.lower().startswith("0x") else value
     return len(token_hex) == 64 and all(c in "0123456789abcdefABCDEF" for c in token_hex)
+
+
+@validate_call(config=_STRICT)
+def _iso_to_unix(ts: str) -> int:
+    # Normalize Z to +00:00
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+
+    # Python < 3.11 datetime.fromisoformat strictness fix:
+    # Ensure fractional seconds are exactly 6 digits if present.
+    # Matches the fractional part (e.g., .12428 from .12428+00:00)
+    # and pads/truncates it to 6 digits.
+    if "." in ts:
+        ts = re.sub(
+            r"\.(\d+)",
+            lambda m: "." + m.group(1).ljust(6, "0")[:6],
+            ts,
+            count=1
+        )
+
+    dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())

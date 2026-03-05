@@ -7,31 +7,8 @@ class CreateMarketRequest(BaseModel):
     question: str
     description: str
     erc1155_tokens: list[tuple[str, str]]
+    slug: str
+    start_date: int
+    end_date: int
+    polymarket_id: int | None = None
 
-    @field_validator("question")
-    @classmethod
-    def validate_question(cls, v: str) -> str:
-        if not isinstance(v, str) or not v:
-            raise ValueError("must be a non-empty string")
-        return v
-
-    @field_validator("description")
-    @classmethod
-    def validate_description(cls, v: str) -> str:
-        if not isinstance(v, str) or not v:
-            raise ValueError("must be a non-empty string")
-        return v
-
-    @field_validator("erc1155_tokens")
-    @classmethod
-    def validate_erc1155_tokens(cls, v: list[tuple[str, str]]) -> list[tuple[str, str]]:
-        if not isinstance(v, list):
-            raise ValueError("must be a list of [tokenId, label] pairs")
-        for pair in v:
-            if (
-                not isinstance(pair, (list, tuple))
-                or len(pair) != 2
-                or not all(isinstance(x, str) and x for x in pair)
-            ):
-                raise ValueError("each token pair must be a tuple or list of two non-empty strings")
-        return v
