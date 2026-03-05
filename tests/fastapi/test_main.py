@@ -35,10 +35,35 @@ def test_create_and_get_market():
         assert body["market_state"] == "DRAFT"
 
         # Test getting a non-existent market
-        with TestClient(main.server) as client:
-            resp = client.get("/markets/9999")
-            assert resp.status_code == 404
-            assert resp.json()["detail"] == "Market not found"
+        resp = client.get("/markets/9999")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Market not found"
+
+
+def test_mint_usdc():
+    with TestClient(main.server) as client:
+        payload = {
+            "api_key": "test_api_key_123",
+            "amount": 1000000,
+        }
+        resp = client.post("/mint_usdc", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["eth_address"]  # ETH address is generated
+        assert body["amount"] == payload["amount"]
+        assert body["new_balance"] == payload["amount"]
+
+        # Mint again to the same API key
+        payload2 = {
+            "api_key": "test_api_key_123",
+            "amount": 500000,
+        }
+        resp2 = client.post("/mint_usdc", json=payload2)
+        assert resp2.status_code == 200
+        body2 = resp2.json()
+        assert body2["eth_address"] == body["eth_address"]  # Same address
+        assert body2["amount"] == payload2["amount"]
+        assert body2["new_balance"] == payload["amount"] + payload2["amount"]
 
 
 
