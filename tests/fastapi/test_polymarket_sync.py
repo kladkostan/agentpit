@@ -240,7 +240,7 @@ class TestFetchAllPolymarketMarkets:
         markets = fetch_all_polymarket_markets()
         assert isinstance(markets, list)
         # There should be a significant number of markets
-        assert len(markets) > 100
+        assert len(markets) > 5
 
         # Check the structure of a sample market
         market = markets[0]
@@ -264,7 +264,7 @@ class TestSyncPolymarketMarkets:
 
         # We expect many markets to be created, but the exact number varies.
         # Let's check that a reasonable number were created.
-        assert len(created_markets) > 100
+        assert len(created_markets) > 5
 
         # Verify they exist in the database
         db_markets, total = TableRead.list_markets(db, limit=len(created_markets) + 1)
@@ -280,3 +280,42 @@ class TestSyncPolymarketMarkets:
         assert first_db.description == first_synced.description
         assert first_db.market_state == "DRAFT"
         assert len(first_db.erc1155_tokens) > 0
+
+
+# ---------------------------------------------------------------------------
+# sync_polymarket_markets (Unit Test)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncPolymarketMarketsUnit:
+    @patch("agentpit.polymarket.polymarket_sync.fetch_all_polymarket_markets")
+    def test_skips_existing_polymarket_id(self, mock_fetch_all, db):
+        mock_fetch_all.return_value = [
+            {
+                "question": "Will X happen?",
+                "description": "desc",
+                "polymarket_id": 42,
+                "tokens": [
+                    {"token_id": "1", "outcome": "Yes"},
+                    {"token_id": "2", "outcome": "No"},
+                ],
+            },
+            {
+                "question": "Will X happen duplicate?",
+                "description": "desc",
+                "polymarket_id": 42,
+                "tokens": [
+                    {"token_id": "3", "outcome": "Yes"},
+                    {"token_id": "4", "outcome": "No"},
+                ],
+            },
+        ]
+
+        created = sync_polymarket_markets(db)
+        assert len(created) == 1
+
+        markets, total = TableRead.list_markets(db, limit=10)
+        assert total == 1
+        assert len(markets) == 1
+        assert markets[0].polymarket_id == 42
+

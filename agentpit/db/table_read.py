@@ -12,6 +12,17 @@ from agentpit.datastructures.market_state import MarketState
 
 class TableRead:
     @staticmethod
+    def market_exists_by_polymarket_id(
+        db: sqlite3.Connection, polymarket_id: int
+    ) -> bool:
+        """Return True if a market row exists for the given Polymarket id."""
+        row = db.execute(
+            "SELECT 1 FROM markets WHERE POLYMARKET_ID = ? LIMIT 1",
+            (polymarket_id,),
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
     def get_erc20_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
     ) -> int:
@@ -192,4 +203,3 @@ class TableRead:
                 "details": json.loads(row[4]) if row[4] else {},
             })
         return transactions
-

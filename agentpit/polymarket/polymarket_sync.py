@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from py_clob_client.http_helpers.helpers import get
 
 from agentpit.db.table_write import TableWrite
+from agentpit.db.table_read import TableRead
 from agentpit.datastructures.market import Market
 
 logger = logging.getLogger(__name__)
@@ -297,7 +298,7 @@ def sync_polymarket_markets(
     for pm_market in pm_markets:
         question = pm_market.get("question", "").strip()
         description = pm_market.get("description", "").strip()
-        polymarket_id = pm_market.get("id")
+        polymarket_id = pm_market.get("polymarket_id")
         erc1155_tokens = _polymarket_to_erc1155_tokens(pm_market)
 
         # Skip markets with missing or invalid data
@@ -314,6 +315,16 @@ def sync_polymarket_markets(
             )
             continue
 
+        if polymarket_id is not None and TableRead.market_exists_by_polymarket_id(
+            db, polymarket_id
+        ):
+            logger.debug(
+                "Skipping market '%s': polymarket_id=%s already exists",
+                question,
+                polymarket_id,
+            )
+            continue
+
         # Default description if empty
         if not description:
             description = question
@@ -326,7 +337,7 @@ def sync_polymarket_markets(
                 erc1155_tokens=erc1155_tokens,
                 polymarket_id=polymarket_id,
             )
-            logger.debug("Created local market #%d: %s", market.market_id, question)
+            logger.info("Created local market #%d: %s", market.market_id, market)
             created_markets.append(market)
 
         except Exception:
