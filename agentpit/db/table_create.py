@@ -128,6 +128,21 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_transactions_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transactions (
+                transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                api_key TEXT NOT NULL,
+                transaction_type TEXT NOT NULL,
+                market_id INTEGER,
+                details TEXT
+            )
+            """
+        )
+
+    @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(db)
@@ -136,3 +151,4 @@ class TableCreate:
         TableCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
         TableCreate.create_keys_table(db)
         TableCreate.create_markets_table(db)
+        TableCreate.create_transactions_table(db)

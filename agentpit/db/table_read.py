@@ -165,3 +165,29 @@ class TableRead:
             ))
 
         return markets, total
+
+    @staticmethod
+    def get_transaction_history(db: sqlite3.Connection, api_key: str) -> list:
+        """
+        Fetch the transaction history for a given API key.
+        """
+        cursor = db.execute(
+            """
+            SELECT transaction_id, timestamp, transaction_type, market_id, details
+            FROM transactions
+            WHERE api_key = ?
+            ORDER BY timestamp DESC
+            """,
+            (api_key,),
+        )
+        transactions = []
+        for row in cursor.fetchall():
+            transactions.append({
+                "transaction_id": row[0],
+                "timestamp": row[1],
+                "transaction_type": row[2],
+                "market_id": row[3],
+                "details": json.loads(row[4]) if row[4] else {},
+            })
+        return transactions
+

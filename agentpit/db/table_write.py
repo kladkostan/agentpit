@@ -199,3 +199,21 @@ class TableWrite:
 
         return TableRead.read_market(db, market_id), refunds_processed
 
+    @staticmethod
+    def log_transaction(
+        db: sqlite3.Connection,
+        api_key: str,
+        transaction_type: str,
+        market_id: int | None,
+        details: dict,
+    ) -> None:
+        """Log a transaction to the database."""
+        details_json = json.dumps(details)
+        db.execute(
+            """
+            INSERT INTO transactions (api_key, transaction_type, market_id, details)
+            VALUES (?, ?, ?, ?)
+            """,
+            (api_key, transaction_type, market_id, details_json),
+        )
+        db.commit()

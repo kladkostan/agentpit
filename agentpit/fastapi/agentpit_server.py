@@ -18,6 +18,7 @@ from agentpit.datastructures.redeem_position_request import RedeemPositionReques
 from agentpit.datastructures.redeem_position_response import RedeemPositionResponse
 from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.datastructures.portfolio_response import PortfolioResponse, Position
+from agentpit.datastructures.transaction_history_response import TransactionHistoryResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -117,6 +118,12 @@ class AgentPitServer(FastAPI):
             self.get_portfolio,
             methods=["GET"],
             response_model=PortfolioResponse,
+        )
+        self.add_api_route(
+            "/markets/history/{api_key}",
+            self.get_transaction_history,
+            methods=["GET"],
+            response_model=TransactionHistoryResponse,
         )
 
     def _connect_db(self) -> None:
@@ -291,6 +298,18 @@ class AgentPitServer(FastAPI):
         # Store updated ownership map
         TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
 
+        # Log the transaction
+        TableWrite.log_transaction(
+            self._db,
+            api_key=payload.api_key,
+            transaction_type="SPLIT",
+            market_id=market_id,
+            details={
+                "amount": payload.amount,
+                "collateral_burned": collateral_amount,
+            },
+        )
+
         return PositionResponse(
             market_id=market_id,
             amount=payload.amount,
@@ -345,6 +364,18 @@ class AgentPitServer(FastAPI):
             eth_address=eth_address,
             asset_address=EASYNET_USDC_TOKEN_ADDRESS,
             value=collateral_amount,
+        )
+
+        # Log the transaction
+        TableWrite.log_transaction(
+            self._db,
+            api_key=payload.api_key,
+            transaction_type="MERGE",
+            market_id=market_id,
+            details={
+                "amount": payload.amount,
+                "collateral_minted": collateral_amount,
+            },
         )
 
         return PositionResponse(
@@ -423,6 +454,18 @@ class AgentPitServer(FastAPI):
                 asset_address=EASYNET_USDC_TOKEN_ADDRESS,
                 value=payout_usdc,
             )
+
+        # Log the transaction
+        TableWrite.log_transaction(
+            self._db,
+            api_key=payload.api_key,
+            transaction_type="REDEEM",
+            market_id=market_id,
+            details={
+                "payout_usdc": payout_usdc,
+                "tokens_redeemed": tokens_redeemed,
+            },
+        )
 
         return RedeemPositionResponse(
             market_id=market_id,
@@ -508,6 +551,18 @@ class AgentPitServer(FastAPI):
             eth_address=eth_address,
             usdc_balance=usdc_balance,
             positions=positions
+        )
+
+    def get_transaction_history(self, api_key: str) -> TransactionHistoryResponse:
+        """
+        Get a user's transaction history.
+        """
+        self._ensure_db()
+        eth_address = TableRead.get_eth_address_for_api_key(self._db, api_key)
+        transactions = TableRead.get_transaction_history(self._db, api_key)
+        return TransactionHistoryResponse(
+            eth_address=eth_address,
+            transactions=transactions,
         )
 
     def shutdown(self) -> None:
