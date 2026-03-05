@@ -5,8 +5,6 @@ import pytest
 
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
-
-from agentpit.fastapi.agentpit_server import AgentPitServer
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _is_market_expired,
@@ -101,26 +99,29 @@ class TestFetchAllPolymarketMarketsUnit:
         mock_get.return_value = []
         fetch_all_polymarket_markets()
         url = mock_get.call_args[0][0]
-        assert "limit=100" in url
+        assert "limit=500" in url
         assert "offset=0" in url
+        assert "archived=false" in url
+        assert "active=true" in url
+        assert "closed=false" in url
 
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_include_archived(self, mock_get):
-        mock_get.return_value = {"next_cursor": END_CURSOR, "data": []}
+        mock_get.return_value = []
         fetch_all_polymarket_markets(archived=True)
         url = mock_get.call_args[0][0]
         assert "archived=true" in url
 
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_include_closed(self, mock_get):
-        mock_get.return_value = {"next_cursor": END_CURSOR, "data": []}
+        mock_get.return_value = []
         fetch_all_polymarket_markets(closed=True)
         url = mock_get.call_args[0][0]
         assert "closed=true" in url
 
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_inactive(self, mock_get):
-        mock_get.return_value = {"next_cursor": END_CURSOR, "data": []}
+        mock_get.return_value = []
         fetch_all_polymarket_markets(active=False)
         url = mock_get.call_args[0][0]
         assert "active=false" in url
@@ -128,14 +129,34 @@ class TestFetchAllPolymarketMarketsUnit:
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_filters_expired_markets(self, mock_get):
         """Markets with end_date_iso in the past should be excluded."""
-        mock_get.return_value = {
-            "next_cursor": END_CURSOR,
-            "data": [
-                {"question": "Expired", "end_date_iso": "2020-01-01T00:00:00Z"},
-                {"question": "Active", "end_date_iso": "2099-12-31T00:00:00Z"},
-                {"question": "No date"},
-            ],
-        }
+        mock_get.return_value = [
+            {
+                "condition_id": "0x" + "1" * 64,
+                "question": "Expired",
+                "end_date_iso": "2020-01-01T00:00:00Z",
+                "archived": False,
+                "active": True,
+                "closed": False,
+                "liquidity": 2_000_000,
+            },
+            {
+                "condition_id": "0x" + "2" * 64,
+                "question": "Active",
+                "end_date_iso": "2099-12-31T00:00:00Z",
+                "archived": False,
+                "active": True,
+                "closed": False,
+                "liquidity": 2_000_000,
+            },
+            {
+                "condition_id": "0x" + "3" * 64,
+                "question": "No date",
+                "archived": False,
+                "active": True,
+                "closed": False,
+                "liquidity": 2_000_000,
+            },
+        ]
         result = fetch_all_polymarket_markets()
         questions = [m["question"] for m in result]
         assert "Expired" not in questions
@@ -146,28 +167,40 @@ class TestFetchAllPolymarketMarketsUnit:
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_pagination(self, mock_get):
         """Test that it loops through pages using offset."""
-        # Page 1 (full), Page 2 (partial/empty) to stop
-        mock_get.side_effect = [
-            [{"question": "M" + str(i)} for i in range(100)],
-            [{"question": "Last"}],
+        page1 = [
+            {
+                "condition_id": f"0x{i:064x}",
+                "question": f"M{i}",
+                "end_date_iso": "2099-12-31T00:00:00Z",
+                "archived": False,
+                "active": True,
+                "closed": False,
+                "liquidity": 2_000_000,
+            }
+            for i in range(1, 501)
         ]
+        page2 = [
+            {
+                "condition_id": "0x" + "f" * 64,
+                "question": "Last",
+                "end_date_iso": "2099-12-31T00:00:00Z",
+                "archived": False,
+                "active": True,
+                "closed": False,
+                "liquidity": 2_000_000,
+            }
+        ]
+
+        mock_get.side_effect = [page1, page2]
         result = fetch_all_polymarket_markets()
-        assert len(result) == 101
-
-        # Check calls
+        assert len(result) == 501
         assert mock_get.call_count == 2
-
-        call1 = mock_get.call_args_list[0][0][0]
-        assert "offset=0" in call1
-
-        call2 = mock_get.call_args_list[1][0][0]
-        assert "offset=100" in call2
+        assert "offset=0" in mock_get.call_args_list[0][0][0]
+        assert "offset=500" in mock_get.call_args_list[1][0][0]
 
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_pagination_stops_on_empty_list(self, mock_get):
-        mock_get.side_effect = [
-            [],
-        ]
+        mock_get.side_effect = [[]]
         result = fetch_all_polymarket_markets()
         assert len(result) == 0
         assert mock_get.call_count == 1
@@ -175,12 +208,16 @@ class TestFetchAllPolymarketMarketsUnit:
     @patch("agentpit.polymarket.polymarket_sync.get")
     def test_raises_on_leaked_archived_markets(self, mock_get):
         """Archived markets leaked by the API should raise an exception."""
-        # Gamma API returns a list
         mock_get.return_value = [
-            {"question": "Archived", "archived": True},
-            {"question": "Not archived", "archived": False},
+            {
+                "condition_id": "0x" + "a" * 64,
+                "question": "Archived",
+                "archived": True,
+                "active": True,
+                "closed": False,
+                "liquidity": 2_000_000,
+            },
         ]
-
         with pytest.raises(ValueError, match="returned archived market"):
             fetch_all_polymarket_markets(archived=False)
 

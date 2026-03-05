@@ -101,6 +101,7 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "active", ["isActive"])
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
+    _coalesce_key(market, "liquidity", ["liquidityNum", "liquidityClob"])
 
     # Ensure normalized source id is either int-like or None.
     pmid = market.get("polymarket_id")
@@ -193,12 +194,13 @@ def fetch_all_polymarket_markets(
         for m in data:
             m = _normalize_market_fields(m)
 
-            # Skip markets without a valid condition_id
             if not m.get("condition_id"):
                 continue
 
-
-            liquidity = float(m.get("liquidity") or 0)
+            try:
+                liquidity = float(m.get("liquidity") or 0)
+            except (TypeError, ValueError):
+                liquidity = 0.0
 
             if liquidity < liquidity_threshold:
                 continue
@@ -250,7 +252,7 @@ def fetch_polymarket_market(
             result = get(f"{host}/markets?conditionId={condition_id}")
         if isinstance(result, list) and len(result) > 0:
             market = _normalize_market_fields(result[0])
-            if market.get("condition_id") != condition_id:
+            if (market.get("condition_id") or "").lower() != condition_id.lower():
                 return None
             return market
     except Exception as e:
