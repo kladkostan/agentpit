@@ -160,12 +160,19 @@ class TableRead:
         count_cur = db.execute("SELECT COUNT(*) FROM markets")
         total = count_cur.fetchone()[0]
 
-        # Get paginated markets
+        # Get paginated markets including start/end dates
         cur = db.execute(
             """
-            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
+            SELECT MARKET_ID,
+                   POLYMARKET_ID,
+                   CONDITION_ID,
+                   QUESTION,
+                   DESCRIPTION,
+                   erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
-                   RESOLVED_OUTCOME
+                   RESOLVED_OUTCOME,
+                   START_DATE,
+                   END_DATE
             FROM markets
             ORDER BY MARKET_ID
             LIMIT ? OFFSET ?
@@ -173,20 +180,35 @@ class TableRead:
             (limit, offset),
         )
 
-        markets = []
+        markets: list[Market] = []
         for row in cur.fetchall():
-            market_id_val, polymarket_id, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
+            (
+                market_id_val,
+                polymarket_id,
+                condition_id,
+                question,
+                description,
+                erc1155_tokens_json,
+                market_state,
+                resolved_outcome,
+                start_date,
+                end_date,
+            ) = row
             erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
-            markets.append(Market(
-                question=question,
-                market_id=market_id_val,
-                polymarket_id=polymarket_id,
-                condition_id=condition_id,
-                description=description,
-                erc1155_tokens=erc1155_tokens,
-                market_state=MarketState(market_state),
-                resolved_outcome=resolved_outcome,
-            ))
+            markets.append(
+                Market(
+                    question=question,
+                    market_id=market_id_val,
+                    polymarket_id=polymarket_id,
+                    condition_id=condition_id,
+                    description=description,
+                    erc1155_tokens=erc1155_tokens,
+                    market_state=MarketState(market_state),
+                    resolved_outcome=resolved_outcome,
+                    start_date=start_date or 0,
+                    end_date=end_date or 0,
+                )
+            )
 
         return markets, total
 

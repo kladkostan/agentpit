@@ -1,4 +1,5 @@
 import sqlite3
+import json
 
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
@@ -12,9 +13,9 @@ class TableWrite:
         question: str,
         description: str,
         erc1155_tokens: list,
-        slug: str,
-        start_date: int,
-        end_date: int,
+        slug: str | None = None,
+        start_date: int | None = None,
+        end_date: int | None = None,
         polymarket_id: int | None = None,
     ) -> Market:
         # Compute condition_id from question and number of outcomes
@@ -49,9 +50,9 @@ class TableWrite:
                 polymarket_id,
                 question,
                 description,
-                slug,
-                start_date,
-                end_date,
+                slug or "",
+                start_date or 0,
+                end_date or 0,
                 erc1155_tokens_json,
             ),
         )
@@ -64,7 +65,7 @@ class TableWrite:
             description=description,
             erc1155_tokens=erc1155_tokens,
             market_state=MarketState.DRAFT,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=start_date or 0,
+            end_date=end_date or 0,
             resolved_outcome=None,
         )
