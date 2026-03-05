@@ -9,6 +9,7 @@ import json
 import re
 from datetime import datetime, timezone
 
+from agentpit.datastructures.create_market_request import CreateMarketRequest
 from py_clob_client.http_helpers.helpers import get
 
 from agentpit.db.table_write import TableWrite
@@ -317,13 +318,27 @@ def sync_polymarket_markets(
         A list of locally-created Market objects.
     """
     pm_markets = fetch_all_polymarket_markets(host)
-    created_markets: list[Market] = []
+    created_markets = []
 
     for pm_market in pm_markets:
+        logger.info("Processing market: %s", pm_market)
         question = pm_market.get("question", "").strip()
         description = pm_market.get("description", "").strip()
-        polymarket_id = pm_market.get("polymarket_id")
+        polymarket_id = pm_market.get("id")
         erc1155_tokens = _polymarket_to_erc1155_tokens(pm_market)
+        slug = pm_market.get("slug")
+        start_date = pm_market.get("startDate")
+        end_date = pm_market.get("endDate")
+
+        request = CreateMarketRequest(
+            question=question,
+            description=description,
+            polymarket_id=polymarket_id,
+            erc1155_tokens=erc1155_tokens,
+            slug=slug,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         # Skip markets with missing or invalid data
         if not question:
