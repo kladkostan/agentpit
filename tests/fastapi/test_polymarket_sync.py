@@ -5,6 +5,8 @@ import pytest
 
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
+
+from agentpit.fastapi.agentpit_server import AgentPitServer
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _is_market_expired,
@@ -13,6 +15,7 @@ from agentpit.polymarket.polymarket_sync import (
     fetch_polymarket_market,
     sync_polymarket_markets,
 )
+
 
 
 @pytest.fixture()

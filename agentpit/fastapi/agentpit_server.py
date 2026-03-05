@@ -3,6 +3,7 @@ import os
 import sqlite3
 from fastapi import FastAPI, HTTPException
 from web3 import Web3
+import logging
 
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.mint_usdc_request import MintUsdcRequest
@@ -32,6 +33,7 @@ from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 class AgentPitServer(FastAPI):
     def __init__(self, *args, db_path: str | None = None, **kwargs):
         super().__init__(*args, **kwargs)
+        AgentPitServer.configureLogging()
         self._db_path = db_path or os.getenv("AGENTPIT_DB_PATH", ":memory:")
         self._connect_db()
         self.add_api_route("/", self.get_version, methods=["GET"])
@@ -576,3 +578,17 @@ class AgentPitServer(FastAPI):
             self._db.close()
             self._db = None
         print("AgentPitServer is shutting down...")
+
+    @staticmethod
+    def configureLogging():
+        root = logging.getLogger()
+        root.setLevel(logging.INFO)
+
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+
+        root.handlers.clear()
+        root.addHandler(handler)
