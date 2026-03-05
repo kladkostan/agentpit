@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 
 from agentpit.datastructures.create_market_request import CreateMarketRequest
+from agentpit.datastructures.market_state import MarketState
 from agentpit.utils.parse import _iso_to_unix
 from py_clob_client.http_helpers.helpers import get
 
@@ -335,6 +336,18 @@ def sync_polymarket_markets(
         else:
             date = None
 
+        active = pm_market.get("active")
+        closed = pm_market.get("closed")
+
+        state = MarketState.DRAFT
+        if active and not closed :
+            state = MarketState.ACTIVE
+        elif not active and closed:
+            state = MarketState.RESOLVING
+        elif closed and active:
+            state = MarketState.RESOLVED
+
+
 
 
         request = CreateMarketRequest(
@@ -344,7 +357,8 @@ def sync_polymarket_markets(
             erc1155_tokens=erc1155_tokens,
             slug=slug,
             start_date=_iso_to_unix(start_date),
-            end_date=date
+            end_date=date,
+            state = state
         )
 
         # Skip markets with missing or invalid data

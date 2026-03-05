@@ -1,5 +1,6 @@
 from pydantic import field_validator, BaseModel
 
+from agentpit.datastructures.market_state import MarketState
 from agentpit.utils.parse import is_hex256
 
 
@@ -11,4 +12,5 @@ class CreateMarketRequest(BaseModel):
     start_date: int
     end_date: int | None = None
     polymarket_id: int | None = None
+    state: MarketState = MarketState.DRAFT
 

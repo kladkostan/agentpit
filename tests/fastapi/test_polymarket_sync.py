@@ -346,7 +346,6 @@ class TestSyncPolymarketMarkets:
         assert first_db.market_id == first_synced.market_id
         assert first_db.question == first_synced.question
         assert first_db.description == first_synced.description
-        assert first_db.market_state == "DRAFT"
         assert len(first_db.erc1155_tokens) > 0
 
         # now do it again as an update

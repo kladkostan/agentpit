@@ -34,8 +34,9 @@ class TableWrite:
                                  SLUG,
                                  START_DATE,
                                  END_DATE,
-                                 erc1155_TOKENS)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 erc1155_TOKENS,
+                                 MARKET_STATE)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 next_market_id,
@@ -46,7 +47,8 @@ class TableWrite:
                 request.slug,
                 request.start_date,
                 request.end_date,
-                erc1155_tokens_json
+                erc1155_tokens_json,
+                request.state
             ),
         )
 
@@ -58,10 +60,11 @@ class TableWrite:
             description=request.description,
             slug=request.slug,
             erc1155_tokens=request.erc1155_tokens,
-            market_state=MarketState.ACTIVE,
+            market_state=MarketState(request.state),
             start_date=request.start_date,
             end_date=request.end_date,
             resolved_outcome=None,
+            state=request.state
         )
 
     @staticmethod
@@ -76,14 +79,14 @@ class TableWrite:
 
         # Fetch existing market details to preserve state and IDs
         cursor = db.execute(
-            "SELECT MARKET_ID, COALESCE(MARKET_STATE, 'DRAFT'), RESOLVED_OUTCOME FROM markets WHERE POLYMARKET_ID = ?",
+            "SELECT MARKET_ID, RESOLVED_OUTCOME FROM markets WHERE POLYMARKET_ID = ?",
             (request.polymarket_id,)
         )
         row = cursor.fetchone()
         if not row:
             raise ValueError(f"Market with Polymarket ID {request.polymarket_id} not found")
 
-        market_id, market_state, resolved_outcome = row
+        market_id, resolved_outcome = row
 
         db.execute(
             """
@@ -94,7 +97,8 @@ class TableWrite:
                 SLUG           = ?,
                 START_DATE     = ?,
                 END_DATE       = ?,
-                erc1155_TOKENS = ?
+                erc1155_TOKENS = ?,
+                MARKET_STATE  = ?
             WHERE POLYMARKET_ID = ?
             """,
             (
@@ -105,6 +109,7 @@ class TableWrite:
                 request.start_date,
                 request.end_date,
                 erc1155_tokens_json,
+                request.state,
                 request.polymarket_id
             ),
         )
@@ -117,8 +122,9 @@ class TableWrite:
             description=request.description,
             slug=request.slug,
             erc1155_tokens=request.erc1155_tokens,
-            market_state=MarketState(market_state),
+            market_state=MarketState(request.state),
             start_date=request.start_date,
             end_date=request.end_date,
             resolved_outcome=resolved_outcome,
+            state=request.state
         )
