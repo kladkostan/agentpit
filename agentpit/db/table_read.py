@@ -168,14 +168,15 @@ class TableRead:
                    CONDITION_ID,
                    QUESTION,
                    DESCRIPTION,
+                   SLUG,
                    erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME,
                    START_DATE,
                    END_DATE
             FROM markets
-            ORDER BY MARKET_ID
-            LIMIT ? OFFSET ?
+            ORDER BY MARKET_ID LIMIT ?
+            OFFSET ?
             """,
             (limit, offset),
         )
@@ -188,6 +189,7 @@ class TableRead:
                 condition_id,
                 question,
                 description,
+                slug,
                 erc1155_tokens_json,
                 market_state,
                 resolved_outcome,
@@ -202,11 +204,12 @@ class TableRead:
                     polymarket_id=polymarket_id,
                     condition_id=condition_id,
                     description=description,
+                    slug=slug,
                     erc1155_tokens=erc1155_tokens,
                     market_state=MarketState(market_state),
                     resolved_outcome=resolved_outcome,
-                    start_date=start_date or 0,
-                    end_date=end_date or 0,
+                    start_date=start_date,
+                    end_date=end_date
                 )
             )
 

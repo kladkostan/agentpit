@@ -322,7 +322,6 @@ def sync_polymarket_markets(
     created_markets = []
 
     for pm_market in pm_markets:
-        logger.info("Processing market: %s", pm_market)
         question = pm_market.get("question", "").strip()
         description = pm_market.get("description", "").strip()
         polymarket_id = pm_market.get("id")
@@ -389,7 +388,7 @@ def sync_polymarket_markets(
                 db,
                 request
             )
-            logger.info("Created local market #%d: %s", market.market_id, market)
+            logger.info("Added market: %s", pm_market)
             created_markets.append(market)
 
 
