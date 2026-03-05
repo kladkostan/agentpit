@@ -17,6 +17,51 @@ logger = logging.getLogger(__name__)
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
 
 
+def _to_bool(value: bool | str | int | None) -> bool:
+    """Coerce common bool-like values; strings are parsed semantically."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off", ""}:
+            return False
+    return bool(value)
+
+
+def _coalesce_key(market: dict, target: str, source_keys: list[str]) -> None:
+    """Set market[target] from the first non-None source key if target is missing/None."""
+    if market.get(target) is not None:
+        return
+    for key in source_keys:
+        if market.get(key) is not None:
+            market[target] = market[key]
+            return
+
+
+def _normalize_market_fields(market: dict) -> dict:
+    """
+    Normalize common Gamma market fields to the snake_case keys used by this module.
+    """
+    _coalesce_key(market, "condition_id", ["conditionId"])
+    _coalesce_key(market, "question", ["title", "name"])
+    _coalesce_key(market, "description", ["descriptionText"])
+    _coalesce_key(
+        market,
+        "end_date_iso",
+        ["endDateIso", "endDateISO", "endDate", "endTimeIso", "endTime"],
+    )
+    _coalesce_key(market, "active", ["isActive"])
+    _coalesce_key(market, "closed", ["isClosed"])
+    _coalesce_key(market, "archived", ["isArchived"])
+    return market
+
+
 def _is_market_expired(market: dict) -> bool:
     """Check if a market is expired based on end_date_iso."""
     end_date_iso = market.get("end_date_iso")
@@ -36,6 +81,8 @@ def _is_market_expired(market: dict) -> bool:
         return end_date < datetime.now(timezone.utc)
     except (ValueError, TypeError):
         return False
+
+
 
 
 def fetch_all_polymarket_markets(
@@ -59,15 +106,24 @@ def fetch_all_polymarket_markets(
     all_markets = []
     limit = 500
     offset = 0
+    closed = _to_bool(closed)
+    active = _to_bool(active)
+    archived = _to_bool(archived)
 
     # Build query parameters
     query_parts = [f"limit={limit}"]
     if archived:
         query_parts.append("archived=true")
+    else:
+        query_parts.append("archived=false")
     if not active:
         query_parts.append("active=false")
+    else:
+        query_parts.append("active=true")
     if closed:
         query_parts.append("closed=true")
+    else:
+        query_parts.append("closed=false")
 
     base_query = "&".join(query_parts)
 
@@ -83,17 +139,35 @@ def fetch_all_polymarket_markets(
         # Client-side filtering to match test expectations (tests/fastapi/test_polymarket_sync.py)
         filtered_data = []
         for m in data:
+            m = _normalize_market_fields(m)
+
+            # Skip markets without a valid condition_id
+            if not m.get("condition_id"):
+                continue
+
             # Filter archived if not requested (API might leak them or mock data includes them)
             if not archived and m.get("archived", False):
                 raise ValueError(
                     f"API returned archived market {m.get('condition_id')} despite request for non-archived"
                 )
 
+            # Gamma can still leak closed markets when closed=false.
+            if not closed and m.get("closed", False):
+                continue
+
             # Filter expired markets unless we asked for closed ones
             # (Test expectations require client-side filtering of expired markets)
             if not closed and _is_market_expired(m):
                 continue
-
+            logger.info(
+                "Market details: condition_id=%s question=%r "
+                "end_date_iso=%s archived=%s active=%s closed=%s",
+            m.get("condition_id"),
+            m.get("question"),
+            m.get("end_date_iso"),
+            m.get("archived"),
+            m.get("active"),
+            m.get("closed"))
             filtered_data.append(m)
 
         all_markets.extend(filtered_data)
@@ -119,8 +193,11 @@ def fetch_polymarket_market(
     try:
         # Gamma API filter by condition_id returns a list
         result = get(f"{host}/markets?condition_id={condition_id}")
+        if not isinstance(result, list) or len(result) == 0:
+            # Some Gamma deployments/versions use camelCase query param.
+            result = get(f"{host}/markets?conditionId={condition_id}")
         if isinstance(result, list) and len(result) > 0:
-            return result[0]
+            return _normalize_market_fields(result[0])
     except Exception as e:
         logger.warning("Failed to fetch market %s: %s", condition_id, e)
     return None
@@ -135,7 +212,14 @@ def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
         [{"token_id": "123...", "outcome": "Yes"}, ...]
     """
     tokens = pm_market.get("tokens", [])
-    return [(t["token_id"], t["outcome"]) for t in tokens]
+    result = []
+    for t in tokens:
+        # Handle both snake_case (CLOB) and camelCase (Gamma) for token_id
+        tid = t.get("token_id") or t.get("tokenId")
+        outcome = t.get("outcome") or t.get("label") or "Unknown"
+        if tid:
+            result.append((tid, outcome))
+    return result
 
 
 def sync_polymarket_markets(
@@ -197,4 +281,3 @@ def sync_polymarket_markets(
         len(pm_markets),
     )
     return created_markets
-
