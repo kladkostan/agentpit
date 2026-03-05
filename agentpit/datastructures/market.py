@@ -9,7 +9,7 @@ class Market(BaseModel):
     market_id: int
     condition_id: str
     description: str
-    erc155_tokens: list[tuple[str, str]]
+    erc1155_tokens: list[tuple[str, str]]
     start_date: Optional[int] = None
     end_date: Optional[int] = None
     resolved_outcome: Optional[int] = None
@@ -38,9 +38,9 @@ class Market(BaseModel):
             raise ValueError("must be a 256-bit hex string (64 hex chars, optional 0x prefix)")
         return v
 
-    @field_validator("erc155_tokens")
+    @field_validator("erc1155_tokens")
     @classmethod
-    def check_erc155_tokens(cls, v: Any) -> list[tuple[str, str]]:
+    def check_erc1155_tokens(cls, v: Any) -> list[tuple[str, str]]:
         if not isinstance(v, list):
             raise ValueError("must be a list of [tokenId, label] pairs")
         for pair in v:

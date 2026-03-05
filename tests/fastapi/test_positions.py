@@ -11,7 +11,7 @@ def test_split_and_merge_positions():
         market_payload = {
             "question": "Will the sun rise tomorrow?",
             "description": "A very safe bet",
-            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+            "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
         }
         market_resp = client.post("/markets", json=market_payload)
         assert market_resp.status_code == 200
@@ -73,7 +73,7 @@ def test_split_position_insufficient_usdc():
         market_payload = {
             "question": "Will it rain?",
             "description": "Weather market",
-            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+            "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
         }
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
@@ -96,7 +96,7 @@ def test_merge_positions_insufficient_tokens():
         market_payload = {
             "question": "Test market?",
             "description": "Test",
-            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+            "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
         }
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]

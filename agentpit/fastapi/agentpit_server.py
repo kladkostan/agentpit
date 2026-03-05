@@ -148,7 +148,7 @@ class AgentPitServer(FastAPI):
             self._db,
             question=payload.question,
             description=payload.description,
-            erc155_tokens=payload.erc155_tokens,
+            erc1155_tokens=payload.erc1155_tokens,
         )
 
     def list_markets(self, limit: int = 100, offset: int = 0) -> ListMarketsResponse:
@@ -284,10 +284,10 @@ class AgentPitServer(FastAPI):
         # Mint outcome tokens (1 of each per set)
         token_balances = {}
         norm_address = normalize_eth_address(eth_address)
-        TableUtils.ensure_erc155_ownership_row(self._db, norm_address)
-        ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+        TableUtils.ensure_erc1155_ownership_row(self._db, norm_address)
+        ownership_map = TableUtils.load_erc1155_ownership_map(self._db, norm_address)
 
-        for token_id, _label in market.erc155_tokens:
+        for token_id, _label in market.erc1155_tokens:
             # Get current balance
             current = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
             # Add the minted amount
@@ -296,7 +296,7 @@ class AgentPitServer(FastAPI):
             token_balances[token_id] = new_balance
 
         # Store updated ownership map
-        TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
+        TableUtils.store_erc1155_ownership_map(self._db, norm_address, ownership_map)
 
         # Log the transaction
         TableWrite.log_transaction(
@@ -334,11 +334,11 @@ class AgentPitServer(FastAPI):
 
         # Load ownership map
         norm_address = normalize_eth_address(eth_address)
-        TableUtils.ensure_erc155_ownership_row(self._db, norm_address)
-        ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+        TableUtils.ensure_erc1155_ownership_row(self._db, norm_address)
+        ownership_map = TableUtils.load_erc1155_ownership_map(self._db, norm_address)
 
         # Check user has enough of each outcome token
-        for token_id, _label in market.erc155_tokens:
+        for token_id, _label in market.erc1155_tokens:
             balance = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
             if balance < payload.amount:
                 raise HTTPException(
@@ -348,14 +348,14 @@ class AgentPitServer(FastAPI):
 
         # Burn outcome tokens
         token_balances = {}
-        for token_id, _label in market.erc155_tokens:
+        for token_id, _label in market.erc1155_tokens:
             current = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
             new_balance = current - payload.amount
             ownership_map[token_id] = Web3.to_hex(new_balance).lower()
             token_balances[token_id] = new_balance
 
         # Store updated ownership map
-        TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
+        TableUtils.store_erc1155_ownership_map(self._db, norm_address, ownership_map)
 
         # Mint USDC collateral (1 USDC per complete set)
         collateral_amount = payload.amount
@@ -425,15 +425,15 @@ class AgentPitServer(FastAPI):
 
         # Load user's token balances
         norm_address = normalize_eth_address(eth_address)
-        TableUtils.ensure_erc155_ownership_row(self._db, norm_address)
-        ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+        TableUtils.ensure_erc1155_ownership_row(self._db, norm_address)
+        ownership_map = TableUtils.load_erc1155_ownership_map(self._db, norm_address)
 
         # Calculate payout and burn all tokens
         payout_usdc = 0
         tokens_redeemed = {}
-        winning_token_id = market.erc155_tokens[market.resolved_outcome][0]
+        winning_token_id = market.erc1155_tokens[market.resolved_outcome][0]
 
-        for token_id, _label in market.erc155_tokens:
+        for token_id, _label in market.erc1155_tokens:
             balance = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
             if balance > 0:
                 tokens_redeemed[token_id] = balance
@@ -444,7 +444,7 @@ class AgentPitServer(FastAPI):
                 ownership_map[token_id] = "0x0"
 
         # Store updated ownership map (with all tokens burned)
-        TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
+        TableUtils.store_erc1155_ownership_map(self._db, norm_address, ownership_map)
 
         # Mint USDC payout to user if they had winning tokens
         if payout_usdc > 0:
@@ -523,7 +523,7 @@ class AgentPitServer(FastAPI):
 
         # Load user's token map. Handle case where user has no entry yet.
         try:
-            ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+            ownership_map = TableUtils.load_erc1155_ownership_map(self._db, norm_address)
         except sqlite3.OperationalError: # More specific exception
             ownership_map = {}
 
@@ -534,7 +534,7 @@ class AgentPitServer(FastAPI):
             all_markets, _ = TableRead.list_markets(self._db, limit=10000)
 
             for market in all_markets:
-                outcomes = market.erc155_tokens
+                outcomes = market.erc1155_tokens
                 for idx, (token_id, label) in enumerate(outcomes):
                     if token_id in ownership_map:
                         balance = hex_u256_to_int(ownership_map[token_id])

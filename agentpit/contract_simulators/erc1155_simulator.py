@@ -28,8 +28,8 @@ class ERC1155Simulator:
         # use context manager for atomic transaction; any exception rolls back
         # errors propagate; no exception handling here
         with db:
-            TableUtils.ensure_erc155_ownership_row(db, norm_token_id)
-            ownership_map = TableUtils.load_erc155_ownership_map(db, norm_token_id)
+            TableUtils.ensure_erc1155_ownership_row(db, norm_token_id)
+            ownership_map = TableUtils.load_erc1155_ownership_map(db, norm_token_id)
 
             current = 0
             if norm_key in ownership_map:
@@ -41,7 +41,7 @@ class ERC1155Simulator:
 
             ownership_map[norm_key] = Web3.to_hex(new_value).lower()
 
-            TableUtils.store_erc155_ownership_map(db, norm_token_id, ownership_map)
+            TableUtils.store_erc1155_ownership_map(db, norm_token_id, ownership_map)
 
     @staticmethod
     @validate_call(config=_STRICT)
@@ -62,10 +62,10 @@ class ERC1155Simulator:
         # use context manager for atomic transaction; any exception rolls back
         # errors propagate; no exception handling here
         with db:
-            TableUtils.ensure_erc155_ownership_row(db, norm_src_token)
-            TableUtils.ensure_erc155_ownership_row(db, norm_dst_token)
-            src_map = TableUtils.load_erc155_ownership_map(db, norm_src_token)
-            dst_map = TableUtils.load_erc155_ownership_map(db, norm_dst_token)
+            TableUtils.ensure_erc1155_ownership_row(db, norm_src_token)
+            TableUtils.ensure_erc1155_ownership_row(db, norm_dst_token)
+            src_map = TableUtils.load_erc1155_ownership_map(db, norm_src_token)
+            dst_map = TableUtils.load_erc1155_ownership_map(db, norm_dst_token)
 
             raw_src_bal = src_map.get(norm_key)
             src_bal = 0 if raw_src_bal is None else hex_u256_to_int(raw_src_bal)
@@ -84,8 +84,8 @@ class ERC1155Simulator:
             src_map[norm_key] = Web3.to_hex(new_src).lower()
             dst_map[norm_key] = Web3.to_hex(new_dst).lower()
 
-            TableUtils.store_erc155_ownership_map(db, norm_src_token, src_map)
-            TableUtils.store_erc155_ownership_map(db, norm_dst_token, dst_map)
+            TableUtils.store_erc1155_ownership_map(db, norm_src_token, src_map)
+            TableUtils.store_erc1155_ownership_map(db, norm_dst_token, dst_map)
 
     @staticmethod
     @validate_call(config=_STRICT)
@@ -98,8 +98,8 @@ class ERC1155Simulator:
         norm_key = normalize_eth_address(asset_address)
 
         with db:
-            TableUtils.ensure_erc155_ownership_row(db, norm_token_id)
-            ownership_map = TableUtils.load_erc155_ownership_map(db, norm_token_id)
+            TableUtils.ensure_erc1155_ownership_row(db, norm_token_id)
+            ownership_map = TableUtils.load_erc1155_ownership_map(db, norm_token_id)
             raw = ownership_map.get(norm_key)
             return 0 if raw is None else hex_u256_to_int(raw)
 
@@ -118,8 +118,8 @@ class ERC1155Simulator:
             return
 
         with db:
-            TableUtils.ensure_erc155_ownership_row(db, norm_token_id)
-            ownership_map = TableUtils.load_erc155_ownership_map(db, norm_token_id)
+            TableUtils.ensure_erc1155_ownership_row(db, norm_token_id)
+            ownership_map = TableUtils.load_erc1155_ownership_map(db, norm_token_id)
 
             raw_bal = ownership_map.get(norm_key)
             bal = 0 if raw_bal is None else hex_u256_to_int(raw_bal)
@@ -130,4 +130,4 @@ class ERC1155Simulator:
             new_bal = bal - value
             ownership_map[norm_key] = Web3.to_hex(new_bal).lower()
 
-            TableUtils.store_erc155_ownership_map(db, norm_token_id, ownership_map)
+            TableUtils.store_erc1155_ownership_map(db, norm_token_id, ownership_map)

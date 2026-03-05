@@ -9,7 +9,7 @@ def test_create_and_get_market():
         payload = {
             "question": "Will it snow today?",
             "description": "Weather prediction market",
-            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+            "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
         }
         create_resp = client.post("/markets", json=payload)
         assert create_resp.status_code == 200
@@ -23,7 +23,7 @@ def test_create_and_get_market():
         assert body["market_id"] == market_id
         assert body["question"] == payload["question"]
         assert body["description"] == payload["description"]
-        assert body["erc155_tokens"] == payload["erc155_tokens"]
+        assert body["erc1155_tokens"] == payload["erc1155_tokens"]
         assert body["condition_id"] == created_market["condition_id"]
         assert body["market_state"] == "DRAFT"
 
@@ -49,7 +49,7 @@ def test_list_markets():
             payload = {
                 "question": f"Question {i}?",
                 "description": f"Description {i}",
-                "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+                "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
             }
             client.post("/markets", json=payload)
 

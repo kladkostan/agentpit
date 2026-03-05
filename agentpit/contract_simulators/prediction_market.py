@@ -30,7 +30,7 @@ class PredictionMarket:
 
         check_state(market is not None, "Market not found")
 
-        market_tokens = market.erc155_tokens
+        market_tokens = market.erc1155_tokens
 
         for token_id, _ in market_tokens:
             ERC1155Simulator.mint(db, owner_address, token_id, usdc_amount)
@@ -48,7 +48,7 @@ class PredictionMarket:
         market = TableRead.read_market(db, market_id)
         check_state(market is not None, "Market not found")
 
-        market_tokens = market.erc155_tokens
+        market_tokens = market.erc1155_tokens
 
         for token_id, _ in market_tokens:
             balance = ERC1155Simulator.get_balance(db, owner_address, token_id)

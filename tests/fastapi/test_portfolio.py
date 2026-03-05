@@ -55,7 +55,7 @@ def test_get_portfolio_after_split(client: TestClient, api_key: str):
     market_payload = {
         "question": "Will it rain tomorrow?",
         "description": "A market about tomorrow's weather.",
-        "erc155_tokens": [["0x1", "Yes"], ["0x2", "No"]],
+        "erc1155_tokens": [["0x1", "Yes"], ["0x2", "No"]],
     }
     market_response = client.post("/markets", json=market_payload)
     market_id = market_response.json()["market_id"]
@@ -93,7 +93,7 @@ def test_get_portfolio_after_merge(client: TestClient, api_key: str):
     """Test portfolio after merging a position."""
     # Setup: Mint USDC and split a position
     client.post("/mint_usdc", json={"api_key": api_key, "amount": 100})
-    market_payload = {"question": "Q1?", "erc155_tokens": [["0x1", "A"], ["0x2", "B"]]}
+    market_payload = {"question": "Q1?", "erc1155_tokens": [["0x1", "A"], ["0x2", "B"]]}
     market_response = client.post("/markets", json=market_payload)
     market_id = market_response.json()["market_id"]
     client.post(f"/markets/{market_id}/split_position", json={"api_key": api_key, "amount": 50})
@@ -118,7 +118,7 @@ def test_get_portfolio_after_redeem(client: TestClient, api_key: str):
     """Test portfolio after redeeming a winning position."""
     # Setup: Mint USDC, split, resolve market
     client.post("/mint_usdc", json={"api_key": api_key, "amount": 100})
-    market_payload = {"question": "Q1?", "erc155_tokens": [["0x1", "Win"], ["0x2", "Lose"]]}
+    market_payload = {"question": "Q1?", "erc1155_tokens": [["0x1", "Win"], ["0x2", "Lose"]]}
     market_response = client.post("/markets", json=market_payload)
     market_id = market_response.json()["market_id"]
     client.post(f"/markets/{market_id}/split_position", json={"api_key": api_key, "amount": 30})
@@ -143,13 +143,13 @@ def test_get_portfolio_multiple_markets(client: TestClient, api_key: str):
     client.post("/mint_usdc", json={"api_key": api_key, "amount": 100})
 
     # Market 1
-    market1_payload = {"question": "Q1", "erc155_tokens": [["0x1", "A"], ["0x2", "B"]]}
+    market1_payload = {"question": "Q1", "erc1155_tokens": [["0x1", "A"], ["0x2", "B"]]}
     market1_resp = client.post("/markets", json=market1_payload)
     market1_id = market1_resp.json()["market_id"]
     client.post(f"/markets/{market1_id}/split_position", json={"api_key": api_key, "amount": 10})
 
     # Market 2
-    market2_payload = {"question": "Q2", "erc155_tokens": [["0x3", "C"], ["0x4", "D"]]}
+    market2_payload = {"question": "Q2", "erc1155_tokens": [["0x3", "C"], ["0x4", "D"]]}
     market2_resp = client.post("/markets", json=market2_payload)
     market2_id = market2_resp.json()["market_id"]
     client.post(f"/markets/{market2_id}/split_position", json={"api_key": api_key, "amount": 20})

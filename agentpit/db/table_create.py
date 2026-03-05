@@ -86,10 +86,10 @@ class TableCreate:
         )
 
     @staticmethod
-    def create_erc155_token_ownership_table(db: sqlite3.Connection) -> None:
+    def create_erc1155_token_ownership_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
-            CREATE TABLE IF NOT EXISTS erc155_token_ownership (
+            CREATE TABLE IF NOT EXISTS erc1155_token_ownership (
                 ETH_ADDRESS TEXT PRIMARY KEY,
                 OWNERSHIP TEXT NOT NULL
             )
@@ -117,7 +117,7 @@ class TableCreate:
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
-                ERC155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
+                erc1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
                 START_DATE INTEGER, -- unix timestamp
                 END_DATE INTEGER,   -- unix timestamp
                 RESOLVED_OUTCOME INTEGER, -- index of the winning outcome
@@ -148,7 +148,7 @@ class TableCreate:
         TableCreate.create_orders_table(db)
         TableCreate.create_trades_table(db)
         TableCreate.create_erc20_token_ownership_table(db)
-        TableCreate.create_erc155_token_ownership_table(db)  # ensure ERC1155 table exists
+        TableCreate.create_erc1155_token_ownership_table(db)
         TableCreate.create_keys_table(db)
         TableCreate.create_markets_table(db)
         TableCreate.create_transactions_table(db)

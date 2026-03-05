@@ -34,13 +34,13 @@ class TableRead:
         return 0
 
     @staticmethod
-    def get_erc155_asset_ownership(
+    def get_erc1155_asset_ownership(
         db: sqlite3.Connection, eth_address: str, token_id: str
     ) -> int:
         norm_eth = normalize_eth_address(eth_address)
 
         # Use shared strict loader; raises on any JSON/type corruption.
-        ownership_map = TableUtils.load_erc155_ownership_map(db, norm_eth)
+        ownership_map = TableUtils.load_erc1155_ownership_map(db, norm_eth)
 
         # For ERC1155, keys in the map are token IDs (opaque strings), not ETH addresses.
         if token_id in ownership_map:
@@ -93,7 +93,7 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS,
+            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -105,17 +105,17 @@ class TableRead:
         if row is None:
             return None
 
-        market_id_val, condition_id, question, description, erc155_tokens_json, market_state, resolved_outcome = row
+        market_id_val, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
 
         # JSON errors propagate; no exception handling here
-        erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
+        erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
 
         return Market(
             question=question,
             market_id=market_id_val,
             condition_id=condition_id,
             description=description,
-            erc155_tokens=erc155_tokens,
+            erc1155_tokens=erc1155_tokens,
             market_state=MarketState(market_state),
             resolved_outcome=resolved_outcome,
         )
@@ -140,7 +140,7 @@ class TableRead:
         # Get paginated markets
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS,
+            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -152,14 +152,14 @@ class TableRead:
 
         markets = []
         for row in cur.fetchall():
-            market_id_val, condition_id, question, description, erc155_tokens_json, market_state, resolved_outcome = row
-            erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
+            market_id_val, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
+            erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
             markets.append(Market(
                 question=question,
                 market_id=market_id_val,
                 condition_id=condition_id,
                 description=description,
-                erc155_tokens=erc155_tokens,
+                erc1155_tokens=erc1155_tokens,
                 market_state=MarketState(market_state),
                 resolved_outcome=resolved_outcome,
             ))

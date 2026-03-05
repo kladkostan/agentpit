@@ -15,7 +15,7 @@ def test_get_transaction_history():
         assert body["transactions"] == []
 
         # 2. Create a market and perform some actions
-        market_payload = {"question": "History test?", "description": "...", "erc155_tokens": [["1", "A"], ["2", "B"]]}
+        market_payload = {"question": "History test?", "description": "...", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
 

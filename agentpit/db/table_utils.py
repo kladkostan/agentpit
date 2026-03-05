@@ -50,10 +50,10 @@ class TableUtils:
         )
 
     @staticmethod
-    def ensure_erc155_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
+    def ensure_erc1155_ownership_row(db: sqlite3.Connection, eth_address: str) -> None:
         db.execute(
             """
-            INSERT INTO erc155_token_ownership (ETH_ADDRESS, OWNERSHIP)
+            INSERT INTO erc1155_token_ownership (ETH_ADDRESS, OWNERSHIP)
             VALUES (?, ?)
             ON CONFLICT(ETH_ADDRESS) DO NOTHING
             """,
@@ -61,12 +61,12 @@ class TableUtils:
         )
 
     @staticmethod
-    def load_erc155_ownership_map(
+    def load_erc1155_ownership_map(
         db: sqlite3.Connection, eth_address: str
     ) -> dict[str, str]:
         # errors propagate; no exception handling here
         row = db.execute(
-            "SELECT OWNERSHIP FROM erc155_token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
+            "SELECT OWNERSHIP FROM erc1155_token_ownership WHERE ETH_ADDRESS = ? LIMIT 1",
             (eth_address,),
         ).fetchone()
         raw: str = "{}" if row is None or row[0] is None else row[0]
@@ -87,10 +87,10 @@ class TableUtils:
         return m
 
     @staticmethod
-    def store_erc155_ownership_map(
+    def store_erc1155_ownership_map(
         db: sqlite3.Connection, eth_address: str, m: dict[str, str]
     ) -> None:
         db.execute(
-            "UPDATE erc155_token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
+            "UPDATE erc1155_token_ownership SET OWNERSHIP = ? WHERE ETH_ADDRESS = ?",
             (json.dumps(m, separators=(",", ":")), eth_address),
         )

@@ -6,7 +6,7 @@ from agentpit.utils.parse import is_hex256
 class CreateMarketRequest(BaseModel):
     question: str
     description: str
-    erc155_tokens: list[tuple[str, str]]
+    erc1155_tokens: list[tuple[str, str]]
 
     @field_validator("question")
     @classmethod
@@ -22,9 +22,9 @@ class CreateMarketRequest(BaseModel):
             raise ValueError("must be a non-empty string")
         return v
 
-    @field_validator("erc155_tokens")
+    @field_validator("erc1155_tokens")
     @classmethod
-    def validate_erc155_tokens(cls, v: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    def validate_erc1155_tokens(cls, v: list[tuple[str, str]]) -> list[tuple[str, str]]:
         if not isinstance(v, list):
             raise ValueError("must be a list of [tokenId, label] pairs")
         for pair in v:

@@ -12,13 +12,13 @@ class TableWrite:
         db: sqlite3.Connection,
         question: str,
         description: str,
-        erc155_tokens: list,
+        erc1155_tokens: list,
     ) -> Market:
         # Compute condition_id from question and number of outcomes
-        condition_id = compute_condition_id(question, len(erc155_tokens))
+        condition_id = compute_condition_id(question, len(erc1155_tokens))
         condition_id_hex = "0x" + condition_id.hex()
 
-        erc155_tokens_json = json.dumps(erc155_tokens, separators=(",", ":"))
+        erc1155_tokens_json = json.dumps(erc1155_tokens, separators=(",", ":"))
 
         with db:
             row = db.execute(
@@ -28,10 +28,10 @@ class TableWrite:
 
             db.execute(
                 """
-                INSERT INTO markets (MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS)
+                INSERT INTO markets (MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (next_market_id, condition_id_hex, question, description, erc155_tokens_json),
+                (next_market_id, condition_id_hex, question, description, erc1155_tokens_json),
             )
 
         return Market(
@@ -39,7 +39,7 @@ class TableWrite:
             market_id=next_market_id,
             condition_id=condition_id_hex,
             description=description,
-            erc155_tokens=erc155_tokens,
+            erc1155_tokens=erc1155_tokens,
             market_state=MarketState.DRAFT,
         )
 
@@ -60,10 +60,10 @@ class TableWrite:
             raise ValueError(f"Market {market_id} is already resolved")
 
         # Validate winning outcome index
-        if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc155_tokens):
+        if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc1155_tokens):
             raise ValueError(
                 f"Invalid winning outcome index {winning_outcome_index}. "
-                f"Market has {len(market.erc155_tokens)} outcomes (indices 0-{len(market.erc155_tokens)-1})"
+                f"Market has {len(market.erc1155_tokens)} outcomes (indices 0-{len(market.erc1155_tokens)-1})"
             )
 
         # Update the market state and resolved outcome
@@ -148,7 +148,7 @@ class TableWrite:
             raise ValueError(f"Market {market_id} is already {market.market_state}")
 
         # Get all token IDs for this market
-        token_ids = [token_id for token_id, _label in market.erc155_tokens]
+        token_ids = [token_id for token_id, _label in market.erc1155_tokens]
 
         # Find all users who hold tokens for this market and refund them
         refunds_processed = 0
@@ -156,7 +156,7 @@ class TableWrite:
 
         for (eth_address,) in cursor.fetchall():
             norm_address = normalize_eth_address(eth_address)
-            ownership_map = TableUtils.load_erc155_ownership_map(db, norm_address)
+            ownership_map = TableUtils.load_erc1155_ownership_map(db, norm_address)
 
             # Calculate how many complete sets this user has
             min_balance = None
@@ -174,7 +174,7 @@ class TableWrite:
                     ownership_map[token_id] = Web3.to_hex(new_balance).lower()
 
                 # Save updated ownership
-                TableUtils.store_erc155_ownership_map(db, norm_address, ownership_map)
+                TableUtils.store_erc1155_ownership_map(db, norm_address, ownership_map)
 
                 # Refund USDC (1 USDC per complete set)
                 ERC20Simulator.mint(

@@ -12,7 +12,7 @@ def test_resolve_market_and_redeem():
         market_payload = {
             "question": "Will the test pass?",
             "description": "Testing market resolution",
-            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+            "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
         }
         market_resp = client.post("/markets", json=market_payload)
         assert market_resp.status_code == 200
@@ -102,7 +102,7 @@ def test_resolve_market_not_found():
 
 def test_resolve_market_already_resolved():
     with TestClient(main.server) as client:
-        market_payload = {"question": "Q", "description": "D", "erc155_tokens": [["1", "A"], ["2", "B"]]}
+        market_payload = {"question": "Q", "description": "D", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
 
@@ -117,7 +117,7 @@ def test_resolve_market_already_resolved():
 
 def test_resolve_market_invalid_outcome_index():
     with TestClient(main.server) as client:
-        market_payload = {"question": "Q", "description": "D", "erc155_tokens": [["1", "A"], ["2", "B"]]}
+        market_payload = {"question": "Q", "description": "D", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
 
@@ -135,7 +135,7 @@ def test_resolve_market_invalid_outcome_index():
 def test_redeem_position_unresolved_market():
     with TestClient(main.server) as client:
         api_key = "eager_redeemer"
-        market_payload = {"question": "Q", "description": "D", "erc155_tokens": [["1", "A"], ["2", "B"]]}
+        market_payload = {"question": "Q", "description": "D", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
 

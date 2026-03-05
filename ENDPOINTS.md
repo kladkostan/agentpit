@@ -37,7 +37,7 @@ Get a paginated list of all markets.
       "condition_id": "0x1234...",
       "question": "Will it rain tomorrow?",
       "description": "Weather prediction market",
-      "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+      "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
       "market_state": "DRAFT",
       "resolved_outcome": null
     }
@@ -64,7 +64,7 @@ Get information about a specific market.
   "condition_id": "0xabcd1234...",
   "question": "Will it rain tomorrow?",
   "description": "Weather prediction market",
-  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
   "market_state": "DRAFT",
   "resolved_outcome": null
 }
@@ -85,14 +85,14 @@ Create a new prediction market.
 {
   "question": "Will it rain tomorrow?",
   "description": "Weather prediction market",
-  "erc155_tokens": [["1", "Yes"], ["2", "No"]]
+  "erc1155_tokens": [["1", "Yes"], ["2", "No"]]
 }
 ```
 
 **Fields:**
 - `question` (required): Question string used to compute the condition_id via keccak256 hash
 - `description` (required): Human-readable description of the market
-- `erc155_tokens` (required): Array of [token_id, label] pairs representing possible outcomes
+- `erc1155_tokens` (required): Array of [token_id, label] pairs representing possible outcomes
 
 **Response:**
 ```json
@@ -101,7 +101,7 @@ Create a new prediction market.
   "condition_id": "0xabcd1234...",
   "question": "Will it rain tomorrow?",
   "description": "Weather prediction market",
-  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
   "market_state": "DRAFT",
   "resolved_outcome": null
 }
@@ -120,7 +120,7 @@ Activate a market, transitioning it from DRAFT to ACTIVE state.
   "condition_id": "0xabcd1234...",
   "question": "Will it rain tomorrow?",
   "description": "Weather prediction market",
-  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
   "market_state": "ACTIVE",
   "resolved_outcome": null
 }
@@ -154,7 +154,7 @@ Close a market, transitioning it from ACTIVE to CLOSED state.
   "condition_id": "0xabcd1234...",
   "question": "Will it rain tomorrow?",
   "description": "Weather prediction market",
-  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
   "market_state": "CLOSED",
   "resolved_outcome": null
 }
@@ -199,7 +199,7 @@ Resolve a market by specifying the winning outcome.
   "condition_id": "0xabcd1234...",
   "question": "Will it rain tomorrow?",
   "description": "Weather prediction market",
-  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "erc1155_tokens": [["1", "Yes"], ["2", "No"]],
   "market_state": "RESOLVED",
   "resolved_outcome": 0
 }
