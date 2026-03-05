@@ -5,6 +5,8 @@ using TableWrite.create_market.
 
 import logging
 import sqlite3
+import json
+import re
 from datetime import datetime, timezone
 
 from py_clob_client.http_helpers.helpers import get
@@ -15,23 +17,10 @@ from agentpit.datastructures.market import Market
 logger = logging.getLogger(__name__)
 
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
+CONDITION_ID_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
 
 
-def _to_bool(value: bool | str | int | None) -> bool:
-    """Coerce common bool-like values; strings are parsed semantically."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, int):
-        return value != 0
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "t", "yes", "y", "on"}:
-            return True
-        if normalized in {"0", "false", "f", "no", "n", "off", ""}:
-            return False
-    return bool(value)
+
 
 
 def _coalesce_key(market: dict, target: str, source_keys: list[str]) -> None:
@@ -42,6 +31,50 @@ def _coalesce_key(market: dict, target: str, source_keys: list[str]) -> None:
         if market.get(key) is not None:
             market[target] = market[key]
             return
+
+
+def _parse_list_field(raw: object) -> list:
+    """Parse list-like API fields that may arrive as JSON strings."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, list) else []
+        except (ValueError, TypeError):
+            return []
+    return []
+
+
+def _ensure_tokens(market: dict) -> None:
+    """
+    Ensure market['tokens'] is present.
+    Build it from clobTokenIds + outcomes when Gamma doesn't provide tokens.
+    """
+    if isinstance(market.get("tokens"), list) and len(market["tokens"]) > 0:
+        return
+
+    token_ids = _parse_list_field(
+        market.get("clobTokenIds") if market.get("clobTokenIds") is not None else market.get("clobTokenids")
+    )
+    outcomes = _parse_list_field(market.get("outcomes"))
+
+    if not token_ids:
+        market["tokens"] = []
+        return
+
+    tokens = []
+    for idx, token_id in enumerate(token_ids):
+        if token_id is None:
+            continue
+        label = outcomes[idx] if idx < len(outcomes) else f"Outcome {idx + 1}"
+        tokens.append({"token_id": str(token_id), "outcome": str(label)})
+    market["tokens"] = tokens
 
 
 def _normalize_market_fields(market: dict) -> dict:
@@ -59,6 +92,7 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "active", ["isActive"])
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
+    _ensure_tokens(market)
     return market
 
 
@@ -106,9 +140,6 @@ def fetch_all_polymarket_markets(
     all_markets = []
     limit = 500
     offset = 0
-    closed = _to_bool(closed)
-    active = _to_bool(active)
-    archived = _to_bool(archived)
 
     # Build query parameters
     query_parts = [f"limit={limit}"]
@@ -159,15 +190,7 @@ def fetch_all_polymarket_markets(
             # (Test expectations require client-side filtering of expired markets)
             if not closed and _is_market_expired(m):
                 continue
-            logger.info(
-                "Market details: condition_id=%s question=%r "
-                "end_date_iso=%s archived=%s active=%s closed=%s",
-            m.get("condition_id"),
-            m.get("question"),
-            m.get("end_date_iso"),
-            m.get("archived"),
-            m.get("active"),
-            m.get("closed"))
+            logger.info("Market details: %r", m)
             filtered_data.append(m)
 
         all_markets.extend(filtered_data)
@@ -190,6 +213,9 @@ def fetch_polymarket_market(
     """
     Fetch a single market from Polymarket by condition_id.
     """
+    if not isinstance(condition_id, str) or not CONDITION_ID_RE.fullmatch(condition_id):
+        return None
+
     try:
         # Gamma API filter by condition_id returns a list
         result = get(f"{host}/markets?condition_id={condition_id}")
@@ -197,7 +223,10 @@ def fetch_polymarket_market(
             # Some Gamma deployments/versions use camelCase query param.
             result = get(f"{host}/markets?conditionId={condition_id}")
         if isinstance(result, list) and len(result) > 0:
-            return _normalize_market_fields(result[0])
+            market = _normalize_market_fields(result[0])
+            if market.get("condition_id") != condition_id:
+                return None
+            return market
     except Exception as e:
         logger.warning("Failed to fetch market %s: %s", condition_id, e)
     return None
