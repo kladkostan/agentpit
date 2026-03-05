@@ -16,6 +16,7 @@ from agentpit.datastructures.position_response import PositionResponse
 from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
 from agentpit.datastructures.redeem_position_request import RedeemPositionRequest
 from agentpit.datastructures.redeem_position_response import RedeemPositionResponse
+from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -91,6 +92,24 @@ class AgentPitServer(FastAPI):
             self.redeem_position,
             methods=["POST"],
             response_model=RedeemPositionResponse,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/activate",
+            self.activate_market,
+            methods=["POST"],
+            response_model=Market,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/close",
+            self.close_market,
+            methods=["POST"],
+            response_model=Market,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/cancel",
+            self.cancel_market,
+            methods=["POST"],
+            response_model=CancelMarketResponse,
         )
 
     def _connect_db(self) -> None:
@@ -404,9 +423,37 @@ class AgentPitServer(FastAPI):
             tokens_redeemed=tokens_redeemed,
         )
 
+    def activate_market(self, market_id: int) -> Market:
+        """Activate a market, transitioning it from DRAFT to ACTIVE."""
+        self._ensure_db()
+        try:
+            return TableWrite.activate_market(self._db, market_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    def close_market(self, market_id: int) -> Market:
+        """Close a market, transitioning it from ACTIVE to CLOSED."""
+        self._ensure_db()
+        try:
+            return TableWrite.close_market(self._db, market_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    def cancel_market(self, market_id: int) -> CancelMarketResponse:
+        """Cancel a market and refund all users who hold complete sets."""
+        self._ensure_db()
+        try:
+            market, refunds_processed = TableWrite.cancel_market(self._db, market_id)
+            return CancelMarketResponse(
+                market_id=market.market_id,
+                message=f"Market cancelled successfully",
+                refunds_processed=refunds_processed,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     def shutdown(self) -> None:
         if hasattr(self, "_db") and self._db is not None:
             self._db.close()
             self._db = None
         print("AgentPitServer is shutting down...")
-

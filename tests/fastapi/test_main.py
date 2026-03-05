@@ -445,3 +445,157 @@ def test_redeem_position_unresolved_market():
         )
         assert redeem_resp.status_code == 400
         assert "not resolved" in redeem_resp.json()["detail"].lower()
+
+
+def test_market_lifecycle():
+    with TestClient(main.server) as client:
+        # Create a market
+        market_payload = {
+            "question": "Lifecycle test?",
+            "description": "Testing market lifecycle",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        assert market_resp.status_code == 200
+        market_id = market_resp.json()["market_id"]
+
+        # Verify initial state is DRAFT
+        get_resp = client.get(f"/markets/{market_id}")
+        assert get_resp.json()["market_state"] == "DRAFT"
+
+        # Activate the market
+        activate_resp = client.post(f"/markets/{market_id}/activate")
+        assert activate_resp.status_code == 200
+        assert activate_resp.json()["market_state"] == "ACTIVE"
+
+        # Verify state persists
+        get_resp2 = client.get(f"/markets/{market_id}")
+        assert get_resp2.json()["market_state"] == "ACTIVE"
+
+        # Close the market
+        close_resp = client.post(f"/markets/{market_id}/close")
+        assert close_resp.status_code == 200
+        assert close_resp.json()["market_state"] == "CLOSED"
+
+        # Verify state persists
+        get_resp3 = client.get(f"/markets/{market_id}")
+        assert get_resp3.json()["market_state"] == "CLOSED"
+
+
+def test_activate_market_invalid_state():
+    with TestClient(main.server) as client:
+        # Create and activate a market
+        market_payload = {
+            "question": "Test?",
+            "description": "Test",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        client.post(f"/markets/{market_id}/activate")
+
+        # Try to activate again
+        activate_resp = client.post(f"/markets/{market_id}/activate")
+        assert activate_resp.status_code == 400
+        assert "not in DRAFT state" in activate_resp.json()["detail"]
+
+
+def test_close_market_invalid_state():
+    with TestClient(main.server) as client:
+        # Create a market (stays in DRAFT)
+        market_payload = {
+            "question": "Test?",
+            "description": "Test",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        # Try to close without activating first
+        close_resp = client.post(f"/markets/{market_id}/close")
+        assert close_resp.status_code == 400
+        assert "not in ACTIVE state" in close_resp.json()["detail"]
+
+
+def test_cancel_market_with_refunds():
+    with TestClient(main.server) as client:
+        api_key1 = "user1"
+        api_key2 = "user2"
+
+        # Create a market
+        market_payload = {
+            "question": "Cancel test?",
+            "description": "Test cancellation",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        # User 1: Mint USDC and split positions
+        client.post("/mint_usdc", json={"api_key": api_key1, "amount": 1000})
+        client.post(f"/markets/{market_id}/split_position", json={"api_key": api_key1, "amount": 100})
+
+        # User 2: Mint USDC and split positions
+        client.post("/mint_usdc", json={"api_key": api_key2, "amount": 500})
+        client.post(f"/markets/{market_id}/split_position", json={"api_key": api_key2, "amount": 50})
+
+        # Get balances before cancellation
+        user1_balance_before = client.get(f"/usdc_balance/{api_key1}").json()["balance"]
+        user2_balance_before = client.get(f"/usdc_balance/{api_key2}").json()["balance"]
+
+        # Cancel the market
+        cancel_resp = client.post(f"/markets/{market_id}/cancel")
+        assert cancel_resp.status_code == 200
+        cancel_body = cancel_resp.json()
+        assert cancel_body["market_id"] == market_id
+        assert cancel_body["refunds_processed"] == 2  # Both users got refunds
+
+        # Verify market state
+        get_resp = client.get(f"/markets/{market_id}")
+        assert get_resp.json()["market_state"] == "CANCELLED"
+
+        # Verify refunds
+        user1_balance_after = client.get(f"/usdc_balance/{api_key1}").json()["balance"]
+        user2_balance_after = client.get(f"/usdc_balance/{api_key2}").json()["balance"]
+
+        assert user1_balance_after == user1_balance_before + 100  # Got 100 USDC back
+        assert user2_balance_after == user2_balance_before + 50   # Got 50 USDC back
+
+
+def test_cancel_market_already_resolved():
+    with TestClient(main.server) as client:
+        # Create and resolve a market
+        market_payload = {
+            "question": "Resolved market?",
+            "description": "Test",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        client.post(f"/markets/{market_id}/resolve", json={"winning_outcome_index": 0})
+
+        # Try to cancel
+        cancel_resp = client.post(f"/markets/{market_id}/cancel")
+        assert cancel_resp.status_code == 400
+        assert "already RESOLVED" in cancel_resp.json()["detail"]
+
+
+def test_cancel_market_no_positions():
+    with TestClient(main.server) as client:
+        # Create a market with no positions
+        market_payload = {
+            "question": "Empty market?",
+            "description": "Test",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        # Cancel the market
+        cancel_resp = client.post(f"/markets/{market_id}/cancel")
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["refunds_processed"] == 0  # No users to refund
+        assert cancel_resp.json()["market_id"] == market_id
+

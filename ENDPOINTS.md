@@ -115,6 +115,113 @@ Get information about a specific market.
 
 ---
 
+### POST /markets/{market_id}/activate
+Activate a market, transitioning it from DRAFT to ACTIVE state.
+
+**Path Parameters:**
+- `market_id` (required): The market ID
+
+**Response:**
+```json
+{
+  "market_id": 1,
+  "condition_id": "0xabcd1234...",
+  "question": "Will it rain tomorrow?",
+  "description": "Weather prediction market",
+  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "market_state": "ACTIVE",
+  "resolved_outcome": null
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Market is not in DRAFT state
+  ```json
+  {
+    "detail": "Market 1 is not in DRAFT state (current: ACTIVE)"
+  }
+  ```
+- `404 Not Found`: Market does not exist
+
+**Notes:**
+- Only markets in DRAFT state can be activated
+- Once activated, a market can accept position splits and merges
+
+---
+
+### POST /markets/{market_id}/close
+Close a market, transitioning it from ACTIVE to CLOSED state.
+
+**Path Parameters:**
+- `market_id` (required): The market ID
+
+**Response:**
+```json
+{
+  "market_id": 1,
+  "condition_id": "0xabcd1234...",
+  "question": "Will it rain tomorrow?",
+  "description": "Weather prediction market",
+  "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+  "market_state": "CLOSED",
+  "resolved_outcome": null
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Market is not in ACTIVE state
+  ```json
+  {
+    "detail": "Market 1 is not in ACTIVE state (current: DRAFT)"
+  }
+  ```
+- `404 Not Found`: Market does not exist
+
+**Notes:**
+- Only markets in ACTIVE state can be closed
+- Closing a market prevents further position changes
+- After closing, the market can be resolved
+
+---
+
+### POST /markets/{market_id}/cancel
+Cancel a market and refund all users who hold complete sets of outcome tokens.
+
+**Path Parameters:**
+- `market_id` (required): The market ID
+
+**Response:**
+```json
+{
+  "market_id": 1,
+  "message": "Market cancelled successfully",
+  "refunds_processed": 5
+}
+```
+
+**Fields in Response:**
+- `market_id`: The cancelled market ID
+- `message`: Status message
+- `refunds_processed`: Number of users who received USDC refunds
+
+**Error Responses:**
+- `400 Bad Request`: Market is already RESOLVED or CANCELLED
+  ```json
+  {
+    "detail": "Market 1 is already RESOLVED"
+  }
+  ```
+- `404 Not Found`: Market does not exist
+
+**Notes:**
+- Markets can be cancelled from any state except RESOLVED or CANCELLED
+- All users holding complete sets of outcome tokens are automatically refunded
+- Refund amount equals the number of complete sets held (1 USDC per complete set)
+- Incomplete sets (partial token holdings) are not refunded
+- After cancellation, the market cannot be resolved or reactivated
+
+---
+
 ### POST /markets/{market_id}/resolve
 Resolve a market by specifying the winning outcome.
 
@@ -387,12 +494,20 @@ Transfer USDC from your API key's address to another Ethereum address.
 ## Market States
 
 Markets can be in one of the following states:
-- `DRAFT`: Market has been created but not yet active
-- `ACTIVE`: Market is open for trading
-- `CLOSED`: Market is closed, no more trading
-- `RESOLVING`: Market outcome is being determined
+- `DRAFT`: Market has been created but not yet active (initial state)
+- `ACTIVE`: Market is open for trading and position management
+- `CLOSED`: Market is closed, no more position changes allowed
+- `RESOLVING`: Market outcome is being determined (not currently used)
 - `RESOLVED`: Market has been resolved with a final outcome
-- `CANCELLED`: Market has been cancelled
+- `CANCELLED`: Market has been cancelled, all complete sets refunded
+
+**State Transitions:**
+- `DRAFT` → `ACTIVE`: via `/markets/{id}/activate`
+- `DRAFT` → `CANCELLED`: via `/markets/{id}/cancel`
+- `ACTIVE` → `CLOSED`: via `/markets/{id}/close`
+- `ACTIVE` → `CANCELLED`: via `/markets/{id}/cancel`
+- `CLOSED` → `RESOLVED`: via `/markets/{id}/resolve`
+- `CLOSED` → `CANCELLED`: via `/markets/{id}/cancel`
 
 ---
 
@@ -400,23 +515,44 @@ Markets can be in one of the following states:
 
 1. **Create Market** - `POST /markets`
    - Market starts in `DRAFT` state
-   - Users can start trading immediately
+   - Users can immediately start trading (split/merge positions)
 
-2. **Split Positions** - `POST /markets/{id}/split_position`
+2. **Activate Market** - `POST /markets/{id}/activate` (optional)
+   - Transitions market from `DRAFT` to `ACTIVE`
+   - Signals that market is officially open for trading
+   - Not required - markets can be used in DRAFT state
+
+3. **Split Positions** - `POST /markets/{id}/split_position`
    - Users burn USDC to get outcome tokens
    - Can trade or hold outcome tokens
+   - Available in DRAFT and ACTIVE states
 
-3. **Merge Positions** - `POST /markets/{id}/merge_positions` (optional)
+4. **Merge Positions** - `POST /markets/{id}/merge_positions` (optional)
    - Users can burn complete sets to get USDC back
-   - Useful before market resolution
+   - Useful before market resolution or cancellation
+   - Available in DRAFT and ACTIVE states
 
-4. **Resolve Market** - `POST /markets/{id}/resolve`
+5. **Close Market** - `POST /markets/{id}/close` (optional)
+   - Transitions market from `ACTIVE` to `CLOSED`
+   - Prevents further position changes
+   - Prepares market for resolution
+
+6. **Resolve Market** - `POST /markets/{id}/resolve`
    - Market transitions to `RESOLVED` state
    - Winning outcome is recorded
+   - Can be done from any state except CANCELLED
 
-5. **Redeem Positions** - `POST /markets/{id}/redeem_position`
+7. **Redeem Positions** - `POST /markets/{id}/redeem_position`
    - Users burn all outcome tokens
    - Receive USDC for winning tokens only
+
+**Alternative Flow: Cancellation**
+
+- **Cancel Market** - `POST /markets/{id}/cancel`
+  - Can be done from DRAFT, ACTIVE, or CLOSED states
+  - Automatically refunds all users holding complete sets
+  - Market transitions to `CANCELLED` state
+  - Cannot be resolved after cancellation
 
 ---
 
