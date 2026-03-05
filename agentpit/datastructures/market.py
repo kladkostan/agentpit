@@ -6,6 +6,7 @@ from agentpit.utils.parse import is_hex256
 
 class Market(BaseModel):
     question: str
+    slug: Optional[str] = None
     market_id: int
     condition_id: str
     description: str
@@ -20,6 +21,13 @@ class Market(BaseModel):
     def check_non_empty_str(cls, v: str) -> str:
         if not isinstance(v, str) or not v:
             raise ValueError("must be a non-empty string")
+        return v
+
+    @field_validator("slug")
+    @classmethod
+    def check_slug(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and (not isinstance(v, str) or not v):
+            raise ValueError("slug must be a non-empty string or None")
         return v
 
     @field_validator("market_id", "start_date", "end_date", "resolved_outcome")

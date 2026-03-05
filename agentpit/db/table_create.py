@@ -116,6 +116,7 @@ class TableCreate:
                 MARKET_ID INTEGER PRIMARY KEY,
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
+                SLUG TEXT,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
                 erc1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
                 START_DATE INTEGER, -- unix timestamp
@@ -126,6 +127,13 @@ class TableCreate:
             )
             """
         )
+        # Backfill schema for existing DBs created before SLUG existed.
+        columns = {
+            row[1].upper()
+            for row in db.execute("PRAGMA table_info(markets)").fetchall()
+        }
+        if "SLUG" not in columns:
+            db.execute("ALTER TABLE markets ADD COLUMN SLUG TEXT")
 
     @staticmethod
     def create_transactions_table(db: sqlite3.Connection) -> None:
