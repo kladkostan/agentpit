@@ -326,8 +326,9 @@ def sync_polymarket_markets(
                 erc1155_tokens=erc1155_tokens,
                 polymarket_id=polymarket_id,
             )
-            created_markets.append(market)
             logger.debug("Created local market #%d: %s", market.market_id, question)
+            created_markets.append(market)
+
         except Exception:
             logger.exception("Failed to create market for question: %s", question)
 
