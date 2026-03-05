@@ -392,6 +392,11 @@ class AgentPitServer(FastAPI):
         """
         self._ensure_db()
 
+        # Check if market exists first to return 404 if not found
+        market = TableRead.read_market(self._db, market_id)
+        if not market:
+            raise HTTPException(status_code=404, detail="Market not found")
+
         try:
             return TableWrite.resolve_market(
                 self._db,

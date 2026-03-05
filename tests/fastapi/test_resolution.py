@@ -96,7 +96,7 @@ def test_resolve_market_not_found():
     with TestClient(main.server) as client:
         resolve_payload = {"winning_outcome_index": 0}
         resolve_resp = client.post("/markets/9999/resolve", json=resolve_payload)
-        assert resolve_resp.status_code == 400
+        assert resolve_resp.status_code == 404
         assert "Market not found" in resolve_resp.json()["detail"]
 
 
