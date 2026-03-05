@@ -40,6 +40,64 @@ def test_create_and_get_market():
         assert resp.json()["detail"] == "Market not found"
 
 
+def test_list_markets():
+    with TestClient(main.server) as client:
+        # List markets when empty
+        resp = client.get("/markets")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 0
+        assert body["markets"] == []
+        assert body["limit"] == 100
+        assert body["offset"] == 0
+
+        # Create multiple markets
+        for i in range(5):
+            payload = {
+                "question": f"Question {i}?",
+                "description": f"Description {i}",
+                "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+            }
+            client.post("/markets", json=payload)
+
+        # List all markets
+        resp = client.get("/markets")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 5
+        assert len(body["markets"]) == 5
+        assert body["limit"] == 100
+        assert body["offset"] == 0
+
+        # Test pagination with limit
+        resp = client.get("/markets?limit=2")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 5
+        assert len(body["markets"]) == 2
+        assert body["limit"] == 2
+        assert body["offset"] == 0
+
+        # Test pagination with offset
+        resp = client.get("/markets?limit=2&offset=2")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 5
+        assert len(body["markets"]) == 2
+        assert body["limit"] == 2
+        assert body["offset"] == 2
+
+        # Test invalid limit
+        resp = client.get("/markets?limit=2000")
+        assert resp.status_code == 400
+        assert "limit" in resp.json()["detail"].lower()
+
+        # Test invalid offset
+        resp = client.get("/markets?offset=-1")
+        assert resp.status_code == 400
+        assert "offset" in resp.json()["detail"].lower()
+
+
 def test_mint_usdc():
     with TestClient(main.server) as client:
         payload = {

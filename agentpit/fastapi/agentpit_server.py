@@ -9,6 +9,7 @@ from agentpit.datastructures.mint_usdc_response import MintUsdcResponse
 from agentpit.datastructures.get_usdc_balance_response import GetUsdcBalanceResponse
 from agentpit.datastructures.transfer_usdc_request import TransferUsdcRequest
 from agentpit.datastructures.transfer_usdc_response import TransferUsdcResponse
+from agentpit.datastructures.list_markets_response import ListMarketsResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -22,6 +23,12 @@ class AgentPitServer(FastAPI):
         self._db_path = db_path or os.getenv("AGENTPIT_DB_PATH", ":memory:")
         self._connect_db()
         self.add_api_route("/", self.get_version, methods=["GET"])
+        self.add_api_route(
+            "/markets",
+            self.list_markets,
+            methods=["GET"],
+            response_model=ListMarketsResponse,
+        )
         self.add_api_route(
             "/markets",
             self.create_market,
@@ -76,6 +83,22 @@ class AgentPitServer(FastAPI):
             question=payload.question,
             description=payload.description,
             erc155_tokens=payload.erc155_tokens,
+        )
+
+    def list_markets(self, limit: int = 100, offset: int = 0) -> ListMarketsResponse:
+        self._ensure_db()
+        # Validate pagination parameters
+        if limit < 1 or limit > 1000:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="offset must be non-negative")
+
+        markets, total = TableRead.list_markets(self._db, limit=limit, offset=offset)
+        return ListMarketsResponse(
+            markets=markets,
+            total=total,
+            limit=limit,
+            offset=offset,
         )
 
     def get_market(self, market_id: int) -> Market:

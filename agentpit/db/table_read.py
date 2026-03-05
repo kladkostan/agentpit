@@ -116,3 +116,46 @@ class TableRead:
             erc155_tokens=erc155_tokens,
             market_state=MarketState(market_state),
         )
+
+    @staticmethod
+    def list_markets(db: sqlite3.Connection, limit: int = 100, offset: int = 0) -> tuple[list[Market], int]:
+        """
+        Fetch a paginated list of markets.
+
+        Args:
+            db: Database connection
+            limit: Maximum number of markets to return
+            offset: Number of markets to skip
+
+        Returns:
+            Tuple of (list of Market instances, total count)
+        """
+        # Get total count
+        count_cur = db.execute("SELECT COUNT(*) FROM markets")
+        total = count_cur.fetchone()[0]
+
+        # Get paginated markets
+        cur = db.execute(
+            """
+            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, ERC155_TOKENS, MARKET_STATE
+            FROM markets
+            ORDER BY MARKET_ID DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        )
+
+        markets = []
+        for row in cur.fetchall():
+            market_id_val, condition_id, question, description, erc155_tokens_json, market_state = row
+            erc155_tokens = json.loads(erc155_tokens_json) if erc155_tokens_json else []
+            markets.append(Market(
+                question=question,
+                market_id=market_id_val,
+                condition_id=condition_id,
+                description=description,
+                erc155_tokens=erc155_tokens,
+                market_state=MarketState(market_state),
+            ))
+
+        return markets, total
