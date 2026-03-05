@@ -12,6 +12,17 @@ from agentpit.datastructures.market_state import MarketState
 
 class TableRead:
     @staticmethod
+    def read_market_id_by_polymarket_id(
+        db: sqlite3.Connection, polymarket_id: int
+    ) -> int | None:
+        """Return MARKET_ID for a Polymarket id, or None if not found."""
+        row = db.execute(
+            "SELECT MARKET_ID FROM markets WHERE POLYMARKET_ID = ? LIMIT 1",
+            (polymarket_id,),
+        ).fetchone()
+        return int(row[0]) if row is not None else None
+
+    @staticmethod
     def market_exists_by_polymarket_id(
         db: sqlite3.Connection, polymarket_id: int
     ) -> bool:

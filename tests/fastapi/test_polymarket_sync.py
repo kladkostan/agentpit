@@ -289,7 +289,7 @@ class TestSyncPolymarketMarkets:
 
 class TestSyncPolymarketMarketsUnit:
     @patch("agentpit.polymarket.polymarket_sync.fetch_all_polymarket_markets")
-    def test_skips_existing_polymarket_id(self, mock_fetch_all, db):
+    def test_updates_existing_polymarket_id(self, mock_fetch_all, db):
         mock_fetch_all.return_value = [
             {
                 "question": "Will X happen?",
@@ -302,7 +302,7 @@ class TestSyncPolymarketMarketsUnit:
             },
             {
                 "question": "Will X happen duplicate?",
-                "description": "desc",
+                "description": "desc updated",
                 "polymarket_id": 42,
                 "tokens": [
                     {"token_id": "3", "outcome": "Yes"},
@@ -318,4 +318,6 @@ class TestSyncPolymarketMarketsUnit:
         assert total == 1
         assert len(markets) == 1
         assert markets[0].polymarket_id == 42
-
+        assert markets[0].question == "Will X happen duplicate?"
+        assert markets[0].description == "desc updated"
+        assert markets[0].erc1155_tokens == [("3", "Yes"), ("4", "No")]

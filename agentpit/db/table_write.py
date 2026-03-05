@@ -60,6 +60,49 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_market(
+        db: sqlite3.Connection,
+        market_id: int,
+        question: str,
+        description: str,
+        erc1155_tokens: list,
+        polymarket_id: int | None = None,
+    ) -> Market:
+        """Update mutable market fields and return the updated market."""
+        # Keep condition_id aligned with the question/outcome structure.
+        condition_id = compute_condition_id(question, len(erc1155_tokens))
+        condition_id_hex = "0x" + condition_id.hex()
+        erc1155_tokens_json = json.dumps(erc1155_tokens, separators=(",", ":"))
+
+        db.execute(
+            """
+            UPDATE markets
+            SET CONDITION_ID = ?,
+                POLYMARKET_ID = ?,
+                QUESTION = ?,
+                DESCRIPTION = ?,
+                erc1155_TOKENS = ?
+            WHERE MARKET_ID = ?
+            """,
+            (
+                condition_id_hex,
+                polymarket_id,
+                question,
+                description,
+                erc1155_tokens_json,
+                market_id,
+            ),
+        )
+        db.commit()
+
+        from agentpit.db.table_read import TableRead
+
+        updated = TableRead.read_market(db, market_id)
+        if updated is None:
+            raise ValueError(f"Market {market_id} not found")
+        return updated
+
+    @staticmethod
     def resolve_market(
         db: sqlite3.Connection,
         market_id: int,

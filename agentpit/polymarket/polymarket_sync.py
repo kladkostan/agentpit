@@ -315,30 +315,38 @@ def sync_polymarket_markets(
             )
             continue
 
-        if polymarket_id is not None and TableRead.market_exists_by_polymarket_id(
-            db, polymarket_id
-        ):
-            logger.debug(
-                "Skipping market '%s': polymarket_id=%s already exists",
-                question,
-                polymarket_id,
-            )
-            continue
 
         # Default description if empty
         if not description:
             description = question
 
         try:
-            market = TableWrite.create_market(
-                db,
-                question=question,
-                description=description,
-                erc1155_tokens=erc1155_tokens,
-                polymarket_id=polymarket_id,
-            )
-            logger.info("Created local market #%d: %s", market.market_id, market)
-            created_markets.append(market)
+            existing_market_id = None
+            if polymarket_id is not None:
+                existing_market_id = TableRead.read_market_id_by_polymarket_id(
+                    db, polymarket_id
+                )
+
+            if existing_market_id is not None:
+                market = TableWrite.update_market(
+                    db,
+                    market_id=existing_market_id,
+                    question=question,
+                    description=description,
+                    erc1155_tokens=erc1155_tokens,
+                    polymarket_id=polymarket_id,
+                )
+                logger.info("Updated local market #%d: %s", market.market_id, market)
+            else:
+                market = TableWrite.create_market(
+                    db,
+                    question=question,
+                    description=description,
+                    erc1155_tokens=erc1155_tokens,
+                    polymarket_id=polymarket_id,
+                )
+                logger.info("Created local market #%d: %s", market.market_id, market)
+                created_markets.append(market)
 
         except Exception:
             logger.exception("Failed to create market for question: %s", question)
