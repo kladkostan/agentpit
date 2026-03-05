@@ -85,6 +85,21 @@ def _ensure_tokens(market: dict) -> None:
     market["tokens"] = tokens
 
 
+def _to_bool(value: object) -> bool | None:
+    """Coerce common bool-like values; return None if unknown."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes"}:
+            return True
+        if text in {"false", "0", "no"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None
+
+
 def _normalize_market_fields(market: dict) -> dict:
     """
     Normalize common Gamma market fields to the snake_case keys used by this module.
@@ -102,6 +117,12 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
     _coalesce_key(market, "liquidity", ["liquidityNum", "liquidityClob"])
+
+    # Normalize bool-ish fields that may arrive as strings.
+    for key in ("active", "closed", "archived"):
+        coerced = _to_bool(market.get(key))
+        if coerced is not None:
+            market[key] = coerced
 
     # Ensure normalized source id is either int-like or None.
     pmid = market.get("polymarket_id")
@@ -245,16 +266,17 @@ def fetch_polymarket_market(
         return None
 
     try:
-        # Gamma API filter by condition_id returns a list
+        # Gamma API filter may return empty/multiple results depending on deployment.
         result = get(f"{host}/markets?condition_id={condition_id}")
         if not isinstance(result, list) or len(result) == 0:
-            # Some Gamma deployments/versions use camelCase query param.
             result = get(f"{host}/markets?conditionId={condition_id}")
-        if isinstance(result, list) and len(result) > 0:
-            market = _normalize_market_fields(result[0])
-            if (market.get("condition_id") or "").lower() != condition_id.lower():
-                return None
-            return market
+
+        if isinstance(result, list):
+            target = condition_id.lower()
+            for raw_market in result:
+                market = _normalize_market_fields(raw_market)
+                if (market.get("condition_id") or "").lower() == target:
+                    return market
     except Exception as e:
         logger.warning("Failed to fetch market %s: %s", condition_id, e)
     return None

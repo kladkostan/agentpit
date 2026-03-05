@@ -221,6 +221,26 @@ class TestFetchAllPolymarketMarketsUnit:
         with pytest.raises(ValueError, match="returned archived market"):
             fetch_all_polymarket_markets(archived=False)
 
+    @patch("agentpit.polymarket.polymarket_sync.get")
+    def test_string_boolean_fields_are_normalized(self, mock_get):
+        mock_get.return_value = [
+            {
+                "condition_id": "0x" + "b" * 64,
+                "question": "Bool string market",
+                "end_date_iso": "2099-12-31T00:00:00Z",
+                "archived": "false",
+                "active": "true",
+                "closed": "false",
+                "liquidity": "2000000",
+                "tokens": [{"token_id": "1", "outcome": "Yes"}],
+            }
+        ]
+        result = fetch_all_polymarket_markets()
+        assert len(result) == 1
+        assert result[0]["archived"] is False
+        assert result[0]["active"] is True
+        assert result[0]["closed"] is False
+
 
 # ---------------------------------------------------------------------------
 # fetch_polymarket_market (Integration Test)
@@ -263,6 +283,17 @@ class TestFetchPolymarketMarket:
         """Test fetching with a badly formatted ID returns None."""
         market = fetch_polymarket_market("not-a-valid-id")
         assert market is None
+
+    @patch("agentpit.polymarket.polymarket_sync.get")
+    def test_selects_matching_market_when_multiple_returned(self, mock_get):
+        target = "0x" + "1" * 64
+        mock_get.return_value = [
+            {"condition_id": "0x" + "2" * 64, "tokens": []},
+            {"conditionId": target, "tokens": [{"tokenId": "10", "outcome": "Yes"}]},
+        ]
+        market = fetch_polymarket_market(target)
+        assert market is not None
+        assert market["condition_id"].lower() == target.lower()
 
 
 # ---------------------------------------------------------------------------
