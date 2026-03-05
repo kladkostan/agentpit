@@ -2,6 +2,7 @@
 import os
 import sqlite3
 from fastapi import FastAPI, HTTPException
+from web3 import Web3
 
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.mint_usdc_request import MintUsdcRequest
@@ -10,12 +11,17 @@ from agentpit.datastructures.get_usdc_balance_response import GetUsdcBalanceResp
 from agentpit.datastructures.transfer_usdc_request import TransferUsdcRequest
 from agentpit.datastructures.transfer_usdc_response import TransferUsdcResponse
 from agentpit.datastructures.list_markets_response import ListMarketsResponse
+from agentpit.datastructures.mint_shares_request import MintSharesRequest
+from agentpit.datastructures.shares_response import SharesResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
 from agentpit.datastructures.market import Market
 from agentpit.contract_simulators.erc20_simulator import ERC20Simulator
+from agentpit.contract_simulators.erc1155_simulator import ERC1155Simulator
 from agentpit.contract_simulators.contract_addresses import EASYNET_USDC_TOKEN_ADDRESS
+from agentpit.db.table_utils import TableUtils
+from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
 
 class AgentPitServer(FastAPI):
     def __init__(self, *args, db_path: str | None = None, **kwargs):
@@ -58,6 +64,18 @@ class AgentPitServer(FastAPI):
             self.transfer_usdc,
             methods=["POST"],
             response_model=TransferUsdcResponse,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/mint_shares",
+            self.mint_shares,
+            methods=["POST"],
+            response_model=SharesResponse,
+        )
+        self.add_api_route(
+            "/markets/{market_id}/redeem_shares",
+            self.redeem_shares,
+            methods=["POST"],
+            response_model=SharesResponse,
         )
 
     def _connect_db(self) -> None:
@@ -182,6 +200,117 @@ class AgentPitServer(FastAPI):
             to_address=payload.destination_address,
             amount=payload.amount,
             new_balance=new_balance,
+        )
+
+    def mint_shares(self, market_id: int, payload: MintSharesRequest) -> SharesResponse:
+        """
+        Mint complete sets of outcome tokens for a market.
+        Burns USDC collateral and mints 1 of each outcome token per set.
+        """
+        self._ensure_db()
+
+        # Get market to find outcome tokens
+        market = TableRead.read_market(self._db, market_id)
+        if not market:
+            raise HTTPException(status_code=404, detail="Market not found")
+
+        # Get user's ETH address
+        eth_address = TableRead.get_eth_address_for_api_key(self._db, payload.api_key)
+
+        # Calculate collateral needed (1 USDC per complete set)
+        collateral_amount = payload.amount
+
+        # Burn USDC collateral
+        try:
+            ERC20Simulator.burn(
+                self._db,
+                eth_address=eth_address,
+                asset_address=EASYNET_USDC_TOKEN_ADDRESS,
+                value=collateral_amount,
+            )
+        except ValueError as e:
+            if "Insufficient balance" in str(e):
+                raise HTTPException(status_code=400, detail=f"Insufficient USDC balance: {e}")
+            raise
+
+        # Mint outcome tokens (1 of each per set)
+        token_balances = {}
+        norm_address = normalize_eth_address(eth_address)
+        TableUtils.ensure_erc155_ownership_row(self._db, norm_address)
+        ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+
+        for token_id, _label in market.erc155_tokens:
+            # Get current balance
+            current = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
+            # Add the minted amount
+            new_balance = current + payload.amount
+            ownership_map[token_id] = Web3.to_hex(new_balance).lower()
+            token_balances[token_id] = new_balance
+
+        # Store updated ownership map
+        TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
+
+        return SharesResponse(
+            market_id=market_id,
+            amount=payload.amount,
+            collateral_amount=collateral_amount,
+            token_balances=token_balances,
+        )
+
+    def redeem_shares(self, market_id: int, payload: MintSharesRequest) -> SharesResponse:
+        """
+        Redeem complete sets of outcome tokens back to USDC collateral.
+        Burns 1 of each outcome token per set and mints USDC.
+        """
+        self._ensure_db()
+
+        # Get market to find outcome tokens
+        market = TableRead.read_market(self._db, market_id)
+        if not market:
+            raise HTTPException(status_code=404, detail="Market not found")
+
+        # Get user's ETH address
+        eth_address = TableRead.get_eth_address_for_api_key(self._db, payload.api_key)
+
+        # Load ownership map
+        norm_address = normalize_eth_address(eth_address)
+        TableUtils.ensure_erc155_ownership_row(self._db, norm_address)
+        ownership_map = TableUtils.load_erc155_ownership_map(self._db, norm_address)
+
+        # Check user has enough of each outcome token
+        for token_id, _label in market.erc155_tokens:
+            balance = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
+            if balance < payload.amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient balance of token {token_id}: have {balance}, need {payload.amount}"
+                )
+
+        # Burn outcome tokens
+        token_balances = {}
+        for token_id, _label in market.erc155_tokens:
+            current = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
+            new_balance = current - payload.amount
+            ownership_map[token_id] = Web3.to_hex(new_balance).lower()
+            token_balances[token_id] = new_balance
+
+        # Store updated ownership map
+        TableUtils.store_erc155_ownership_map(self._db, norm_address, ownership_map)
+
+        # Mint USDC collateral (1 USDC per complete set)
+        collateral_amount = payload.amount
+        ERC20Simulator.mint(
+            self._db,
+            eth_address=eth_address,
+            asset_address=EASYNET_USDC_TOKEN_ADDRESS,
+            value=collateral_amount,
+        )
+
+        return SharesResponse(
+            market_id=market_id,
+            amount=payload.amount,
+            collateral_amount=collateral_amount,
+            token_balances=token_balances,
         )
 
     def shutdown(self) -> None:

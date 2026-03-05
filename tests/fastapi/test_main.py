@@ -217,4 +217,116 @@ def test_transfer_usdc_insufficient_balance():
         assert "Insufficient balance" in transfer_resp.json()["detail"]
 
 
+def test_mint_and_redeem_shares():
+    with TestClient(main.server) as client:
+        api_key = "shares_test_key"
+
+        # Create a market
+        market_payload = {
+            "question": "Will the sun rise tomorrow?",
+            "description": "A very safe bet",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        assert market_resp.status_code == 200
+        market_id = market_resp.json()["market_id"]
+
+        # Mint USDC for the user
+        mint_usdc_payload = {
+            "api_key": api_key,
+            "amount": 1000,
+        }
+        usdc_resp = client.post("/mint_usdc", json=mint_usdc_payload)
+        assert usdc_resp.status_code == 200
+        assert usdc_resp.json()["new_balance"] == 1000
+
+        # Mint shares (complete sets)
+        mint_shares_payload = {
+            "api_key": api_key,
+            "amount": 100,
+        }
+        mint_resp = client.post(f"/markets/{market_id}/mint_shares", json=mint_shares_payload)
+        assert mint_resp.status_code == 200
+        mint_body = mint_resp.json()
+        assert mint_body["market_id"] == market_id
+        assert mint_body["amount"] == 100
+        assert mint_body["collateral_amount"] == 100
+        assert mint_body["token_balances"]["1"] == 100  # Yes tokens
+        assert mint_body["token_balances"]["2"] == 100  # No tokens
+
+        # Check USDC balance decreased
+        balance_resp = client.get(f"/usdc_balance/{api_key}")
+        assert balance_resp.status_code == 200
+        assert balance_resp.json()["balance"] == 900  # 1000 - 100
+
+        # Redeem 50 shares back to USDC
+        redeem_shares_payload = {
+            "api_key": api_key,
+            "amount": 50,
+        }
+        redeem_resp = client.post(f"/markets/{market_id}/redeem_shares", json=redeem_shares_payload)
+        assert redeem_resp.status_code == 200
+        redeem_body = redeem_resp.json()
+        assert redeem_body["market_id"] == market_id
+        assert redeem_body["amount"] == 50
+        assert redeem_body["collateral_amount"] == 50
+        assert redeem_body["token_balances"]["1"] == 50  # 100 - 50
+        assert redeem_body["token_balances"]["2"] == 50  # 100 - 50
+
+        # Check USDC balance increased
+        balance_resp2 = client.get(f"/usdc_balance/{api_key}")
+        assert balance_resp2.status_code == 200
+        assert balance_resp2.json()["balance"] == 950  # 900 + 50
+
+
+def test_mint_shares_insufficient_usdc():
+    with TestClient(main.server) as client:
+        api_key = "broke_user"
+
+        # Create a market
+        market_payload = {
+            "question": "Will it rain?",
+            "description": "Weather market",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        # Try to mint shares without USDC
+        mint_shares_payload = {
+            "api_key": api_key,
+            "amount": 100,
+        }
+        mint_resp = client.post(f"/markets/{market_id}/mint_shares", json=mint_shares_payload)
+        assert mint_resp.status_code == 400
+        assert "Insufficient USDC balance" in mint_resp.json()["detail"]
+
+
+def test_redeem_shares_insufficient_tokens():
+    with TestClient(main.server) as client:
+        api_key = "partial_holder"
+
+        # Create a market
+        market_payload = {
+            "question": "Test market?",
+            "description": "Test",
+            "erc155_tokens": [["1", "Yes"], ["2", "No"]],
+        }
+        market_resp = client.post("/markets", json=market_payload)
+        market_id = market_resp.json()["market_id"]
+
+        # Mint USDC and shares
+        client.post("/mint_usdc", json={"api_key": api_key, "amount": 50})
+        client.post(f"/markets/{market_id}/mint_shares", json={"api_key": api_key, "amount": 50})
+
+        # Try to redeem more than we have
+        redeem_payload = {
+            "api_key": api_key,
+            "amount": 100,
+        }
+        redeem_resp = client.post(f"/markets/{market_id}/redeem_shares", json=redeem_payload)
+        assert redeem_resp.status_code == 400
+        assert "Insufficient balance of token" in redeem_resp.json()["detail"]
+
+
 
