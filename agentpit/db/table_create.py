@@ -117,7 +117,7 @@ class TableCreate:
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
                 POLYMARKET_ID INTEGER,      -- optional source market id from Polymarket
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
-                SLUG TEXT,                  -- optional URL-safe identifier
+                SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
                 erc1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
                 START_DATE INTEGER, -- unix timestamp
