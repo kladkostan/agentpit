@@ -84,6 +84,7 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "condition_id", ["conditionId"])
     _coalesce_key(market, "question", ["title", "name"])
     _coalesce_key(market, "description", ["descriptionText"])
+    _coalesce_key(market, "polymarket_id", ["id", "marketId"])
     _coalesce_key(
         market,
         "end_date_iso",
@@ -92,6 +93,15 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "active", ["isActive"])
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
+
+    # Ensure normalized source id is either int-like or None.
+    pmid = market.get("polymarket_id")
+    if pmid is not None:
+        try:
+            market["polymarket_id"] = int(pmid)
+        except (TypeError, ValueError):
+            market["polymarket_id"] = None
+
     _ensure_tokens(market)
     return market
 
@@ -272,6 +282,7 @@ def sync_polymarket_markets(
     for pm_market in pm_markets:
         question = pm_market.get("question", "").strip()
         description = pm_market.get("description", "").strip()
+        polymarket_id = pm_market.get("polymarket_id")
         erc1155_tokens = _polymarket_to_erc1155_tokens(pm_market)
 
         # Skip markets with missing or invalid data
@@ -298,6 +309,7 @@ def sync_polymarket_markets(
                 question=question,
                 description=description,
                 erc1155_tokens=erc1155_tokens,
+                polymarket_id=polymarket_id,
             )
             created_markets.append(market)
             logger.debug("Created local market #%d: %s", market.market_id, question)

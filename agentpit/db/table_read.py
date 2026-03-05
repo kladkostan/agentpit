@@ -93,7 +93,7 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
+            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -105,7 +105,7 @@ class TableRead:
         if row is None:
             return None
 
-        market_id_val, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
+        market_id_val, polymarket_id, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
 
         # JSON errors propagate; no exception handling here
         erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
@@ -113,6 +113,7 @@ class TableRead:
         return Market(
             question=question,
             market_id=market_id_val,
+            polymarket_id=polymarket_id,
             condition_id=condition_id,
             description=description,
             erc1155_tokens=erc1155_tokens,
@@ -140,7 +141,7 @@ class TableRead:
         # Get paginated markets
         cur = db.execute(
             """
-            SELECT MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
+            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -152,11 +153,12 @@ class TableRead:
 
         markets = []
         for row in cur.fetchall():
-            market_id_val, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
+            market_id_val, polymarket_id, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
             erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
             markets.append(Market(
                 question=question,
                 market_id=market_id_val,
+                polymarket_id=polymarket_id,
                 condition_id=condition_id,
                 description=description,
                 erc1155_tokens=erc1155_tokens,

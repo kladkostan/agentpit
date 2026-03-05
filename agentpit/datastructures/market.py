@@ -8,6 +8,7 @@ class Market(BaseModel):
     question: str
     slug: Optional[str] = None
     market_id: int
+    polymarket_id: Optional[int] = None
     condition_id: str
     description: str
     erc1155_tokens: list[tuple[str, str]]
@@ -30,7 +31,7 @@ class Market(BaseModel):
             raise ValueError("slug must be a non-empty string or None")
         return v
 
-    @field_validator("market_id", "start_date", "end_date", "resolved_outcome")
+    @field_validator("market_id", "polymarket_id", "start_date", "end_date", "resolved_outcome")
     @classmethod
     def check_non_negative_int(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and (not isinstance(v, int) or v < 0):

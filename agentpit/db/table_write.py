@@ -13,6 +13,7 @@ class TableWrite:
         question: str,
         description: str,
         erc1155_tokens: list,
+        polymarket_id: int | None = None,
     ) -> Market:
         # Compute condition_id from question and number of outcomes
         condition_id = compute_condition_id(question, len(erc1155_tokens))
@@ -28,15 +29,30 @@ class TableWrite:
 
             db.execute(
                 """
-                INSERT INTO markets (MARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO markets (
+                    MARKET_ID,
+                    CONDITION_ID,
+                    POLYMARKET_ID,
+                    QUESTION,
+                    DESCRIPTION,
+                    erc1155_TOKENS
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (next_market_id, condition_id_hex, question, description, erc1155_tokens_json),
+                (
+                    next_market_id,
+                    condition_id_hex,
+                    polymarket_id,
+                    question,
+                    description,
+                    erc1155_tokens_json,
+                ),
             )
 
         return Market(
             question=question,
             market_id=next_market_id,
+            polymarket_id=polymarket_id,
             condition_id=condition_id_hex,
             description=description,
             erc1155_tokens=erc1155_tokens,

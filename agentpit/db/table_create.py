@@ -115,6 +115,7 @@ class TableCreate:
             CREATE TABLE IF NOT EXISTS markets (
                 MARKET_ID INTEGER PRIMARY KEY,
                 CONDITION_ID TEXT NOT NULL, -- u256 hex string
+                POLYMARKET_ID INTEGER,      -- optional source market id from Polymarket
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 SLUG TEXT,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
@@ -127,13 +128,15 @@ class TableCreate:
             )
             """
         )
-        # Backfill schema for existing DBs created before SLUG existed.
+        # Backfill schema for existing DBs created before SLUG/POLYMARKET_ID existed.
         columns = {
             row[1].upper()
             for row in db.execute("PRAGMA table_info(markets)").fetchall()
         }
         if "SLUG" not in columns:
             db.execute("ALTER TABLE markets ADD COLUMN SLUG TEXT")
+        if "POLYMARKET_ID" not in columns:
+            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_ID INTEGER")
 
     @staticmethod
     def create_transactions_table(db: sqlite3.Connection) -> None:
