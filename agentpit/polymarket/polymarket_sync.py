@@ -376,11 +376,7 @@ def sync_polymarket_markets(
         if existing_market_id is not None:
             market = TableWrite.update_market(
                 db,
-                market_id=existing_market_id,
-                question=question,
-                description=description,
-                erc1155_tokens=erc1155_tokens,
-                polymarket_id=polymarket_id,
+                request
             )
             logger.info("Updated local market #%d: %s", market.market_id, market)
         else:

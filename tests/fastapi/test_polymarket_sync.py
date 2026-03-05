@@ -349,6 +349,9 @@ class TestSyncPolymarketMarkets:
         assert first_db.market_state == "DRAFT"
         assert len(first_db.erc1155_tokens) > 0
 
+        # now do it again as an update
+        created_markets = sync_polymarket_markets(db)
+
 
 # ---------------------------------------------------------------------------
 # sync_polymarket_markets (Unit Test)
