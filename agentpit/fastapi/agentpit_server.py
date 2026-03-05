@@ -1,11 +1,12 @@
 # agentpit/fastapi/agentpit_server.py
 import os
 import sqlite3
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
+from agentpit.db.table_read import TableRead
 from agentpit.datastructures.market import Market
 
 class AgentPitServer(FastAPI):
@@ -18,6 +19,12 @@ class AgentPitServer(FastAPI):
             "/markets",
             self.create_market,
             methods=["POST"],
+            response_model=Market,
+        )
+        self.add_api_route(
+            "/markets/{market_id}",
+            self.get_market,
+            methods=["GET"],
             response_model=Market,
         )
 
@@ -45,6 +52,13 @@ class AgentPitServer(FastAPI):
             description=payload.description,
             erc155_tokens=payload.erc155_tokens,
         )
+
+    def get_market(self, market_id: int) -> Market:
+        self._ensure_db()
+        market = TableRead.read_market(self._db, market_id)
+        if market is None:
+            raise HTTPException(status_code=404, detail="Market not found")
+        return market
 
     def shutdown(self) -> None:
         if hasattr(self, "_db") and self._db is not None:
