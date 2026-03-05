@@ -37,3 +37,4 @@ class TableWrite:
             erc155_tokens=erc155_tokens,
             market_state=MarketState.DRAFT,
         )
+
