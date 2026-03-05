@@ -6,14 +6,14 @@ from agentpit.utils.parse import is_hex256
 
 class Market(BaseModel):
     question: str
-    slug: Optional[str] = None
+    slug: str = None
     market_id: int
     polymarket_id: Optional[int] = None
     condition_id: str
     description: str
     erc1155_tokens: list[tuple[str, str]]
-    start_date: Optional[int] = None
-    end_date: Optional[int] = None
+    start_date: int
+    end_date: int
     resolved_outcome: Optional[int] = None
     market_state: MarketState
 
