@@ -51,10 +51,11 @@ def fetch_polymarket_market(
     """
     try:
         result = get(f"{host}/markets/{condition_id}")
-        if isinstance(result, dict) and result.get("condition_id") == condition_id:
+        # Relax validation: if we got a dict back without an HTTP error, return it.
+        if isinstance(result, dict):
             return result
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to fetch market %s: %s", condition_id, e)
     return None
 
 
