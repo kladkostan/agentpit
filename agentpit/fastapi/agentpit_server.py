@@ -498,6 +498,7 @@ class AgentPitServer(FastAPI):
                 market_id=market.market_id,
                 message=f"Market cancelled successfully",
                 refunds_processed=refunds_processed,
+                market=market,
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))

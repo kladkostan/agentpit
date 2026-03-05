@@ -152,7 +152,7 @@ class TableWrite:
 
         # Find all users who hold tokens for this market and refund them
         refunds_processed = 0
-        cursor = db.execute("SELECT ETH_ADDRESS FROM erc1155_ownership")
+        cursor = db.execute("SELECT ETH_ADDRESS FROM erc1155_token_ownership")
 
         for (eth_address,) in cursor.fetchall():
             norm_address = normalize_eth_address(eth_address)
