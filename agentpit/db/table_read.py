@@ -115,7 +115,8 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, erc1155_TOKENS,
+            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, SLUG,
+                   START_DATE, END_DATE, erc1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -127,7 +128,7 @@ class TableRead:
         if row is None:
             return None
 
-        market_id_val, polymarket_id, condition_id, question, description, erc1155_tokens_json, market_state, resolved_outcome = row
+        market_id_val, polymarket_id, condition_id, question, description, slug, start_date, end_date, erc1155_tokens_json, market_state, resolved_outcome = row
 
         # JSON errors propagate; no exception handling here
         erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
@@ -138,6 +139,9 @@ class TableRead:
             polymarket_id=polymarket_id,
             condition_id=condition_id,
             description=description,
+            slug=slug,
+            start_date=start_date,
+            end_date=end_date,
             erc1155_tokens=erc1155_tokens,
             market_state=MarketState(market_state),
             resolved_outcome=resolved_outcome,

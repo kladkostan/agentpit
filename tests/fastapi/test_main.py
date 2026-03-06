@@ -15,16 +15,6 @@ from .test_lifecycle import *
 from .test_portfolio import *
 
 
-def test_all():
-    """
-    This function is a placeholder to confirm that all imported tests are being run.
-    Pytest discovers and runs all functions starting with 'test_'.
-    By running this file, all imported tests will be executed.
-    """
-    print("Running all tests...")
-    assert True
-
-
 if __name__ == "__main__":
     # This allows running all tests by executing this file directly
     # pytest will discover and run all tests in this file and imported ones
