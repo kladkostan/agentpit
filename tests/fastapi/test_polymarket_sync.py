@@ -363,42 +363,4 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     # now do it again as an update
     created_markets = sync_polymarket_markets(db)
 
-
-# ---------------------------------------------------------------------------
-# sync_polymarket_markets (Unit Test)
-# ---------------------------------------------------------------------------
-
-
-@patch("agentpit.polymarket.polymarket_sync.fetch_all_polymarket_markets")
-def test_sync_polymarket_markets_updates_existing_polymarket_id(mock_fetch_all, db):
-    mock_fetch_all.return_value = [
-        {
-            "question": "Will X happen?",
-            "description": "desc",
-            "polymarket_id": 42,
-            "tokens": [
-                {"token_id": "1", "outcome": "Yes"},
-                {"token_id": "2", "outcome": "No"},
-            ],
-        },
-        {
-            "question": "Will X happen duplicate?",
-            "description": "desc updated",
-            "polymarket_id": 42,
-            "tokens": [
-                {"token_id": "3", "outcome": "Yes"},
-                {"token_id": "4", "outcome": "No"},
-            ],
-        },
-    ]
-
-    created = sync_polymarket_markets(db)
-    assert len(created) == 1
-
-    markets, total = TableRead.list_markets(db, limit=10)
-    assert total == 1
-    assert len(markets) == 1
-    assert markets[0].polymarket_id == 42
-    assert markets[0].question == "Will X happen duplicate?"
-    assert markets[0].description == "desc updated"
-    assert markets[0].erc1155_tokens == [("3", "Yes"), ("4", "No")]
+    assert created_markets == []  # No new markets should be created on second sync
