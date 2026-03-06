@@ -344,7 +344,6 @@ def sync_polymarket_markets(
         else:
             state = MarketState.CLOSED
 
-
         request = CreateMarketRequest(
             question=question,
             description=description,
@@ -352,7 +351,7 @@ def sync_polymarket_markets(
             erc1155_tokens=erc1155_tokens,
             slug=slug,
             start_date=_iso_to_unix(start_date),
-            end_date=date,
+            end_date=_iso_to_unix(end_date) if end_date is not None else None,
             state = state
         )
 
@@ -382,13 +381,7 @@ def sync_polymarket_markets(
                 db, polymarket_id
             )
 
-        if existing_market_id is not None:
-            market = TableWrite.update_market(
-                db,
-                request
-            )
-            logger.info("Updated local market #%d: %s", market.market_id, market)
-        else:
+        if existing_market_id is None:
             market = TableWrite.create_market(
                 db,
                 request
