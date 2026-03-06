@@ -101,3 +101,11 @@ def _iso_to_unix(ts: str) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp())
+
+
+def hex2bytes(val: str) -> bytes:
+    if val.startswith("0x"):
+        return bytes.fromhex(val[2:])
+    else:
+        return bytes.fromhex(val)
+

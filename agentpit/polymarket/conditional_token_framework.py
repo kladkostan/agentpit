@@ -3,6 +3,7 @@ from web3 import Web3
 
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.onchain_resolution_status import OnchainResolutionStatus
+from agentpit.utils.parse import hex2bytes
 
 CTF_ABI = [
     {
@@ -41,20 +42,14 @@ class ConditionalTokenFramework:
         # Check if resolved
         # condition_id must be bytes32
         val = condition_id.value
-        if val.startswith("0x"):
-            condition_id_bytes = bytes.fromhex(val[2:])
-        else:
-            condition_id_bytes = bytes.fromhex(val)
+
+        condition_id_bytes = hex2bytes(val)
 
         denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
 
         if denominator == 0:
             return OnchainResolutionStatus(payouts=[], denominator=0, resolved=False)
 
-        # Get payouts for binary market (most common)
-        # We iterate until we find all numerators that sum up to denominator
-        # or just assume 2 for now as Polymarket is mostly binary.
-        # However, to be safe, we can try fetching 0 and 1.
 
         payouts = []
         current_sum = 0
@@ -73,3 +68,4 @@ class ConditionalTokenFramework:
             denominator=denominator,
             resolved=current_sum >= denominator
         )
+
