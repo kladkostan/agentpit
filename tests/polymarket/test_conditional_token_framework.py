@@ -142,7 +142,7 @@ class TestConditionalTokenFramework:
             MockWeb3Class.assert_called()
 
     @pytest.mark.integration
-    def test_get_onchain_resolution_status_real_market(self):
+    def test_get_onchain_resolution_status_real_unresolved_market(self):
         """
         This is an integration test that checks the resolution of a real market on Polygon.
         It will fail if there is no connection or if the RPC is down.
@@ -153,10 +153,28 @@ class TestConditionalTokenFramework:
         condition_id = ConditionId("0x55757944295b6994355171361952eb86904f3b5a9b4c6ab1ee99a6b349424313")
 
         # This test uses a public Polygon RPC.
-        web3 = Web3(Web3.HTTPProvider("https://polygon-bor.publicnode.com"))
+        web3 = Web3(Web3.HTTPProvider("https://tenderly.rpc.polygon.community/"))
 
         status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3)
 
-        assert status.resolved is True
-        assert status.payouts == [0, 1000000000000000000]  # Payout for "Yes" is 1, "No" is 0
-        assert status.denominator == 1000000000000000000
+        assert status.resolved is False
+        assert status.get_winner_index() is None   # Payout for "Yes" is 1, "No" is 0
+
+    @pytest.mark.integration
+    def test_get_onchain_resolution_status_real_resolved_market(self):
+        """
+        This is an integration test that checks the resolution of a real market on Polygon.
+        It will fail if there is no connection or if the RPC is down.
+        """
+        # This is the conditionId for the Polymarket market:
+        # "Will the US federal debt be over $34T by Feb 1, 2024?"
+        # This market resolved to "Yes".
+        condition_id = ConditionId("0x84df4e5c5e0b5d2fdfd3e8a2eeef39b4e2ff1e70910542f91b3ef1aae36f5b60")
+
+        # This test uses a public Polygon RPC.
+        web3 = Web3(Web3.HTTPProvider("https://tenderly.rpc.polygon.community/"))
+
+        status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3)
+
+        assert status.resolved is False
+        assert status.get_winner_index() is None   # Payout for "Yes" is 1, "No" is 0
