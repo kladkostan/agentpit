@@ -1,5 +1,3 @@
-from typing import Optional, List
-from dataclasses import dataclass
 
 from web3 import Web3
 
@@ -33,7 +31,7 @@ POLYGON_RPC = "https://polygon-rpc.com"
 class ConditionalTokenFramework:
 
     @staticmethod
-    def get_onchain_resolution_status(condition_id: ConditionId, web3: Web3 = None) -> Optional[OnchainResolutionStatus]:
+    def get_onchain_resolution_status(condition_id: ConditionId, web3: Web3 = None) -> OnchainResolutionStatus:
         if web3 is None:
             web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
 
@@ -42,20 +40,13 @@ class ConditionalTokenFramework:
 
         # Check if resolved
         # condition_id must be bytes32
-        try:
-            val = condition_id.value
-            if val.startswith("0x"):
-                condition_id_bytes = bytes.fromhex(val[2:])
-            else:
-                condition_id_bytes = bytes.fromhex(val)
-        except ValueError:
-            return None
+        val = condition_id.value
+        if val.startswith("0x"):
+            condition_id_bytes = bytes.fromhex(val[2:])
+        else:
+            condition_id_bytes = bytes.fromhex(val)
 
-        try:
-            denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
-        except Exception:
-            # If call fails (e.g. invalid condition ID), return None or re-raise
-            return None
+        denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
 
         if denominator == 0:
             return OnchainResolutionStatus(payouts=[], denominator=0, resolved=False)
@@ -70,15 +61,12 @@ class ConditionalTokenFramework:
         i = 0
         # Safety limit
         while i < 10:
-            try:
-                payout = contract.functions.payoutNumerators(condition_id_bytes, i).call()
-                payouts.append(payout)
-                current_sum += payout
-                if current_sum >= denominator:
-                    break
-                i += 1
-            except Exception:
+            payout = contract.functions.payoutNumerators(condition_id_bytes, i).call()
+            payouts.append(payout)
+            current_sum += payout
+            if current_sum >= denominator:
                 break
+            i += 1
 
         return OnchainResolutionStatus(
             payouts=payouts,

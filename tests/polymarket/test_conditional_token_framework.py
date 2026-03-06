@@ -20,13 +20,13 @@ class TestConditionalTokenFramework:
         # --- Scenario 1: Invalid condition ID ---
         # Invalid condition ID (not hex)
         condition_id_invalid = ConditionId("invalid_id")
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_invalid, web3=mock_web3)
-        assert result is None
+        with pytest.raises(ValueError):
+            ConditionalTokenFramework.get_onchain_resolution_status(condition_id_invalid, web3=mock_web3)
 
         # Invalid condition ID (odd length hex)
         condition_id_invalid_hex = ConditionId("0x123")
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_invalid_hex, web3=mock_web3)
-        assert result is None
+        with pytest.raises(ValueError):
+            ConditionalTokenFramework.get_onchain_resolution_status(condition_id_invalid_hex, web3=mock_web3)
 
         # --- Scenario 2: Contract call failure ---
         condition_id_bytes_32 = "0x" + "00" * 32
@@ -34,8 +34,8 @@ class TestConditionalTokenFramework:
 
         mock_contract.functions.payoutDenominator.return_value.call.side_effect = Exception("Contract error")
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
-        assert result is None
+        with pytest.raises(Exception, match="Contract error"):
+            ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
 
         mock_contract.functions.payoutDenominator.return_value.call.side_effect = None
 
@@ -107,13 +107,24 @@ class TestConditionalTokenFramework:
         mock_call_1 = MagicMock()
         mock_call_1.call.side_effect = Exception("Some error")
 
+        # side_effect list applies to consecutive calls to payoutNumerators
+        # 1st call: i=0 -> returns mock_call_0 which returns 50
+        # 2nd call: i=1 -> returns mock_call_1 which raises Exception on call()
+
+        # When payoutNumerators is called, it returns a mock object that has a .call() method.
+        # We need to set side_effect on the mock object returned by payoutNumerators call...
+        # But here payoutNumerators(condition_id_bytes, i) is called.
+
+        # In test setup:
+        # payout_numerators_mock is assigned to mock_contract.functions.payoutNumerators
+        # payout_numerators_mock(bytes, i) returns a mock object (let's call it 'method_mock')
+        # method_mock.call() is then called.
+
+        # So we need payout_numerators_mock.side_effect to return different method_mocks.
         payout_numerators_mock.side_effect = [mock_call_0, mock_call_1]
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
-
-        assert result.payouts == [50]
-        assert result.denominator == 100
-        assert result.resolved is False
+        with pytest.raises(Exception, match="Some error"):
+            ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
 
         # --- Scenario 7: Default Web3 Initialization ---
         with patch('agentpit.polymarket.conditional_token_framework.Web3') as MockWeb3Class:
