@@ -1,5 +1,5 @@
 from pydantic import field_validator, BaseModel
-from .utils import check_state
+
 
 
 class TransferUsdcRequest(BaseModel):

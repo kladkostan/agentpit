@@ -1,8 +1,8 @@
 from pydantic import BaseModel
 import time
 
+from agentpit.common import check_state
 from agentpit.datastructures.market_state import MarketState
-from agentpit.utils.check_state import check_state  # Adjust import path as needed
 
 
 class CreateMarketRequest(BaseModel):

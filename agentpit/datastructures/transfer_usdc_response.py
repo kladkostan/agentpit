@@ -1,5 +1,15 @@
 from pydantic import BaseModel
-from agentpit.utils import check_state
+from pydantic import field_validator, BaseModel
+from agentpit.common import check_state
+
+
+class RedeemPositionRequest(BaseModel):
+    api_key: str
+
+    def model_post_init(self, __context):
+        check_state(self.api_key, "api_key must not be empty")
+
+
 
 
 class TransferUsdcResponse(BaseModel):
