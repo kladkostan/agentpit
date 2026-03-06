@@ -2,6 +2,7 @@ from pydantic import BaseModel
 import time
 
 from agentpit.datastructures.market_state import MarketState
+from agentpit.utils.check_state import check_state  # Adjust import path as needed
 
 
 class CreateMarketRequest(BaseModel):
@@ -15,10 +16,12 @@ class CreateMarketRequest(BaseModel):
     state: MarketState = MarketState.DRAFT
 
     def model_post_init(self, __context):
-        # Auto-generate slug from question if not provided
-        if not self.slug:
-            self.slug = self.question.lower().replace(" ", "-").replace("?", "")
-        # Use current timestamp if start_date not provided
-        if self.start_date is None:
-            self.start_date = int(time.time())
-
+        check_state(len(self.question) > 0,
+                    "Question must not be empty")
+        check_state(len(self.description) > 0,
+                    "Description must not be empty")
+        check_state(len(self.erc1155_tokens) > 0,
+                    "ERC1155 tokens list must not be empty")
+        if self.start_date is not None and self.end_date is not None:
+            check_state(self.end_date >= self.start_date,
+                        "End date must be after or equal to start date")
