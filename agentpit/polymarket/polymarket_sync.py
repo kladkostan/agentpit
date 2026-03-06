@@ -408,3 +408,20 @@ def sync_polymarket_markets(
         len(pm_markets),
     )
     return created_markets
+
+@staticmethod
+def update_market_outcomes(db: sqlite3.Connection) -> None:
+    markets = TableRead.list_markets()
+    for market in markets:
+        if market.market_id == market_id:
+            market.market_state = state
+            db.execute(
+                """
+                UPDATE markets
+                SET MARKET_STATE = ?
+                WHERE MARKET_ID = ?
+                """,
+                (state.value, market_id)
+            )
+            return
+
