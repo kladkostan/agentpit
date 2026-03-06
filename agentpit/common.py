@@ -1,4 +1,6 @@
 import inspect
+from fastapi import HTTPException
+
 from pydantic import ConfigDict, validate_call
 
 _STRICT = ConfigDict(strict=True)
@@ -23,9 +25,6 @@ def check_state(expression: bool, msg: str = "") -> None:
 
     base = f"Check failed::{expr_text} {file}:{line} {func}"
     detail = f"(): {msg}" if msg else "()"
-    raise LogicError(base + detail)
+    raise HTTPException(400, base + detail)
 
 
-class LogicError(Exception):
-    """Python analogue of `std::logic_error`."""
-    pass
