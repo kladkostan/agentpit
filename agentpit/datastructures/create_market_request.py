@@ -10,12 +10,19 @@ class CreateMarketRequest(BaseModel):
     description: str
     erc1155_tokens: list[tuple[str, str]]
     slug: str = ""
-    start_date: int = None
+    start_date: int | None = None
     end_date: int | None = None
     polymarket_id: int | None = None
     state: MarketState = MarketState.DRAFT
 
     def model_post_init(self, __context):
+
+        if not self.slug:
+            self.slug = self.question.lower().replace(" ", "-").replace("?", "")
+            # Use current timestamp if start_date not provided
+        if self.start_date is None:
+            self.start_date = int(time.time())
+
         check_state(len(self.question) > 0,
                     "Question must not be empty")
         check_state(len(self.description) > 0,
