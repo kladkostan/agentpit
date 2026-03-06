@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from agentpit.utils import check_state
+from agentpit.common import check_state
 
 
 class RedeemPositionResponse(BaseModel):

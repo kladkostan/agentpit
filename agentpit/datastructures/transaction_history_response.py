@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from agentpit.utils import check_state
+from agentpit.common import check_state
 
 class Transaction(BaseModel):
     """Represents a single transaction in a user's history."""
