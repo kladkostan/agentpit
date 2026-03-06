@@ -18,12 +18,6 @@ class Trade(BaseModel):
     bucket_index: int
     fee_rate_bps: int
 
-    @field_validator("id", "taker_order_id", "market", "asset_id", "transaction_hash")
-    @classmethod
-    def check_non_empty_str(cls, v: str) -> str:
-        if not isinstance(v, str) or not v:
-            raise ValueError("must be a non-empty string")
-        return v
 
     @property
     def dict(self) -> dict[str, Any]:
