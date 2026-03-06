@@ -125,3 +125,33 @@ class TableWrite:
             end_date=request.end_date,
             resolved_outcome=resolved_outcome
         )
+
+    @staticmethod
+    def log_transaction(
+            db: sqlite3.Connection,
+            api_key: str,
+            transaction_type: str,
+            market_id: int | None = None,
+            details: dict | None = None
+    ) -> None:
+        """
+        Log a transaction to the transactions table.
+
+        Args:
+            db: Database connection
+            api_key: API key of the user performing the transaction
+            transaction_type: Type of transaction (e.g., "SPLIT", "MERGE", "REDEEM")
+            market_id: Optional market ID
+            details: Optional dictionary with transaction details (will be JSON serialized)
+        """
+        details_json = json.dumps(details) if details else None
+
+        db.execute(
+            """
+            INSERT INTO transactions (api_key, transaction_type, market_id, details)
+            VALUES (?, ?, ?, ?)
+            """,
+            (api_key, transaction_type, market_id, details_json)
+        )
+
+
