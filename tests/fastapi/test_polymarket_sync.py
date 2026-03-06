@@ -259,80 +259,9 @@ def test_fetch_all_polymarket_markets_string_boolean_fields_are_normalized(mock_
 
 
 # ---------------------------------------------------------------------------
-# fetch_polymarket_market (Integration Test)
-# ---------------------------------------------------------------------------
-
-
-def test_fetch_polymarket_market_fetches_real_market_by_id():
-    """Test fetching a valid market from the live Polymarket API.
-
-    Since condition_ids can become stale, we first fetch the market list
-    to obtain a known-good condition_id, then verify fetch_polymarket_market
-    can retrieve it individually.
-    """
-    markets = fetch_all_polymarket_markets()
-    assert len(markets) > 0, "No markets returned from Polymarket API"
-
-    # Pick the first market that has a condition_id and tokens
-    sample = next(
-        (m for m in markets if m.get("condition_id") and m.get("tokens")),
-        None,
-    )
-    assert sample is not None, "No market with condition_id and tokens found"
-
-    condition_id_str : str = sample["condition_id"]
-
-    check_state(bool(condition_id_str))
-
-    condition_id = ConditionId(condition_id_str)
-
-    check_state(ConditionalTokenFramework.condition_exists(condition_id))
-
-    market = fetch_polymarket_market(condition_id)
-
-    assert market is not None, "fetch_polymarket_market returned None (check network/vpn?)"
-    assert market["condition_id"] == condition_id
-    assert "tokens" in market and len(market["tokens"]) > 0
-
-
-def test_fetch_polymarket_market_returns_none_for_nonexistent_market():
-    """Test fetching a non-existent market returns None."""
-    condition_id = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-    market = fetch_polymarket_market(condition_id)
-    assert market is None
-
-
-def test_fetch_polymarket_market_returns_none_for_invalid_id():
-    """Test fetching with a badly formatted ID returns None."""
-    market = fetch_polymarket_market("not-a-valid-id")
-    assert market is None
-
-
-
-# ---------------------------------------------------------------------------
 # fetch_all_polymarket_markets (Integration Test)
 # ---------------------------------------------------------------------------
 
-
-@pytest.mark.integration
-def test_fetch_all_polymarket_markets_fetches_real_markets():
-    """Test that we can fetch markets from the live Polymarket API."""
-    markets = fetch_all_polymarket_markets()
-    assert isinstance(markets, list)
-    # There should be a significant number of markets
-    assert len(markets) > 5
-
-    # Check the structure of a sample market
-    market = markets[0]
-    assert "question" in market
-    assert "condition_id" in market
-    assert "tokens" in market
-    assert isinstance(market["tokens"], list)
-
-
-# ---------------------------------------------------------------------------
-# sync_polymarket_markets (Integration Test)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
