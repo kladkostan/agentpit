@@ -2,15 +2,13 @@ import inspect
 from pydantic import ConfigDict, validate_call
 
 _STRICT = ConfigDict(strict=True)
-
-
 @validate_call(config=_STRICT)
-def check_state(expression: bool, expr_text: str, msg: str = "") -> None:
+def check_state(expression: bool, msg: str = "") -> None:
     """
     Raises LogicError if `expression` is False, formatting a message similar to the C++ macro.
 
     Example:
-        check_state2(x > 0, "x > 0", "x must be positive")
+        check_state(x > 0, "x must be positive")
     """
     if expression:
         return
@@ -21,6 +19,8 @@ def check_state(expression: bool, expr_text: str, msg: str = "") -> None:
     func = caller.f_code.co_name if caller else "<unknown>"
     file = info.filename
     line = info.lineno
+
+    expr_text = info.code_context[0].strip() if info.code_context else "<unknown>"
 
     base = f"Check failed::{expr_text} {file}:{line} {func}"
     detail = f"(): {msg}" if msg else "()"
