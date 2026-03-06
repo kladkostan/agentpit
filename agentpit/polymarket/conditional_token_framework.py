@@ -66,21 +66,21 @@ class ConditionalTokenFramework:
 
         denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
 
+
+
+        outcome_slot_count = ConditionalTokenFramework.get_outcome_slot_count(condition_id, web3)
+
         if denominator == 0:
             return OnchainResolutionStatus(payouts=[], denominator=0, resolved=False)
 
-
         payouts = []
         current_sum = 0
-        i = 0
-        # Safety limit
-        while i < 10:
+        for i in range(outcome_slot_count):
             payout = contract.functions.payoutNumerators(condition_id_bytes, i).call()
             payouts.append(payout)
             current_sum += payout
             if current_sum >= denominator:
                 break
-            i += 1
 
         return OnchainResolutionStatus(
             payouts=payouts,

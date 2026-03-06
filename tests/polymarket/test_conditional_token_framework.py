@@ -16,6 +16,28 @@ class TestConditionalTokenFramework:
         mock_web3.eth.contract.return_value = contract
         return contract
 
+    def test_get_outcome_slot_count(self, mock_web3, mock_contract):
+        condition_id = ConditionId("0x" + "11" * 32)
+        mock_contract.functions.getOutcomeSlotCount.return_value.call.return_value = 3
+
+        count = ConditionalTokenFramework.get_outcome_slot_count(condition_id, web3=mock_web3)
+
+        assert count == 3
+
+    def test_get_outcome_slot_count_default_web3_initialization(self):
+        condition_id = ConditionId("0x" + "22" * 32)
+
+        with patch('agentpit.polymarket.conditional_token_framework.Web3') as MockWeb3Class:
+            mock_web3_instance = MockWeb3Class.return_value
+            mock_contract = MagicMock()
+            mock_web3_instance.eth.contract.return_value = mock_contract
+            mock_contract.functions.getOutcomeSlotCount.return_value.call.return_value = 2
+
+            count = ConditionalTokenFramework.get_outcome_slot_count(condition_id)
+
+            assert count == 2
+            MockWeb3Class.assert_called()
+
     def test_get_onchain_resolution_status_all_scenarios(self, mock_web3, mock_contract):
         # --- Scenario 1: Invalid condition ID ---
         # Invalid condition ID (not hex)
@@ -52,6 +74,7 @@ class TestConditionalTokenFramework:
         # --- Scenario 4: Resolved Binary ---
         denominator = 100
         mock_contract.functions.payoutDenominator.return_value.call.return_value = denominator
+        mock_contract.functions.getOutcomeSlotCount.return_value.call.return_value = 2
 
         payout_numerators_mock = MagicMock()
         mock_contract.functions.payoutNumerators = payout_numerators_mock
@@ -75,8 +98,9 @@ class TestConditionalTokenFramework:
         assert result.denominator == 100
         assert result.resolved is True
 
-        # --- Scenario 5: Safety Limit ---
+        # --- Scenario 5: Bounded by outcome slot count ---
         mock_contract.functions.payoutDenominator.return_value.call.return_value = denominator
+        mock_contract.functions.getOutcomeSlotCount.return_value.call.return_value = 3
 
         payout_numerators_mock = MagicMock()
         mock_contract.functions.payoutNumerators = payout_numerators_mock
@@ -90,13 +114,14 @@ class TestConditionalTokenFramework:
         result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
 
         assert isinstance(result, OnchainResolutionStatus)
-        assert len(result.payouts) == 10
-        assert result.payouts == [1] * 10
+        assert len(result.payouts) == 3
+        assert result.payouts == [1] * 3
         assert result.denominator == 100
         assert result.resolved is False
 
         # --- Scenario 6: Payout Exception ---
         mock_contract.functions.payoutDenominator.return_value.call.return_value = denominator
+        mock_contract.functions.getOutcomeSlotCount.return_value.call.return_value = 2
 
         payout_numerators_mock = MagicMock()
         mock_contract.functions.payoutNumerators = payout_numerators_mock
