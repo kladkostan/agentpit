@@ -1,6 +1,17 @@
 from typing import Optional, List
+from dataclasses import dataclass
 
 from web3 import Web3
+
+@dataclass
+class OnchainResolutionStatus:
+    payouts: List[int]
+    denominator: int
+    resolved: bool
+
+@dataclass
+class ConditionId:
+    value: str
 
 CTF_ABI = [
     {
@@ -29,7 +40,7 @@ POLYGON_RPC = "https://polygon-rpc.com"
 class ConditionalTokenFramework:
 
     @staticmethod
-    def get_onchain_resolution_status(condition_id: str, web3: Web3 = None) -> Optional[List[int]]:
+    def get_onchain_resolution_status(condition_id: ConditionId, web3: Web3 = None) -> Optional[OnchainResolutionStatus]:
         if web3 is None:
             web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
 
@@ -39,10 +50,11 @@ class ConditionalTokenFramework:
         # Check if resolved
         # condition_id must be bytes32
         try:
-            if condition_id.startswith("0x"):
-                condition_id_bytes = bytes.fromhex(condition_id[2:])
+            val = condition_id.value
+            if val.startswith("0x"):
+                condition_id_bytes = bytes.fromhex(val[2:])
             else:
-                condition_id_bytes = bytes.fromhex(condition_id)
+                condition_id_bytes = bytes.fromhex(val)
         except ValueError:
             return None
 
@@ -53,7 +65,7 @@ class ConditionalTokenFramework:
             return None
 
         if denominator == 0:
-            return None
+            return OnchainResolutionStatus(payouts=[], denominator=0, resolved=False)
 
         # Get payouts for binary market (most common)
         # We iterate until we find all numerators that sum up to denominator
@@ -75,5 +87,8 @@ class ConditionalTokenFramework:
             except Exception:
                 break
 
-        return payouts
-
+        return OnchainResolutionStatus(
+            payouts=payouts,
+            denominator=denominator,
+            resolved=current_sum >= denominator
+        )

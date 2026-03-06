@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
+from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework, OnchainResolutionStatus, ConditionId
 from web3 import Web3
 
 class TestConditionalTokenFramework:
@@ -19,28 +19,35 @@ class TestConditionalTokenFramework:
     def test_get_onchain_resolution_status_all_scenarios(self, mock_web3, mock_contract):
         # --- Scenario 1: Invalid condition ID ---
         # Invalid condition ID (not hex)
-        result = ConditionalTokenFramework.get_onchain_resolution_status("invalid_id", web3=mock_web3)
+        condition_id_invalid = ConditionId("invalid_id")
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_invalid, web3=mock_web3)
         assert result is None
 
         # Invalid condition ID (odd length hex)
-        result = ConditionalTokenFramework.get_onchain_resolution_status("0x123", web3=mock_web3)
+        condition_id_invalid_hex = ConditionId("0x123")
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_invalid_hex, web3=mock_web3)
         assert result is None
 
         # --- Scenario 2: Contract call failure ---
         condition_id_bytes_32 = "0x" + "00" * 32
+        condition_id = ConditionId(condition_id_bytes_32)
 
         mock_contract.functions.payoutDenominator.return_value.call.side_effect = Exception("Contract error")
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_bytes_32, web3=mock_web3)
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
         assert result is None
 
         mock_contract.functions.payoutDenominator.return_value.call.side_effect = None
 
-        # --- Scenario 3: Unresolved ---
+        # --- Scenario 3: Unresolved (denominator == 0) ---
         mock_contract.functions.payoutDenominator.return_value.call.return_value = 0
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_bytes_32, web3=mock_web3)
-        assert result is None
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
+
+        assert isinstance(result, OnchainResolutionStatus)
+        assert result.payouts == []
+        assert result.denominator == 0
+        assert result.resolved is False
 
         # --- Scenario 4: Resolved Binary ---
         denominator = 100
@@ -59,13 +66,14 @@ class TestConditionalTokenFramework:
                 mock_call.call.return_value = 0
             return mock_call
 
-        # Re-assign side_effect to the mocked function object
-        # Note: payoutNumerators is a function that returns a contract function object.
-        # But here we are mocking `contract.functions.payoutNumerators` itself.
         payout_numerators_mock.side_effect = call_side_effect_binary
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_bytes_32, web3=mock_web3)
-        assert result == [0, 100]
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
+
+        assert isinstance(result, OnchainResolutionStatus)
+        assert result.payouts == [0, 100]
+        assert result.denominator == 100
+        assert result.resolved is True
 
         # --- Scenario 5: Safety Limit ---
         mock_contract.functions.payoutDenominator.return_value.call.return_value = denominator
@@ -75,12 +83,17 @@ class TestConditionalTokenFramework:
 
         mock_call_obj = MagicMock()
         mock_call_obj.call.return_value = 1
+
+        payout_numerators_mock.side_effect = None
         payout_numerators_mock.return_value = mock_call_obj
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_bytes_32, web3=mock_web3)
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
 
-        assert len(result) == 10
-        assert result == [1] * 10
+        assert isinstance(result, OnchainResolutionStatus)
+        assert len(result.payouts) == 10
+        assert result.payouts == [1] * 10
+        assert result.denominator == 100
+        assert result.resolved is False
 
         # --- Scenario 6: Payout Exception ---
         mock_contract.functions.payoutDenominator.return_value.call.return_value = denominator
@@ -94,31 +107,26 @@ class TestConditionalTokenFramework:
         mock_call_1 = MagicMock()
         mock_call_1.call.side_effect = Exception("Some error")
 
-        # side_effect on the call `payoutNumerators(...)`
         payout_numerators_mock.side_effect = [mock_call_0, mock_call_1]
 
-        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_bytes_32, web3=mock_web3)
+        result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3=mock_web3)
 
-        assert result == [50]
+        assert result.payouts == [50]
+        assert result.denominator == 100
+        assert result.resolved is False
 
         # --- Scenario 7: Default Web3 Initialization ---
         with patch('agentpit.polymarket.conditional_token_framework.Web3') as MockWeb3Class:
-            # We must configure the mock class to behave like a class that returns an instance
             mock_web3_instance = MockWeb3Class.return_value
-
-            # The code does `contract = web3.eth.contract(...)`
-            # So `mock_web3_instance.eth.contract` should return a mock contract
             mock_contract_default = MagicMock()
             mock_web3_instance.eth.contract.return_value = mock_contract_default
 
-            # Setup behavior for payoutDenominator
             mock_contract_default.functions.payoutDenominator.return_value.call.return_value = 0
 
-            # Call without web3 arg
-            result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id_bytes_32)
+            result = ConditionalTokenFramework.get_onchain_resolution_status(condition_id)
 
-            assert result is None
+            assert isinstance(result, OnchainResolutionStatus)
+            assert result.resolved is False
 
-            # Verify Web3 was instantiated
             MockWeb3Class.assert_called()
 
