@@ -47,8 +47,6 @@ class ConditionalTokenFramework:
 
         denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
 
-        if denominator == 0:
-            return OnchainResolutionStatus(payouts=[], denominator=0, resolved=False)
 
 
         payouts = []

@@ -169,7 +169,7 @@ class TestConditionalTokenFramework:
         # This is the conditionId for the Polymarket market:
         # "Will the US federal debt be over $34T by Feb 1, 2024?"
         # This market resolved to "Yes".
-        condition_id = ConditionId("0x84df4e5c5e0b5d2fdfd3e8a2eeef39b4e2ff1e70910542f91b3ef1aae36f5b60")
+            condition_id = ConditionId("0x84df4e5c5e0b5d2fdfd3e8a2eeef39b4e2ff1e70910542f91b3ef1aae36f5b60")
 
         # This test uses a public Polygon RPC.
         web3 = Web3(Web3.HTTPProvider("https://tenderly.rpc.polygon.community/"))
