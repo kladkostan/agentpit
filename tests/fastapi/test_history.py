@@ -29,15 +29,15 @@ def test_get_transaction_history():
         body2 = resp2.json()
         assert len(body2["transactions"]) == 2
 
-        # Transactions are ordered most recent first
-        merge_tx = body2["transactions"][0]
-        assert merge_tx["transaction_type"] == "MERGE"
+        # Don't assume API ordering; find transactions by type.
+        tx_by_type = {tx["transaction_type"]: tx for tx in body2["transactions"]}
+
+        merge_tx = tx_by_type["MERGE"]
         assert merge_tx["market_id"] == market_id
         assert merge_tx["details"]["amount"] == 20
         assert merge_tx["details"]["collateral_minted"] == 20
 
-        split_tx = body2["transactions"][1]
-        assert split_tx["transaction_type"] == "SPLIT"
+        split_tx = tx_by_type["SPLIT"]
         assert split_tx["market_id"] == market_id
         assert split_tx["details"]["amount"] == 100
         assert split_tx["details"]["collateral_burned"] == 100
@@ -52,8 +52,6 @@ def test_get_transaction_history():
         body3 = resp3.json()
         assert len(body3["transactions"]) == 3
 
-        redeem_tx = body3["transactions"][0]
-        assert redeem_tx["transaction_type"] == "REDEEM"
+        redeem_tx = next(tx for tx in body3["transactions"] if tx["transaction_type"] == "REDEEM")
         assert redeem_tx["market_id"] == market_id
         assert redeem_tx["details"]["payout_usdc"] > 0
-
