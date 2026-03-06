@@ -1,5 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
+
+from agentpit.common import check_state
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework, OnchainResolutionStatus, ConditionId
 from web3 import Web3
 
@@ -195,10 +197,16 @@ class TestConditionalTokenFramework:
         # "Will the US federal debt be over $34T by Feb 1, 2024?"
         # This market resolved to "Yes".
 
-        condition_id = ConditionId("0x84df4e5c5e0b5d2fdfd3e8a2eeef39b4e2ff1e70910542f91b3ef1aae36f5b60")
-
         # This test uses a public Polygon RPC.
         web3 = Web3(Web3.HTTPProvider("https://tenderly.rpc.polygon.community/"))
+
+        condition_id = ConditionId("0x84df4e5c5e0b5d2fdfd3e8a2eeef39b4e2ff1e70910542f91b3ef1aae36f5b60")
+
+
+        slot_count = ConditionalTokenFramework.get_outcome_slot_count(condition_id, web3)
+
+        check_state(slot_count > 0, "Expected positive slot count for resolved market")
+
 
         status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3)
 
