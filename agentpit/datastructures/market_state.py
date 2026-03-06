@@ -4,6 +4,6 @@ from enum import Enum
 class MarketState(str, Enum):
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
-    RESOLVING = "RESOLVING"
+    CLOSED = "CLOSED"
     RESOLVED = "RESOLVED"
     CANCELLED = "CANCELLED"

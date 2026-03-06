@@ -339,15 +339,10 @@ def sync_polymarket_markets(
         active = pm_market.get("active")
         closed = pm_market.get("closed")
 
-        state = MarketState.DRAFT
         if active and not closed :
             state = MarketState.ACTIVE
-        elif not active and closed:
-            state = MarketState.RESOLVING
-        elif closed and active:
-            state = MarketState.RESOLVED
-
-
+        else:
+            state = MarketState.CLOSED
 
 
         request = CreateMarketRequest(
