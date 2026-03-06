@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from agentpit.common import check_state
 

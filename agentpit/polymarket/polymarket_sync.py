@@ -9,6 +9,7 @@ import json
 import re
 from datetime import datetime, timezone
 
+from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.utils.parse import _iso_to_unix
@@ -28,7 +29,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
-CONDITION_ID_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
+
 
 
 
@@ -260,28 +261,26 @@ def fetch_all_polymarket_markets(
 
 
 def fetch_polymarket_market(
-    condition_id: str, host: str = POLYMARKET_GAMMA_URL
+    condition_id: ConditionId, host: str = POLYMARKET_GAMMA_URL
 ) -> dict | None:
     """
     Fetch a single market from Polymarket by condition_id.
     """
-    if not isinstance(condition_id, str) or not CONDITION_ID_RE.fullmatch(condition_id):
-        return None
 
     try:
         # Gamma API filter may return empty/multiple results depending on deployment.
-        result = get(f"{host}/markets?condition_id={condition_id}")
+        result = get(f"{host}/markets?condition_id={condition_id.value}")
         if not isinstance(result, list) or len(result) == 0:
-            result = get(f"{host}/markets?conditionId={condition_id}")
+            result = get(f"{host}/markets?conditionId={condition_id.value}")
 
         if isinstance(result, list):
-            target = condition_id.lower()
+            target = condition_id.value.lower()
             for raw_market in result:
                 market = _normalize_market_fields(raw_market)
                 if (market.get("condition_id") or "").lower() == target:
                     return market
     except Exception as e:
-        logger.warning("Failed to fetch market %s: %s", condition_id, e)
+        logger.warning("Failed to fetch market %s: %s", condition_id.value, e)
     return None
 
 

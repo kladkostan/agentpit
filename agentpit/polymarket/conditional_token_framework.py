@@ -146,7 +146,7 @@ CTF_ABI = [{"constant": True, "inputs": [{"name": "owner", "type": "address"}, {
                                                          "name": "URI", "type": "event"}]
 
 CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-POLYGON_RPC = "https://polygon-rpc.com"
+POLYGON_RPC = "https://tenderly.rpc.polygon.community"
 
 
 class ConditionalTokenFramework:

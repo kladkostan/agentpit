@@ -3,8 +3,11 @@ from unittest.mock import patch
 
 import pytest
 
+from agentpit.common import check_state
+from agentpit.datastructures.condition_id import ConditionId
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
+from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _is_market_expired,
@@ -277,7 +280,14 @@ def test_fetch_polymarket_market_fetches_real_market_by_id():
     )
     assert sample is not None, "No market with condition_id and tokens found"
 
-    condition_id = sample["condition_id"]
+    condition_id_str : str = sample["condition_id"]
+
+    check_state(bool(condition_id_str))
+
+    condition_id = ConditionId(condition_id_str)
+
+    check_state(ConditionalTokenFramework.condition_exists(condition_id))
+
     market = fetch_polymarket_market(condition_id)
 
     assert market is not None, "fetch_polymarket_market returned None (check network/vpn?)"
