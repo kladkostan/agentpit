@@ -25,27 +25,6 @@ class Trade(BaseModel):
             raise ValueError("must be a non-empty string")
         return v
 
-    @field_validator("maker_orders")
-    @classmethod
-    def check_maker_orders(cls, v: Any) -> list[dict[str, Any]]:
-        if not isinstance(v, list) or not all(isinstance(x, dict) for x in v):
-            raise ValueError("maker_orders must be a list of dicts")
-        return v
-
-    @field_validator("price", "trade_size", "remaining_size", "match_time", "bucket_index", "fee_rate_bps")
-    @classmethod
-    def check_non_negative_int(cls, v: int) -> int:
-        if not isinstance(v, int) or v < 0:
-            raise ValueError("must be a non-negative int")
-        return v
-
-    @field_validator("side")
-    @classmethod
-    def check_side(cls, v: str) -> str:
-        if v not in {"BUY", "SELL"}:
-            raise ValueError('side must be "BUY" or "SELL"')
-        return v
-
     @property
     def dict(self) -> dict[str, Any]:
         return self.model_dump()

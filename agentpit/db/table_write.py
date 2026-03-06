@@ -260,7 +260,7 @@ class TableWrite:
         # Validate outcome index
         if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc1155_tokens):
             raise ValueError(
-                f"Invalid winning outcome index {winning_outcome_index}. "
+                f"Invalid winning_outcome_index {winning_outcome_index}. "
                 f"Market has {len(market.erc1155_tokens)} outcomes (indices 0-{len(market.erc1155_tokens)-1})"
             )
 
