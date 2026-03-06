@@ -1,4 +1,3 @@
-
 from web3 import Web3
 
 from agentpit.datastructures.condition_id import ConditionId
@@ -24,12 +23,32 @@ CTF_ABI = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "constant": True,
+        "inputs": [{"name": "conditionId", "type": "bytes32"}],
+        "name": "getOutcomeSlotCount",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "payable": False,
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 POLYGON_RPC = "https://polygon-rpc.com"
 
 class ConditionalTokenFramework:
+
+    @staticmethod
+    def get_outcome_slot_count(condition_id: ConditionId, web3: Web3 = None) -> int:
+        if web3 is None:
+            web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
+
+        contract_address = Web3.to_checksum_address(CTF_ADDRESS)
+        contract = web3.eth.contract(address=contract_address, abi=CTF_ABI)
+
+        condition_id_bytes = hex2bytes(condition_id.value)
+        return contract.functions.getOutcomeSlotCount(condition_id_bytes).call()
 
     @staticmethod
     def get_onchain_resolution_status(condition_id: ConditionId, web3: Web3 = None) -> OnchainResolutionStatus:
@@ -68,4 +87,3 @@ class ConditionalTokenFramework:
             denominator=denominator,
             resolved=current_sum >= denominator
         )
-
