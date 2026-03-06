@@ -1,6 +1,7 @@
 black==24.4.2
 eth-account>=0.12,<0.14
 eth-utils>=4,<5
+eth-typing>=3,<5
 poly_eip712_structs==0.0.1
 py_order_utils==0.3.2
 pytest==8.2.2
@@ -13,4 +14,4 @@ fastapi
 uvicorn
 pydantic-settings>=2.0
 setuptools
-web3>=6,<8
+web3>=6,<7
