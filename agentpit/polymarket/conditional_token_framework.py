@@ -150,6 +150,10 @@ POLYGON_RPC = "https://polygon-rpc.com"
 
 
 class ConditionalTokenFramework:
+
+    @staticmethod
+    def condition_exists(condition_id : ConditionId, web3: Web3 = None) -> bool:
+        return ConditionalTokenFramework.get_outcome_slot_count(condition_id, web3) > 0
     @staticmethod
     def get_outcome_slot_count(condition_id: ConditionId, web3: Web3 = None) -> int:
         if web3 is None:
@@ -174,14 +178,13 @@ class ConditionalTokenFramework:
         # Check if resolved
         # condition_id must be bytes32
 
-        condition_id_bytes = hex2bytes(condition_id.value)
-
-        slot_count = contract.functions.getOutcomeSlotCount(condition_id_bytes).call()
 
         check_state(
-            slot_count > 0,
-            f"Condition {condition_id.value} has zero outcome slots, cannot be resolved",
+            ConditionalTokenFramework.condition_exists(condition_id, web3),
+            f"Condition {condition_id.value} does not exist on chain",
         )
+
+        condition_id_bytes = hex2bytes(condition_id.value)
 
         denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
 

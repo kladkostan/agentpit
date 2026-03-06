@@ -200,15 +200,15 @@ class TestConditionalTokenFramework:
         # This test uses a public Polygon RPC.
         web3 = Web3(Web3.HTTPProvider("https://tenderly.rpc.polygon.community/"))
 
-        condition_id = ConditionId("0x84df4e5c5e0b5d2fdfd3e8a2eeef39b4e2ff1e70910542f91b3ef1aae36f5b60")
+        condition_id = ConditionId("0xe3b423dfad8c22ff75c9899c4e8176f628cf4ad4caa00481764d320e7415f7a9")
 
 
         slot_count = ConditionalTokenFramework.get_outcome_slot_count(condition_id, web3)
 
-        check_state(slot_count > 0, "Expected positive slot count for resolved market")
+        check_state(slot_count == 2, "Expected positive slot count for resolved market")
 
 
         status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id, web3)
 
-        assert status.resolved is False
-        assert status.get_winner_index() is None   # Payout for "Yes" is 1, "No" is 0
+        assert status.resolved is True
+        assert status.get_winner_index() == 1   # Payout for "Yes" is 1, "No" is 0

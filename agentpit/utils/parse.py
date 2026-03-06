@@ -106,6 +106,8 @@ def _iso_to_unix(ts: str) -> int:
 def hex2bytes(val: str) -> bytes:
     if val.startswith("0x"):
         return bytes.fromhex(val[2:])
+    if val.startswith("0X"):
+        return bytes.fromhex(val[2:])
     else:
         return bytes.fromhex(val)
 
