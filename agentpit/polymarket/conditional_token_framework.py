@@ -3,15 +3,8 @@ from dataclasses import dataclass
 
 from web3 import Web3
 
-@dataclass
-class OnchainResolutionStatus:
-    payouts: List[int]
-    denominator: int
-    resolved: bool
-
-@dataclass
-class ConditionId:
-    value: str
+from agentpit.datastructures.condition_id import ConditionId
+from agentpit.datastructures.onchain_resolution_status import OnchainResolutionStatus
 
 CTF_ABI = [
     {
