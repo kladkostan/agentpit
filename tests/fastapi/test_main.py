@@ -8,11 +8,16 @@ import pytest
 # Import all test functions from submodules
 from .test_basic import *
 from .test_markets import *
-from .test_usdc import *
+
+from .test_basic import *
+from .test_history import *
+from .test_lifecycle import *
+from .test_markets import *
+from .test_polymarket_sync import *
+from .test_portfolio import *
 from .test_positions import *
 from .test_resolution import *
-from .test_lifecycle import *
-from .test_portfolio import *
+from .test_usdc import *
 
 
 if __name__ == "__main__":
