@@ -4,7 +4,7 @@ from agentpit.fastapi import main
 
 
 def test_create_and_get_market():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         # First create a market
         payload = {
             "question": "Will it snow today?",
@@ -34,7 +34,7 @@ def test_create_and_get_market():
 
 
 def test_list_markets():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         # List markets when empty
         resp = client.get("/markets")
         assert resp.status_code == 200

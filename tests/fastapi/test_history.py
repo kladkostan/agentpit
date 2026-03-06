@@ -4,7 +4,7 @@ from agentpit.fastapi import main
 
 
 def test_get_transaction_history():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         api_key = "history_test_key"
 
         # 1. Initially, history should be empty

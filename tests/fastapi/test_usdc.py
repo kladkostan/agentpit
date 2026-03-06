@@ -4,7 +4,7 @@ from agentpit.fastapi import main
 
 
 def test_mint_usdc():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         payload = {
             "api_key": "test_api_key_123",
             "amount": 1000000,
@@ -30,7 +30,7 @@ def test_mint_usdc():
 
 
 def test_get_usdc_balance():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         api_key = "test_balance_key"
 
         # Check balance before minting (should be 0)
@@ -57,7 +57,7 @@ def test_get_usdc_balance():
 
 
 def test_transfer_usdc():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         sender_key = "sender_key"
         receiver_key = "receiver_key"
 
@@ -100,7 +100,7 @@ def test_transfer_usdc():
 
 
 def test_transfer_usdc_insufficient_balance():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         sender_key = "poor_sender"
         receiver_address = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
 

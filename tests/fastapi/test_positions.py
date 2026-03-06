@@ -4,7 +4,7 @@ from agentpit.fastapi import main
 
 
 def test_split_and_merge_positions():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         api_key = "shares_test_key"
 
         # Create a market
@@ -66,7 +66,7 @@ def test_split_and_merge_positions():
 
 
 def test_split_position_insufficient_usdc():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         api_key = "broke_user"
 
         # Create a market
@@ -89,7 +89,7 @@ def test_split_position_insufficient_usdc():
 
 
 def test_merge_positions_insufficient_tokens():
-    with TestClient(main.server) as client:
+    with TestClient(main.app) as client:
         api_key = "partial_holder"
 
         # Create a market

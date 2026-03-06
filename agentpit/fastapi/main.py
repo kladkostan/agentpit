@@ -12,7 +12,7 @@ async def lifespan(server: AgentPitServer):
     print("Agentpit server shutdown...")
     server.shutdown()
 
-server = AgentPitServer(lifespan=lifespan)
+app = AgentPitServer(lifespan=lifespan)
 
 # This part is for running the app directly
 if __name__ == "__main__":
