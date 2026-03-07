@@ -52,20 +52,20 @@ CTF_ABI = [{"constant": True, "inputs": [{"name": "owner", "type": "address"}, {
                                   "name": "getCollectionId", "outputs": [{"name": "", "type": "bytes32"}],
                                   "payable": False, "stateMutability": "view", "type": "function"}, {"constant": False,
                                                                                                      "inputs": [{
-                                                                                                                    "name": "collateralToken",
-                                                                                                                    "type": "address"},
-                                                                                                                {
-                                                                                                                    "name": "parentCollectionId",
-                                                                                                                    "type": "bytes32"},
-                                                                                                                {
-                                                                                                                    "name": "conditionId",
-                                                                                                                    "type": "bytes32"},
-                                                                                                                {
-                                                                                                                    "name": "partition",
-                                                                                                                    "type": "uint256[]"},
-                                                                                                                {
-                                                                                                                    "name": "amount",
-                                                                                                                    "type": "uint256"}],
+                                                                                                         "name": "collateralToken",
+                                                                                                         "type": "address"},
+                                                                                                         {
+                                                                                                             "name": "parentCollectionId",
+                                                                                                             "type": "bytes32"},
+                                                                                                         {
+                                                                                                             "name": "conditionId",
+                                                                                                             "type": "bytes32"},
+                                                                                                         {
+                                                                                                             "name": "partition",
+                                                                                                             "type": "uint256[]"},
+                                                                                                         {
+                                                                                                             "name": "amount",
+                                                                                                             "type": "uint256"}],
                                                                                                      "name": "mergePositions",
                                                                                                      "outputs": [],
                                                                                                      "payable": False,
@@ -152,12 +152,13 @@ POLYGON_RPC = "https://tenderly.rpc.polygon.community"
 class ConditionalTokenFramework:
 
     @staticmethod
-    def condition_exists(condition_id : ConditionId, web3: Web3 = None) -> bool:
-        return ConditionalTokenFramework.get_outcome_slot_count(condition_id, web3) > 0
+    def condition_exists(condition_id: ConditionId) -> bool:
+        return ConditionalTokenFramework.get_outcome_slot_count(condition_id) > 0
+
     @staticmethod
-    def get_outcome_slot_count(condition_id: ConditionId, web3: Web3 = None) -> int:
-        if web3 is None:
-            web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
+    def get_outcome_slot_count(condition_id: ConditionId) -> int:
+
+        web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
 
         contract_address = Web3.to_checksum_address(CTF_ADDRESS)
         contract = web3.eth.contract(address=contract_address, abi=CTF_ABI)
@@ -167,10 +168,10 @@ class ConditionalTokenFramework:
 
     @staticmethod
     def get_onchain_resolution_status(
-            condition_id: ConditionId, web3: Web3 = None
+            condition_id: ConditionId
     ) -> OnchainResolutionStatus:
-        if web3 is None:
-            web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
+
+        web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
 
         contract_address = Web3.to_checksum_address(CTF_ADDRESS)
         contract = web3.eth.contract(address=contract_address, abi=CTF_ABI)
@@ -178,9 +179,8 @@ class ConditionalTokenFramework:
         # Check if resolved
         # condition_id must be bytes32
 
-
         check_state(
-            ConditionalTokenFramework.condition_exists(condition_id, web3),
+            ConditionalTokenFramework.condition_exists(condition_id),
             f"Condition {condition_id.value} does not exist on chain",
         )
 
@@ -189,7 +189,7 @@ class ConditionalTokenFramework:
         denominator = contract.functions.payoutDenominator(condition_id_bytes).call()
 
         outcome_slot_count = ConditionalTokenFramework.get_outcome_slot_count(
-            condition_id, web3
+            condition_id
         )
 
         if denominator == 0:
