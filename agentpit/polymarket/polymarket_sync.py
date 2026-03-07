@@ -334,8 +334,10 @@ def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
 
-    check_state(ConditionalTokenFramework.condition_exists(ConditionId(request.condition_id)),
-                f"Condition {request.condition_id} does not exist on-chain")
+    if ConditionalTokenFramework.condition_exists(ConditionId(request.condition_id)):
+        logger.info("Checked condition exists for condition_id=%s", request.condition_id)
+    else:
+        logger.info("Checked condition does not exist for condition_id=%s", request.condition_id)
 
     existing_market_id = TableRead.read_market_id_by_polymarket_id(
         db, request.polymarket_id
