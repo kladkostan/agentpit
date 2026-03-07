@@ -4,7 +4,7 @@ from eth_abi import encode
 from agentpit.contract_simulators.contract_addresses import EASYNET_ORACLE_ADDRESS
 
 
-def compute_condition_id(question: str, outcome_slot_count: int) -> bytes:
+def compute_condition_id(question: str, outcome_slot_count: int) -> str:
     """
     Compute condition_id using keccak256(abi.encodePacked(oracle, questionId, outcomeSlotCount))
 
@@ -13,7 +13,7 @@ def compute_condition_id(question: str, outcome_slot_count: int) -> bytes:
         outcome_slot_count: Number of outcome slots
 
     Returns:
-        condition_id as bytes32
+        condition_id as string
     """
     # Compute question_id as keccak256 hash of the question
     question_id = keccak(text=question)
@@ -28,4 +28,7 @@ def compute_condition_id(question: str, outcome_slot_count: int) -> bytes:
     # address (20 bytes) + bytes32 (32 bytes) + uint256 (32 bytes)
     packed = oracle_bytes + question_id + outcome_slot_count.to_bytes(32, byteorder='big')
 
-    return keccak(packed)
+    raw_condition_id = keccak(packed)
+
+    condition_id = "0x" + raw_condition_id.hex()
+    return condition_id

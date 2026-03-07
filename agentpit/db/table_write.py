@@ -13,9 +13,7 @@ class TableWrite:
             db : sqlite3.Connection,
             request: CreateMarketRequest
     ) -> Market:
-        # Compute condition_id from question and number of outcomes
-        condition_id = compute_condition_id(request.question, len(request.erc1155_tokens))
-        condition_id_hex = "0x" + condition_id.hex()
+
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
         row = db.execute(
@@ -39,7 +37,7 @@ class TableWrite:
             """,
             (
                 next_market_id,
-                condition_id_hex,
+                request.condition_id,
                 request.polymarket_id,
                 request.question,
                 request.description,
@@ -55,7 +53,7 @@ class TableWrite:
             question=request.question,
             market_id=next_market_id,
             polymarket_id=request.polymarket_id,
-            condition_id=condition_id_hex,
+            condition_id=request.condition_id,
             description=request.description,
             slug=request.slug,
             erc1155_tokens=request.erc1155_tokens,
@@ -71,8 +69,6 @@ class TableWrite:
             request: CreateMarketRequest
     ) -> Market:
         # Compute condition_id from question and number of outcomes
-        condition_id = compute_condition_id(request.question, len(request.erc1155_tokens))
-        condition_id_hex = "0x" + condition_id.hex()
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
         # Fetch existing market details to preserve state and IDs
@@ -100,7 +96,7 @@ class TableWrite:
             WHERE POLYMARKET_ID = ?
             """,
             (
-                condition_id_hex,
+                request.condition_id,
                 request.question,
                 request.description,
                 request.slug,
@@ -116,7 +112,7 @@ class TableWrite:
             question=request.question,
             market_id=market_id,
             polymarket_id=request.polymarket_id,
-            condition_id=condition_id_hex,
+            condition_id=request.condition_id,
             description=request.description,
             slug=request.slug,
             erc1155_tokens=request.erc1155_tokens,

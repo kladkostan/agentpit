@@ -23,7 +23,7 @@ def check_state(expression: bool, msg: str = "") -> None:
 
     expr_text = info.code_context[0].strip() if info.code_context else "<unknown>"
 
-    base = f"Check failed::{expr_text} {file}:{line} {func}"
+    base = f"Check failed::{expr_text} \n {file}:{line} {func}"
     detail = f"(): {msg}" if msg else "()"
     raise HTTPException(400, base + detail)
 

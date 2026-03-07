@@ -15,6 +15,7 @@ from agentpit.common import check_state
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
+from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.utils.parse import _iso_to_unix
 from py_clob_client.http_helpers.helpers import get
 
@@ -332,6 +333,9 @@ def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]
 def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
+
+    check_state(ConditionalTokenFramework.condition_exists(ConditionId(request.condition_id)),
+                f"Condition {request.condition_id} does not exist on-chain")
 
     existing_market_id = TableRead.read_market_id_by_polymarket_id(
         db, request.polymarket_id

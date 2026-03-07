@@ -3,6 +3,7 @@ import time
 
 from agentpit.common import check_state
 from agentpit.datastructures.market_state import MarketState
+from agentpit.utils.condition_id import compute_condition_id
 
 
 class CreateMarketRequest(BaseModel):
@@ -13,6 +14,7 @@ class CreateMarketRequest(BaseModel):
     start_date: int | None = None
     end_date: int | None = None
     polymarket_id: int | None = None
+    condition_id: str | None = None
     state: MarketState = MarketState.DRAFT
 
     def model_post_init(self, __context):
@@ -32,3 +34,7 @@ class CreateMarketRequest(BaseModel):
         if self.start_date is not None and self.end_date is not None:
             check_state(self.end_date >= self.start_date,
                         "End date must be after or equal to start date")
+
+        if self.condition_id is None:
+            self.condition_id = compute_condition_id(self.question, len(self.erc1155_tokens))
+
