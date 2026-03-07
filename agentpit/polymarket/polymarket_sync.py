@@ -336,6 +336,7 @@ def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]
             logger.info("Added market: %s", pm_market)
             created_markets.append(market)
 
+
     logger.info(
         "Synced %d/%d Polymarket markets locally",
         len(created_markets),
