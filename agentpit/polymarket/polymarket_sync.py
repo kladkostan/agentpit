@@ -315,14 +315,11 @@ def fetch_and_sync_polymarket_markets(
 
 def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]:
 
-    created_markets = []
+    created_markets : list[Market] = []
     for pm_market in pm_markets:
-        create_market_request : CreateMarketRequest
 
         request = build_create_market_request_from_json(pm_market)
-
         check_state(bool(request.polymarket_id))
-
 
         existing_market_id = TableRead.read_market_id_by_polymarket_id(
             db, request.polymarket_id
