@@ -317,22 +317,9 @@ def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]
 
     created_markets : list[Market] = []
     for pm_market in pm_markets:
-
-        request = build_create_market_request_from_json(pm_market)
-        check_state(bool(request.polymarket_id))
-
-        existing_market_id = TableRead.read_market_id_by_polymarket_id(
-            db, request.polymarket_id
-        )
-
-        if existing_market_id is None:
-            market = TableWrite.create_market(
-                db,
-                request
-            )
-            logger.info("Added market: %s", pm_market)
+        market = create_or_sync_market(db, pm_market)
+        if market is not None:
             created_markets.append(market)
-
 
     logger.info(
         "Synced %d/%d Polymarket markets locally",
@@ -340,6 +327,24 @@ def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]
         len(pm_markets),
     )
     return created_markets
+
+
+def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
+    request = build_create_market_request_from_json(pm_market)
+    check_state(bool(request.polymarket_id))
+
+    existing_market_id = TableRead.read_market_id_by_polymarket_id(
+        db, request.polymarket_id
+    )
+
+    if existing_market_id is None:
+        market = TableWrite.create_market(
+            db,
+            request
+        )
+        logger.info("Added market: %s", pm_market)
+        return market
+    return None
 
 
 def build_create_market_request_from_json(pm_market: dict) -> CreateMarketRequest:
