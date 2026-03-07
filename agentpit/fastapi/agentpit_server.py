@@ -148,7 +148,7 @@ class AgentPitServer(FastAPI):
         self._ensure_db()
         return TableWrite.create_market(
             self._db,
-            payload
+            payload, False
         )
 
     def list_markets(self, limit: int = 100, offset: int = 0) -> ListMarketsResponse:

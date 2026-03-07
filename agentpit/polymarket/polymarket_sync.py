@@ -334,11 +334,7 @@ def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
 
-    if ConditionalTokenFramework.condition_exists(ConditionId(request.condition_id)):
-        logger.info("Checked condition exists for condition_id=%s", request.condition_id)
-    else:
-        logger.info("Checked condition does not exist for condition_id=%s", request.condition_id)
-
+    check_state(ConditionalTokenFramework.condition_exists(ConditionId(request.condition_id)))
     existing_market_id = TableRead.read_market_id_by_polymarket_id(
         db, request.polymarket_id
     )
@@ -346,7 +342,8 @@ def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
     if existing_market_id is None:
         market = TableWrite.create_market(
             db,
-            request
+            request,
+            True
         )
         logger.info("Added market: %s", pm_market)
         return market
@@ -363,6 +360,7 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
     end_date = pm_market.get("endDate")
     active = pm_market.get("active")
     closed = pm_market.get("closed")
+    condition_id = pm_market.get("conditionId")
 
     if active and not closed:
         state = MarketState.ACTIVE
@@ -377,7 +375,8 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
         slug=slug,
         start_date=_iso_to_unix(start_date),
         end_date=_iso_to_unix(end_date) if end_date is not None else None,
-        state=state
+        state=state,
+        condition_id=condition_id
     )
     return request
 

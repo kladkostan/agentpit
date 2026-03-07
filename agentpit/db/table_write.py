@@ -1,6 +1,7 @@
 import sqlite3
 import json
 
+from agentpit.common import check_state
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
@@ -11,8 +12,15 @@ class TableWrite:
     @staticmethod
     def create_market(
             db : sqlite3.Connection,
-            request: CreateMarketRequest
+            request: CreateMarketRequest, is_polygon_market: bool
     ) -> Market:
+
+        if not is_polygon_market:
+            condition_id = compute_condition_id(request.question, len(request.erc1155_tokens))
+        else:
+            check_state(request.condition_id is not None)
+            condition_id = request.condition_id
+
 
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
@@ -37,7 +45,7 @@ class TableWrite:
             """,
             (
                 next_market_id,
-                request.condition_id,
+                condition_id,
                 request.polymarket_id,
                 request.question,
                 request.description,
@@ -53,7 +61,7 @@ class TableWrite:
             question=request.question,
             market_id=next_market_id,
             polymarket_id=request.polymarket_id,
-            condition_id=request.condition_id,
+            condition_id=condition_id,
             description=request.description,
             slug=request.slug,
             erc1155_tokens=request.erc1155_tokens,

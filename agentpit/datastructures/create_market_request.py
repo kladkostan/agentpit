@@ -35,6 +35,4 @@ class CreateMarketRequest(BaseModel):
             check_state(self.end_date >= self.start_date,
                         "End date must be after or equal to start date")
 
-        if self.condition_id is None:
-            self.condition_id = compute_condition_id(self.question, len(self.erc1155_tokens))
 
