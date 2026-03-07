@@ -8,6 +8,8 @@ import sqlite3
 import json
 import re
 from datetime import datetime, timezone
+from sqlite3 import Connection
+from typing import Any
 
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
@@ -303,24 +305,17 @@ def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
     return result
 
 
-def sync_polymarket_markets(
+def fetch_and_sync_polymarket_markets(
     db: sqlite3.Connection,
     host: str = POLYMARKET_GAMMA_URL,
 ) -> list[Market]:
-    """
-    Fetch all markets from Polymarket and re-create them locally using
-    TableWrite.create_market.
-
-    Args:
-        db: An open sqlite3 connection with tables already created.
-        host: The Polymarket CLOB API base URL.
-
-    Returns:
-        A list of locally-created Market objects.
-    """
     pm_markets = fetch_all_polymarket_markets(host)
-    created_markets = []
+    return sync_polymarket_markets(db, pm_markets)
 
+
+def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]:
+
+    created_markets = []
     for pm_market in pm_markets:
         question = pm_market.get("question", "").strip()
         description = pm_market.get("description", "").strip()
@@ -330,7 +325,7 @@ def sync_polymarket_markets(
         start_date = pm_market.get("startDate")
         end_date = pm_market.get("endDate")
 
-        if (end_date is not None) :
+        if (end_date is not None):
             date = _iso_to_unix(end_date)
         else:
             date = None
@@ -338,7 +333,7 @@ def sync_polymarket_markets(
         active = pm_market.get("active")
         closed = pm_market.get("closed")
 
-        if active and not closed :
+        if active and not closed:
             state = MarketState.ACTIVE
         else:
             state = MarketState.CLOSED
@@ -351,7 +346,7 @@ def sync_polymarket_markets(
             slug=slug,
             start_date=_iso_to_unix(start_date),
             end_date=_iso_to_unix(end_date) if end_date is not None else None,
-            state = state
+            state=state
         )
 
         # Skip markets with missing or invalid data
@@ -368,11 +363,9 @@ def sync_polymarket_markets(
             )
             continue
 
-
         # Default description if empty
         if not description:
             description = question
-
 
         existing_market_id = None
         if polymarket_id is not None:
@@ -388,13 +381,13 @@ def sync_polymarket_markets(
             logger.info("Added market: %s", pm_market)
             created_markets.append(market)
 
-
     logger.info(
         "Synced %d/%d Polymarket markets locally",
         len(created_markets),
         len(pm_markets),
     )
     return created_markets
+
 
 @staticmethod
 def update_market_outcomes(db: sqlite3.Connection) -> None:

@@ -14,7 +14,7 @@ from agentpit.polymarket.polymarket_sync import (
     _polymarket_to_erc1155_tokens,
     fetch_all_polymarket_markets,
     fetch_polymarket_market,
-    sync_polymarket_markets,
+    fetch_and_sync_polymarket_markets,
 )
 
 
@@ -268,7 +268,7 @@ def test_fetch_all_polymarket_markets_string_boolean_fields_are_normalized(mock_
 def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     """Test syncing live Polymarket markets into a local DB."""
     # This will hit the actual Polymarket API
-    created_markets = sync_polymarket_markets(db)
+    created_markets = fetch_and_sync_polymarket_markets(db)
 
     # We expect many markets to be created, but the exact number varies.
     # Let's check that a reasonable number were created.
@@ -289,6 +289,6 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     assert len(first_db.erc1155_tokens) > 0
 
     # now do it again as an update
-    created_markets = sync_polymarket_markets(db)
+    created_markets = fetch_and_sync_polymarket_markets(db)
 
     assert created_markets == []  # No new markets should be created on second sync
