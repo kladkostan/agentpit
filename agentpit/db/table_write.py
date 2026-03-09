@@ -2,6 +2,7 @@ import sqlite3
 import json
 
 from agentpit.common import check_state
+from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
@@ -373,16 +374,26 @@ class TableWrite:
     @staticmethod
     def update_market_state_to_resolved_if_needed(
             db: sqlite3.Connection,
-            market_id: int,
+            condition_id: ConditionId,
             winning_outcome_index: int
     ) -> Market:
+        """
+        Idempotently resolves a market. If already resolved or cancelled, does nothing.
 
+        Args:
+            db: Database connection
+            condition_id: Condition ID of the market to resolve
+            winning_outcome_index: Index of the winning outcome
+
+        Returns:
+            Updated Market object
+        """
         from agentpit.db.table_read import TableRead
 
         # Get current market
-        market = TableRead.read_market(db, market_id)
+        market = TableRead.read_market_by_condition_id(db, condition_id)
         if not market:
-            raise ValueError(f"Market {market_id} not found")
+            raise ValueError(f"Market with condition_id {condition_id} not found")
 
         if market.market_state == MarketState.RESOLVED or market.market_state == MarketState.CANCELLED:
             return market
@@ -395,8 +406,8 @@ class TableWrite:
             )
 
         db.execute(
-            "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE MARKET_ID = ?",
-            (MarketState.RESOLVED.value, winning_outcome_index, market_id)
+            "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE CONDITION_ID = ?",
+            (MarketState.RESOLVED.value, winning_outcome_index, market.condition_id.value)
         )
 
         market.market_state = MarketState.RESOLVED

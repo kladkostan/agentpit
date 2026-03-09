@@ -35,6 +35,26 @@ class TableRead:
         return row is not None
 
     @staticmethod
+    def get_market_status_by_condition_id(
+        db: sqlite3.Connection, condition_id: str
+    ) -> tuple[MarketState, int | None] | None:
+        """
+        Fetch the market state and resolved outcome by CONDITION_ID.
+
+        Returns:
+            Tuple of (MarketState, resolved_outcome) if found, otherwise None.
+        """
+        row = db.execute(
+            "SELECT COALESCE(MARKET_STATE, 'DRAFT'), RESOLVED_OUTCOME FROM markets WHERE CONDITION_ID = ? LIMIT 1",
+            (condition_id,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return MarketState(row[0]), row[1]
+
+    @staticmethod
     def get_erc20_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
     ) -> int:
@@ -139,6 +159,50 @@ class TableRead:
             market_id=market_id_val,
             polymarket_id=polymarket_id,
             condition_id=condition_id,
+            description=description,
+            slug=slug,
+            start_date=start_date,
+            end_date=end_date,
+            erc1155_tokens=erc1155_tokens,
+            market_state=MarketState(market_state),
+            resolved_outcome=resolved_outcome,
+        )
+
+    @staticmethod
+    def read_market_by_condition_id(db: sqlite3.Connection, condition_id: ConditionId) -> Market | None:
+        """
+        Fetch a single market by CONDITION_ID.
+
+        Returns:
+            Market instance if found, otherwise None.
+        """
+        cur = db.execute(
+            """
+            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, SLUG,
+                   START_DATE, END_DATE, erc1155_TOKENS,
+                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
+                   RESOLVED_OUTCOME
+            FROM markets
+            WHERE CONDITION_ID = ?
+            """,
+            (condition_id.value,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+
+        (market_id_val, polymarket_id,
+         cond_id, question, description, slug, start_date, end_date, erc1155_tokens_json,
+         market_state, resolved_outcome) = row
+
+        # JSON errors propagate; no exception handling here
+        erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
+
+        return Market(
+            question=question,
+            market_id=market_id_val,
+            polymarket_id=polymarket_id,
+            condition_id=ConditionId(cond_id),
             description=description,
             slug=slug,
             start_date=start_date,
