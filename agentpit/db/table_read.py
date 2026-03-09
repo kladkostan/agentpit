@@ -142,7 +142,7 @@ class TableRead:
         return acct
 
     @staticmethod
-    def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
+    def get_eth_address_for_api_key_creating_if_needed(db: sqlite3.Connection, api_key: str) -> str:
         acct = TableRead.get_private_key_for_api_key(db, api_key)
         return acct.address
 
