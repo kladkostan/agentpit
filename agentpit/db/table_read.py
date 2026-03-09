@@ -55,6 +55,26 @@ class TableRead:
         return MarketState(row[0]), row[1]
 
     @staticmethod
+    def get_market_state(
+        db: sqlite3.Connection, condition_id: ConditionId
+    ) -> MarketState | None:
+        """
+        Fetch the market state by CONDITION_ID.
+
+        Returns:
+            MarketState if found, otherwise None.
+        """
+        row = db.execute(
+            "SELECT COALESCE(MARKET_STATE, 'DRAFT') FROM markets WHERE CONDITION_ID = ? LIMIT 1",
+            (condition_id.value,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return MarketState(row[0])
+
+    @staticmethod
     def get_erc20_asset_ownership(
         db: sqlite3.Connection, eth_address: str, asset_address: str
     ) -> int:

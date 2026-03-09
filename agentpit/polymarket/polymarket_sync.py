@@ -6,7 +6,6 @@ using TableWrite.create_market.
 import logging
 import sqlite3
 import json
-import re
 from datetime import datetime, timezone
 from sqlite3 import Connection
 from typing import Any
@@ -33,6 +32,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
+CLOB_MARKET_URL = "https://clob.polymarket.com/markets"
 
 
 
@@ -264,11 +264,45 @@ def fetch_all_polymarket_markets(
     return all_markets
 
 
+def fetch_is_polymarket_market_closed(condition_id: ConditionId) -> bool:
+
+    url = f"{CLOB_MARKET_URL}/{condition_id.value}"
+    raw = get(url)
+    logger.info("CLOB single-market fetch raw result: %s", raw)
+
+    # Normalize shape.
+    market_raw: dict | None
+    if isinstance(raw, dict):
+        market_raw = raw
+    elif isinstance(raw, list):
+        # Pick the first dict whose conditionId/condition_id matches.
+        market_raw = None
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            normalized = _normalize_market_fields(item)
+            cid = normalized.get("condition_id")
+            if cid is not None and str(cid).lower() == condition_id.value.lower():
+                market_raw = item
+                break
+
+    check_state(bool(market_raw))
+
+    market = _normalize_market_fields(market_raw)
+
+    cid = market.get("condition_id")
+    check_state(cid is not None)
+    check_state((cid).lower() == condition_id.value.lower())
+    coerced = _to_bool(market.get("closed"))
+    check_state(coerced is not None)
+    return coerced
+
+
 def fetch_polymarket_market(
     condition_id: ConditionId, host: str = POLYMARKET_GAMMA_URL
 ) -> dict | None:
     """
-    Fetch a single market from Polymarket by condition_id.
+    Fetch a single market from Polymarket by condition_id using the Gamma API.
 
     Gamma API returns a list; we pick the first matching entry.
     """
@@ -286,11 +320,13 @@ def fetch_polymarket_market(
         markets = [result]
     else:
         return None
-    check_state(len(markets) <= 1, f"Expected 1 market, got {len(markets)}")
 
+    # Gamma *should* return one market, but in practice can return multiple.
+    # We choose the first exact condition_id match after normalization.
     for raw in markets:
+        if not isinstance(raw, dict):
+            continue
         m = _normalize_market_fields(raw)
-        # Normalize both to plain strings for comparison
         cid = m.get("condition_id")
         if cid is None:
             continue
@@ -298,6 +334,12 @@ def fetch_polymarket_market(
             return m
 
     # No matching market found
+    if len(markets) > 1:
+        logger.warning(
+            "Gamma returned %d markets for conditionId=%s but none matched exactly",
+            len(markets),
+            condition_id.value,
+        )
     return None
 
 
@@ -325,12 +367,14 @@ def fetch_and_sync_polymarket_markets(
     host: str = POLYMARKET_GAMMA_URL,
 ) -> list[Market]:
     pm_markets = fetch_all_polymarket_markets(host)
-    create_polymarket_markets_if_needed(db, pm_markets)
+    created_markets = create_polymarket_markets_if_needed(db, pm_markets)
 
     all_markets = TableRead.list_all_markets(db)
     for market in all_markets:
         if market.polymarket_id is not None:
             sync_market_state(db, market.condition_id)
+    return created_markets
+
 
 def create_polymarket_markets_if_needed(db: Connection, pm_markets: list[dict]) -> list[Any]:
 
@@ -368,11 +412,16 @@ def create_polygon_market_if_does_not_exist(db: Connection, pm_market: dict) -> 
 
 
 def sync_market_state(db: Connection, condition_id: ConditionId) -> None:
-    pm_market = fetch_polymarket_market(condition_id)
-    check_state(ConditionalTokenFramework.condition_exists(condition_id))
-    status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id)
-    if status.resolved:
-            TableWrite.update_market_state_to_resolved_if_needed(db, status.get_winner_index())
+    state = TableRead.get_market_state(db, condition_id)
+    if state == MarketState.DRAFT or state == MarketState.ACTIVE:
+        closed = fetch_is_polymarket_market_closed(condition_id)
+        if (closed):
+            TableWrite.update_market_state_to_closed_if_needed(db)
+    if state == MarketState.DRAFT or state == MarketState.ACTIVE or state == MarketState.CLOSED:
+        check_state(ConditionalTokenFramework.condition_exists(condition_id))
+        status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id)
+        if status.resolved:
+                TableWrite.update_market_state_to_resolved_if_needed(db, status.get_winner_index())
 
 def build_create_market_request_from_json(pm_market: dict) -> CreateMarketRequest:
     question = pm_market.get("question", "").strip()
