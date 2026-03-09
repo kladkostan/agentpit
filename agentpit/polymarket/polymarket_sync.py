@@ -286,6 +286,7 @@ def fetch_polymarket_market(
         markets = [result]
     else:
         return None
+    check_state(len(markets) <= 1, f"Expected 1 market, got {len(markets)}")
 
     for raw in markets:
         m = _normalize_market_fields(raw)
