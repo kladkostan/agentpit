@@ -318,7 +318,7 @@ def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]
 
     created_markets : list[Market] = []
     for pm_market in pm_markets:
-        market = create_or_sync_market(db, pm_market)
+        market = create_polygon_market_if_does_not_exist(db, pm_market)
         if market is not None:
             created_markets.append(market)
 
@@ -330,12 +330,12 @@ def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]
     return created_markets
 
 
-def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
+def create_polygon_market_if_does_not_exist(db: Connection, pm_market: dict) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
 
     check_state(ConditionalTokenFramework.condition_exists(request.condition_id))
-    existing_market_id = TableRead.read_market_id_by_polymarket_id(
+    existing_market_id = TableRead.read_condition_id_by_polymarket_id(
         db, request.polymarket_id
     )
 
@@ -347,11 +347,16 @@ def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
         )
         logger.info("Added market: %s", pm_market)
         return market
-    else:
-        status = ConditionalTokenFramework.get_onchain_resolution_status(request.condition_id)
-        if status.resolved is True:
+
+
+def sync_market_state(db: Connection, pm_market: ConditionId) -> None:
+    request = build_create_market_request_from_json(pm_market)
+    check_state(bool(request.polymarket_id))
+
+    check_state(ConditionalTokenFramework.condition_exists(request.condition_id))
+    status = ConditionalTokenFramework.get_onchain_resolution_status(request.condition_id)
+    if status.resolved:
             TableWrite.update_market_state_to_resolved_if_needed(db, status.get_winner_index())
-        return None
 
 def build_create_market_request_from_json(pm_market: dict) -> CreateMarketRequest:
     question = pm_market.get("question", "").strip()
