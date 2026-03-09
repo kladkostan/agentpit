@@ -2,9 +2,10 @@ from eth_utils import keccak
 from eth_abi import encode
 
 from agentpit.contract_simulators.contract_addresses import EASYNET_ORACLE_ADDRESS
+from agentpit.datastructures.condition_id import ConditionId
 
 
-def compute_condition_id(question: str, outcome_slot_count: int) -> str:
+def compute_condition_id(question: str, outcome_slot_count: int) -> ConditionId:
     """
     Compute condition_id using keccak256(abi.encodePacked(oracle, questionId, outcomeSlotCount))
 
@@ -31,4 +32,4 @@ def compute_condition_id(question: str, outcome_slot_count: int) -> str:
     raw_condition_id = keccak(packed)
 
     condition_id = "0x" + raw_condition_id.hex()
-    return condition_id
+    return ConditionId(condition_id)

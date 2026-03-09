@@ -2,6 +2,7 @@ from pydantic import BaseModel
 import time
 
 from agentpit.common import check_state
+from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.market_state import MarketState
 from agentpit.utils.condition_id import compute_condition_id
 
@@ -14,7 +15,7 @@ class CreateMarketRequest(BaseModel):
     start_date: int | None = None
     end_date: int | None = None
     polymarket_id: int | None = None
-    condition_id: str | None = None
+    condition_id: ConditionId | None = None
     state: MarketState = MarketState.DRAFT
 
     def model_post_init(self, __context):

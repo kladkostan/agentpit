@@ -334,7 +334,7 @@ def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
 
-    check_state(ConditionalTokenFramework.condition_exists(ConditionId(request.condition_id)))
+    check_state(ConditionalTokenFramework.condition_exists(request.condition_id))
     existing_market_id = TableRead.read_market_id_by_polymarket_id(
         db, request.polymarket_id
     )
@@ -347,8 +347,11 @@ def create_or_sync_market(db: Connection, pm_market: dict) -> Market | None:
         )
         logger.info("Added market: %s", pm_market)
         return market
-    return None
-
+    else:
+        status = ConditionalTokenFramework.get_onchain_resolution_status(request.condition_id)
+        if status.resolved is True:
+            TableWrite.update_market_state_to_resolved_if_needed(db, status.get_winner_index())
+        return None
 
 def build_create_market_request_from_json(pm_market: dict) -> CreateMarketRequest:
     question = pm_market.get("question", "").strip()
@@ -376,7 +379,7 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
         start_date=_iso_to_unix(start_date),
         end_date=_iso_to_unix(end_date) if end_date is not None else None,
         state=state,
-        condition_id=condition_id
+        condition_id=ConditionId(condition_id)
     )
     return request
 

@@ -45,7 +45,7 @@ class TableWrite:
             """,
             (
                 next_market_id,
-                condition_id,
+                condition_id.value,
                 request.polymarket_id,
                 request.question,
                 request.description,
@@ -72,7 +72,7 @@ class TableWrite:
         )
 
     @staticmethod
-    def update_market(
+    def update_market_state_if_needed(
             db: sqlite3.Connection,
             request: CreateMarketRequest
     ) -> Market:
@@ -370,4 +370,35 @@ class TableWrite:
         market.market_state = MarketState.CANCELLED
         return market, refunds_processed
 
+    @staticmethod
+    def update_market_state_to_resolved_if_needed(
+            db: sqlite3.Connection,
+            market_id: int,
+            winning_outcome_index: int
+    ) -> Market:
 
+        from agentpit.db.table_read import TableRead
+
+        # Get current market
+        market = TableRead.read_market(db, market_id)
+        if not market:
+            raise ValueError(f"Market {market_id} not found")
+
+        if market.market_state == MarketState.RESOLVED or market.market_state == MarketState.CANCELLED:
+            return market
+
+        # Validate outcome index
+        if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc1155_tokens):
+            raise ValueError(
+                f"Invalid winning_outcome_index {winning_outcome_index}. "
+                f"Market has {len(market.erc1155_tokens)} outcomes"
+            )
+
+        db.execute(
+            "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE MARKET_ID = ?",
+            (MarketState.RESOLVED.value, winning_outcome_index, market_id)
+        )
+
+        market.market_state = MarketState.RESOLVED
+        market.resolved_outcome = winning_outcome_index
+        return market

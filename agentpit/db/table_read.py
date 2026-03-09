@@ -8,6 +8,7 @@ from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int, parse_3
 from .table_utils import TableUtils
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
+from ..datastructures.condition_id import ConditionId
 
 
 class TableRead:
@@ -190,7 +191,7 @@ class TableRead:
             (
                 market_id_val,
                 polymarket_id,
-                condition_id,
+                condition_id_str,
                 question,
                 description,
                 slug,
@@ -206,7 +207,7 @@ class TableRead:
                     question=question,
                     market_id=market_id_val,
                     polymarket_id=polymarket_id,
-                    condition_id=condition_id,
+                    condition_id=ConditionId(condition_id_str),
                     description=description,
                     slug=slug,
                     erc1155_tokens=erc1155_tokens,
