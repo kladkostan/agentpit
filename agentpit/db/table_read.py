@@ -213,6 +213,69 @@ class TableRead:
         )
 
     @staticmethod
+    def list_all_markets(db: sqlite3.Connection) -> list[Market]:
+        """
+        Fetch all markets from the database without pagination.
+
+        Args:
+            db: Database connection
+
+        Returns:
+            List of all Market instances
+        """
+        cur = db.execute(
+            """
+            SELECT MARKET_ID,
+                   POLYMARKET_ID,
+                   CONDITION_ID,
+                   QUESTION,
+                   DESCRIPTION,
+                   SLUG,
+                   erc1155_TOKENS,
+                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
+                   RESOLVED_OUTCOME,
+                   START_DATE,
+                   END_DATE
+            FROM markets
+            ORDER BY MARKET_ID
+            """
+        )
+
+        markets: list[Market] = []
+        for row in cur.fetchall():
+            (
+                market_id_val,
+                polymarket_id,
+                condition_id_str,
+                question,
+                description,
+                slug,
+                erc1155_tokens_json,
+                market_state,
+                resolved_outcome,
+                start_date,
+                end_date,
+            ) = row
+            erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
+            markets.append(
+                Market(
+                    question=question,
+                    market_id=market_id_val,
+                    polymarket_id=polymarket_id,
+                    condition_id=ConditionId(condition_id_str),
+                    description=description,
+                    slug=slug,
+                    erc1155_tokens=erc1155_tokens,
+                    market_state=MarketState(market_state),
+                    resolved_outcome=resolved_outcome,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            )
+
+        return markets
+
+    @staticmethod
     def list_markets(db: sqlite3.Connection, limit: int = 100, offset: int = 0) -> tuple[list[Market], int]:
         """
         Fetch a paginated list of markets.

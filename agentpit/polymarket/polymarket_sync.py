@@ -269,22 +269,34 @@ def fetch_polymarket_market(
 ) -> dict | None:
     """
     Fetch a single market from Polymarket by condition_id.
+
+    Gamma API returns a list; we pick the first matching entry.
     """
+    # Gamma expects the bare conditionId string
+    url = f"{host}/markets?conditionId={condition_id.value}"
+    result = get(url)
+    logger.info("Polymarket market fetch raw result: %s", result)
 
-    # Gamma API filter may return empty/multiple results depending on deployment.
-    result = get(f"{host}/markets?condition_id={condition_id.value}")
-    logger.info("Polymarket market fetch result: %s", result)
-    if not isinstance(result, list) or len(result) == 0:
-        result = get(f"{host}/markets?conditionId={condition_id.value}")
-        logger.info("Polymarket market fetch result (fallback): %s", result)
-
+    # Gamma returns a list; guard for unexpected shapes
+    markets: list[dict]
     if isinstance(result, list):
-        target = condition_id.value.lower()
-        for raw_market in result:
-            market = _normalize_market_fields(raw_market)
-            if (market.get("condition_id") or "").lower() == target:
-                return market
+        markets = result
+    elif isinstance(result, dict):
+        # Some helpers might already unwrap a single result
+        markets = [result]
+    else:
+        return None
 
+    for raw in markets:
+        m = _normalize_market_fields(raw)
+        # Normalize both to plain strings for comparison
+        cid = m.get("condition_id")
+        if cid is None:
+            continue
+        if str(cid).lower() == condition_id.value.lower():
+            return m
+
+    # No matching market found
     return None
 
 
@@ -312,9 +324,14 @@ def fetch_and_sync_polymarket_markets(
     host: str = POLYMARKET_GAMMA_URL,
 ) -> list[Market]:
     pm_markets = fetch_all_polymarket_markets(host)
-    return sync_polymarket_markets(db, pm_markets)
+    create_polymarket_markets_if_needed(db, pm_markets)
 
-def sync_polymarket_markets(db: Connection, pm_markets: list[dict]) -> list[Any]:
+    all_markets = TableRead.list_all_markets(db)
+    for market in all_markets:
+        if market.polymarket_id is not None:
+            sync_market_state(db, market.condition_id)
+
+def create_polymarket_markets_if_needed(db: Connection, pm_markets: list[dict]) -> list[Any]:
 
     created_markets : list[Market] = []
     for pm_market in pm_markets:
@@ -349,12 +366,10 @@ def create_polygon_market_if_does_not_exist(db: Connection, pm_market: dict) -> 
         return market
 
 
-def sync_market_state(db: Connection, pm_market: ConditionId) -> None:
-    request = build_create_market_request_from_json(pm_market)
-    check_state(bool(request.polymarket_id))
-
-    check_state(ConditionalTokenFramework.condition_exists(request.condition_id))
-    status = ConditionalTokenFramework.get_onchain_resolution_status(request.condition_id)
+def sync_market_state(db: Connection, condition_id: ConditionId) -> None:
+    pm_market = fetch_polymarket_market(condition_id)
+    check_state(ConditionalTokenFramework.condition_exists(condition_id))
+    status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id)
     if status.resolved:
             TableWrite.update_market_state_to_resolved_if_needed(db, status.get_winner_index())
 
