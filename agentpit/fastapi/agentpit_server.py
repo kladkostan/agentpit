@@ -149,7 +149,7 @@ class AgentPitServer(FastAPI):
     def create_market(self, payload: CreateMarketRequest) -> Market:
         with self._rw_lock.write_lock():
             self._ensure_db()
-            with self.db:
+            with self._db:
                 return TableWrite.create_market(
                     self._db,
                     payload, False
@@ -183,7 +183,7 @@ class AgentPitServer(FastAPI):
     def mint_usdc(self, payload: MintUsdcRequest) -> MintUsdcResponse:
         with self._rw_lock.write_lock():
             self._ensure_db()
-            with self.db:
+            with self._db:
                 # Get the ETH address for this API key
                 eth_address = TableRead.get_eth_address_for_api_key_creating_if_needed(self._db, payload.api_key)
 
@@ -212,7 +212,7 @@ class AgentPitServer(FastAPI):
         with self._rw_lock.write_lock():
             self._ensure_db()
             # Get the ETH address for this API key
-            with self.db:
+            with self._db:
                 eth_address = TableRead.get_eth_address_for_api_key_creating_if_needed(self._db, api_key)
 
             # Get the balance
@@ -230,7 +230,7 @@ class AgentPitServer(FastAPI):
     def transfer_usdc(self, payload: TransferUsdcRequest) -> TransferUsdcResponse:
         with self._rw_lock.write_lock():
             self._ensure_db()
-            with self.db:
+            with self._db:
                 # Get the ETH address for this API key
                 from_address = TableRead.get_eth_address_for_api_key_creating_if_needed(self._db, payload.api_key)
 
@@ -269,7 +269,7 @@ class AgentPitServer(FastAPI):
         """
         with self._rw_lock.write_lock():
             self._ensure_db()
-            with self.db:
+            with self._db:
 
                 # Get market to find outcome tokens
                 market = TableRead.read_market(self._db, market_id)
