@@ -1,5 +1,9 @@
 import sqlite3
 import json
+import uuid
+from web3 import Web3
+from eth_account import Account
+from eth_account.signers.local import LocalAccount
 
 from agentpit.common import check_state
 from agentpit.datastructures.condition_id import ConditionId
@@ -10,6 +14,21 @@ from agentpit.utils.condition_id import compute_condition_id
 
 
 class TableWrite:
+    @staticmethod
+    def create_user(db: sqlite3.Connection, user_id: str) -> str:
+        acct: LocalAccount = Account.create()
+        key_hex: str = Web3.to_hex(acct.key)
+        api_key: str = str(uuid.uuid4())
+
+        db.execute(
+            """
+            INSERT INTO users (API_KEY, ETH_PRIVATE_KEY, user_id)
+            VALUES (?, ?, ?)
+            """,
+            (api_key, key_hex, user_id),
+        )
+        return api_key
+
     @staticmethod
     def create_market(
             db : sqlite3.Connection,

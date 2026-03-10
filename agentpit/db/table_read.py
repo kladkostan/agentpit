@@ -9,6 +9,7 @@ from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int, parse_3
 from .table_utils import TableUtils
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
+from agentpit.datastructures.user import User
 from ..datastructures.condition_id import ConditionId
 
 
@@ -147,6 +148,52 @@ class TableRead:
     def get_eth_address_for_api_key_creating_if_needed(db: sqlite3.Connection, api_key: str) -> str:
         acct = TableRead.get_private_key_for_api_key(db, api_key)
         return acct.address
+
+    @staticmethod
+    def get_user_by_userid(db: sqlite3.Connection, user_id: str) -> User | None:
+        """
+        Fetch a user by their user_id.
+        """
+        row = db.execute(
+            "SELECT API_KEY, ETH_PRIVATE_KEY FROM users WHERE user_id = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        api_key_val, eth_private_key = row
+        existing_key = parse_32b_hex_private_key(eth_private_key)
+        acct = Account.from_key(existing_key)
+
+        return User(
+            user_id=user_id,
+            eth_key=acct,
+            api_key=api_key_val
+        )
+
+    @staticmethod
+    def get_user_by_api_key(db: sqlite3.Connection, api_key: str) -> User | None:
+        """
+        Fetch a user by their API key.
+        """
+        row = db.execute(
+            "SELECT user_id, ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
+            (api_key,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        user_id_val, eth_private_key = row
+        existing_key = parse_32b_hex_private_key(eth_private_key)
+        acct = Account.from_key(existing_key)
+
+        return User(
+            user_id=user_id_val,
+            eth_key=acct,
+            api_key=api_key
+        )
 
     @staticmethod
     def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:
