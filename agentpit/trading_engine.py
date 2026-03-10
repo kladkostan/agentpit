@@ -42,7 +42,7 @@ class OrderStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class ClobDB:
+class TradingEngine:
     _STRICT = ConfigDict(strict=True, arbitrary_types_allowed=True)
 
     @validate_call(config=_STRICT)
