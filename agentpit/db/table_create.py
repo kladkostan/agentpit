@@ -148,6 +148,20 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_agents_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agents (
+                AGENT_ID INTEGER PRIMARY KEY,
+                API_KEY TEXT NOT NULL UNIQUE,
+                PERSONALITY TEXT NOT NULL,
+                FOREIGN KEY (API_KEY) REFERENCES keys(API_KEY)
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_agents_api_key ON agents(API_KEY)")
+
+    @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(db)
@@ -155,5 +169,6 @@ class TableCreate:
         TableCreate.create_erc20_token_ownership_table(db)
         TableCreate.create_erc1155_token_ownership_table(db)
         TableCreate.create_keys_table(db)
+        TableCreate.create_agents_table(db)
         TableCreate.create_markets_table(db)
         TableCreate.create_transactions_table(db)
