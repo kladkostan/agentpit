@@ -169,7 +169,7 @@ class TableRead:
         if row is None:
             return None
 
-        market_id_val, polymarket_id, condition_id, question, description, slug, start_date, end_date, erc1155_tokens_json, market_state, resolved_outcome = row
+        market_id_val, polymarket_id, condition_id_str, question, description, slug, start_date, end_date, erc1155_tokens_json, market_state, resolved_outcome = row
 
         # JSON errors propagate; no exception handling here
         erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
@@ -178,7 +178,7 @@ class TableRead:
             question=question,
             market_id=market_id_val,
             polymarket_id=polymarket_id,
-            condition_id=condition_id,
+            condition_id=ConditionId(condition_id_str),
             description=description,
             slug=slug,
             start_date=start_date,
