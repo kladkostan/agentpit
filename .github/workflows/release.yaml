@@ -27,7 +27,7 @@ jobs:
           pip install -e .
 
       - name: Run Tests
-        run: make test
+        run: pytest tests/fastapi -q
 
       # If your build system reads version dynamically, set it here.
       # Common pattern: setuptools-scm or hatch-vcs will pick up the git tag automatically.
