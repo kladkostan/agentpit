@@ -23,6 +23,8 @@ from agentpit.datastructures.portfolio_response import PortfolioResponse, Positi
 from agentpit.datastructures.transaction_history_response import TransactionHistoryResponse
 from agentpit.datastructures.create_user_request import CreateUserRequest
 from agentpit.datastructures.create_user_response import CreateUserResponse
+from agentpit.datastructures.create_personality_request import CreatePersonalityRequest
+from agentpit.datastructures.create_personality_response import CreatePersonalityResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -136,6 +138,12 @@ class AgentPitServer(FastAPI):
             methods=["POST"],
             response_model=CreateUserResponse,
         )
+        self.add_api_route(
+            "/create_personality",
+            self.create_personality,
+            methods=["POST"],
+            response_model=CreatePersonalityResponse,
+        )
 
     def _connect_db(self) -> None:
         self._db = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -175,6 +183,29 @@ class AgentPitServer(FastAPI):
                 user_id=payload.user_id,
                 api_key=api_key,
                 eth_address=user.eth_key.address,
+            )
+
+    def create_personality(self, payload: CreatePersonalityRequest) -> CreatePersonalityResponse:
+        """Create a new personality from title, beliefs, methods and needs."""
+        with self._rw_lock.write_lock():
+            self._ensure_db()
+            with self._db:
+                personality_id = TableWrite.create_personality(
+                    self._db,
+                    payload.title,
+                    payload.beliefs,
+                    payload.methods,
+                    payload.needs,
+                )
+            spec = {
+                "beliefs": payload.beliefs,
+                "methods": payload.methods,
+                "needs": payload.needs,
+            }
+            return CreatePersonalityResponse(
+                personality_id=personality_id,
+                title=payload.title,
+                spec=spec,
             )
 
     def create_market(self, payload: CreateMarketRequest) -> Market:

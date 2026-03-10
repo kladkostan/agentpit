@@ -170,9 +170,7 @@ class TableCreate:
             CREATE TABLE IF NOT EXISTS personalities (
                 PERSONALITY_ID INTEGER PRIMARY KEY AUTOINCREMENT,
                 TITLE TEXT NOT NULL,
-                BELIEFS TEXT NOT NULL,
-                METHODS TEXT NOT NULL,
-                NEEDS TEXT NOT NULL
+                SPEC TEXT NOT NULL
             )
             """
         )

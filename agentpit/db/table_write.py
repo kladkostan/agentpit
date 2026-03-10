@@ -30,6 +30,23 @@ class TableWrite:
         return api_key
 
     @staticmethod
+    def create_personality(
+        db: sqlite3.Connection, title: str, beliefs: str, methods: str, needs: str
+    ) -> int:
+        spec = json.dumps(
+            {"beliefs": beliefs, "methods": methods, "needs": needs},
+            separators=(",", ":"),
+        )
+        cursor = db.execute(
+            """
+            INSERT INTO personalities (TITLE, SPEC)
+            VALUES (?, ?)
+            """,
+            (title, spec),
+        )
+        return cursor.lastrowid
+
+    @staticmethod
     def create_market(
             db : sqlite3.Connection,
             request: CreateMarketRequest, is_polygon_market: bool
