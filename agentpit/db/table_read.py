@@ -116,7 +116,7 @@ class TableRead:
         db: sqlite3.Connection, api_key: str
     ) -> LocalAccount:
         row = db.execute(
-            "SELECT ETH_PRIVATE_KEY FROM keys WHERE API_KEY = ? LIMIT 1",
+            "SELECT ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
             (api_key,),
         ).fetchone()
 
@@ -133,7 +133,7 @@ class TableRead:
         with db:
             db.execute(
                 """
-                INSERT INTO keys (API_KEY, ETH_PRIVATE_KEY)
+                INSERT INTO users (API_KEY, ETH_PRIVATE_KEY)
                 VALUES (?, ?)
                 """,
                 (api_key, key_hex),

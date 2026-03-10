@@ -97,15 +97,16 @@ class TableCreate:
         )
 
     @staticmethod
-    def create_keys_table(db: sqlite3.Connection) -> None:
+    def create_users_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
-            CREATE TABLE IF NOT EXISTS keys (
+            CREATE TABLE IF NOT EXISTS users (
                 API_KEY TEXT PRIMARY KEY,
                 ETH_PRIVATE_KEY TEXT NOT NULL
             )
             """
         )
+
 
     @staticmethod
     def create_markets_table(db: sqlite3.Connection) -> None:
@@ -155,7 +156,7 @@ class TableCreate:
                 AGENT_ID INTEGER PRIMARY KEY,
                 API_KEY TEXT NOT NULL UNIQUE,
                 PERSONALITY TEXT NOT NULL,
-                FOREIGN KEY (API_KEY) REFERENCES keys(API_KEY)
+                FOREIGN KEY (API_KEY) REFERENCES users(API_KEY)
             )
             """
         )
@@ -168,7 +169,7 @@ class TableCreate:
         TableCreate.create_trades_table(db)
         TableCreate.create_erc20_token_ownership_table(db)
         TableCreate.create_erc1155_token_ownership_table(db)
-        TableCreate.create_keys_table(db)
+        TableCreate.create_users_table(db)
         TableCreate.create_agents_table(db)
         TableCreate.create_markets_table(db)
         TableCreate.create_transactions_table(db)
