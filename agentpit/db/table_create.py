@@ -102,7 +102,8 @@ class TableCreate:
             """
             CREATE TABLE IF NOT EXISTS users (
                 API_KEY TEXT PRIMARY KEY,
-                ETH_PRIVATE_KEY TEXT NOT NULL
+                ETH_PRIVATE_KEY TEXT NOT NULL,
+                user_id TEXT UNIQUE
             )
             """
         )

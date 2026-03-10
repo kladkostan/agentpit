@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import uuid
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
@@ -129,14 +130,15 @@ class TableRead:
         # No row: generate once and insert. Any DB / Web3 error propagates.
         acct: LocalAccount = Account.create()
         key_hex: str = Web3.to_hex(acct.key)
+        user_id: str = str(uuid.uuid4())
 
         with db:
             db.execute(
                 """
-                INSERT INTO users (API_KEY, ETH_PRIVATE_KEY)
-                VALUES (?, ?)
+                INSERT INTO users (API_KEY, ETH_PRIVATE_KEY, user_id)
+                VALUES (?, ?, ?)
                 """,
-                (api_key, key_hex),
+                (api_key, key_hex, user_id),
             )
 
         return acct
