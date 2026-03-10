@@ -21,6 +21,8 @@ from agentpit.datastructures.redeem_position_response import RedeemPositionRespo
 from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.datastructures.portfolio_response import PortfolioResponse, Position
 from agentpit.datastructures.transaction_history_response import TransactionHistoryResponse
+from agentpit.datastructures.create_user_request import CreateUserRequest
+from agentpit.datastructures.create_user_response import CreateUserResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -128,6 +130,12 @@ class AgentPitServer(FastAPI):
             methods=["GET"],
             response_model=TransactionHistoryResponse,
         )
+        self.add_api_route(
+            "/create_user",
+            self.create_user,
+            methods=["POST"],
+            response_model=CreateUserResponse,
+        )
 
     def _connect_db(self) -> None:
         self._db = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -145,6 +153,29 @@ class AgentPitServer(FastAPI):
     def get_version(self) -> dict[str, str]:
         with self._rw_lock.read_lock():
             return {"version": "1.0"}
+
+    def create_user(self, payload: CreateUserRequest) -> CreateUserResponse:
+        """Create a new user with the given user_id. Returns the api_key and eth_address."""
+        with self._rw_lock.write_lock():
+            self._ensure_db()
+            with self._db:
+                # Check if user already exists
+                existing = TableRead.get_user_by_userid(self._db, payload.user_id)
+                if existing is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"User '{payload.user_id}' already exists",
+                    )
+
+                api_key = TableWrite.create_user(self._db, payload.user_id)
+
+            # Read back the created user to get the eth_address
+            user = TableRead.get_user_by_userid(self._db, payload.user_id)
+            return CreateUserResponse(
+                user_id=payload.user_id,
+                api_key=api_key,
+                eth_address=user.eth_key.address,
+            )
 
     def create_market(self, payload: CreateMarketRequest) -> Market:
         with self._rw_lock.write_lock():
