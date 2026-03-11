@@ -101,9 +101,9 @@ class TableCreate:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
-                API_KEY TEXT PRIMARY KEY,
-                ETH_PRIVATE_KEY TEXT NOT NULL,
-                user_id TEXT UNIQUE
+                USER_ID TEXT PRIMARY KEY,
+                API_KEY TEXT NOT NULL UNIQUE,
+                ETH_PRIVATE_KEY TEXT NOT NULL UNIQUE
             )
             """
         )

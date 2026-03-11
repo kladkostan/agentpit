@@ -22,10 +22,10 @@ class TableWrite:
 
         db.execute(
             """
-            INSERT INTO users (API_KEY, ETH_PRIVATE_KEY, user_id)
+            INSERT INTO users (USER_ID, API_KEY, ETH_PRIVATE_KEY)
             VALUES (?, ?, ?)
             """,
-            (api_key, key_hex, user_id),
+            (user_id, api_key, key_hex),
         )
         return api_key
 

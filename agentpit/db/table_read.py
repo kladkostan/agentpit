@@ -136,10 +136,10 @@ class TableRead:
         with db:
             db.execute(
                 """
-                INSERT INTO users (API_KEY, ETH_PRIVATE_KEY, user_id)
+                INSERT INTO users (USER_ID, API_KEY, ETH_PRIVATE_KEY)
                 VALUES (?, ?, ?)
                 """,
-                (api_key, key_hex, user_id),
+                (user_id, api_key, key_hex),
             )
 
         return acct
@@ -155,7 +155,7 @@ class TableRead:
         Fetch a user by their user_id.
         """
         row = db.execute(
-            "SELECT API_KEY, ETH_PRIVATE_KEY FROM users WHERE user_id = ? LIMIT 1",
+            "SELECT API_KEY, ETH_PRIVATE_KEY FROM users WHERE USER_ID = ? LIMIT 1",
             (user_id,),
         ).fetchone()
 
@@ -178,7 +178,7 @@ class TableRead:
         Fetch a user by their API key.
         """
         row = db.execute(
-            "SELECT user_id, ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
+            "SELECT USER_ID, ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
             (api_key,),
         ).fetchone()
 
