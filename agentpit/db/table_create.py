@@ -155,13 +155,13 @@ class TableCreate:
             """
             CREATE TABLE IF NOT EXISTS agents (
                 AGENT_ID INTEGER PRIMARY KEY,
-                API_KEY TEXT NOT NULL UNIQUE,
                 PERSONALITY TEXT NOT NULL,
-                FOREIGN KEY (API_KEY) REFERENCES users(API_KEY)
+                STATE TEXT NOT NULL DEFAULT '{}',
+                HISTORY TEXT NOT NULL DEFAULT '[]',
+                TODO TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
-        db.execute("CREATE INDEX IF NOT EXISTS idx_agents_api_key ON agents(API_KEY)")
 
     @staticmethod
     def create_personalities_table(db: sqlite3.Connection) -> None:
