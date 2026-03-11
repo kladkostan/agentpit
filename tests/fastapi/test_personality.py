@@ -6,6 +6,7 @@ from agentpit.fastapi import main
 def test_create_personality():
     with TestClient(main.app) as client:
         payload = {
+            "personality_id": "contrarian_1",
             "title": "Contrarian Trader",
             "beliefs": "Markets overreact to news",
             "methods": "Fade large moves and revert to mean",
@@ -14,7 +15,7 @@ def test_create_personality():
         resp = client.post("/create_personality", json=payload)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["personality_id"] > 0
+        assert body["personality_id"] == "contrarian_1"
         assert body["title"] == payload["title"]
         assert body["spec"]["beliefs"] == payload["beliefs"]
         assert body["spec"]["methods"] == payload["methods"]
@@ -25,6 +26,7 @@ def test_create_personality_missing_field():
     with TestClient(main.app) as client:
         # Missing 'needs'
         payload = {
+            "personality_id": "incomplete_1",
             "title": "Incomplete",
             "beliefs": "Something",
             "methods": "Something else",
@@ -36,6 +38,7 @@ def test_create_personality_missing_field():
 def test_create_personality_empty_title():
     with TestClient(main.app) as client:
         payload = {
+            "personality_id": "empty_title_1",
             "title": "",
             "beliefs": "Believe in efficiency",
             "methods": "Arbitrage",
@@ -50,6 +53,7 @@ def test_create_multiple_personalities():
         ids = []
         for i in range(3):
             payload = {
+                "personality_id": f"personality_{i}",
                 "title": f"Personality {i}",
                 "beliefs": f"Belief {i}",
                 "methods": f"Method {i}",

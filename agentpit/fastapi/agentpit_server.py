@@ -192,6 +192,7 @@ class AgentPitServer(FastAPI):
             with self._db:
                 personality_id = TableWrite.create_personality(
                     self._db,
+                    payload.personality_id,
                     payload.title,
                     payload.beliefs,
                     payload.methods,

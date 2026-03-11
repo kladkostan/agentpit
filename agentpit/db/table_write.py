@@ -31,20 +31,20 @@ class TableWrite:
 
     @staticmethod
     def create_personality(
-        db: sqlite3.Connection, title: str, beliefs: str, methods: str, needs: str
-    ) -> int:
+        db: sqlite3.Connection, personality_id: str, title: str, beliefs: str, methods: str, needs: str
+    ) -> str:
         spec = json.dumps(
             {"beliefs": beliefs, "methods": methods, "needs": needs},
             separators=(",", ":"),
         )
-        cursor = db.execute(
+        db.execute(
             """
-            INSERT INTO personalities (TITLE, SPEC)
-            VALUES (?, ?)
+            INSERT INTO personalities (PERSONALITY_ID, PERSONALITY_TITLE, PERSONALITY_SPEC)
+            VALUES (?, ?, ?)
             """,
-            (title, spec),
+            (personality_id, title, spec),
         )
-        return cursor.lastrowid
+        return personality_id
 
     @staticmethod
     def create_market(

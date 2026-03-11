@@ -154,7 +154,7 @@ class TableCreate:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS agents (
-                AGENT_ID INTEGER PRIMARY KEY,
+                AGENT_ID TEXT PRIMARY KEY,
                 PERSONALITY TEXT NOT NULL,
                 STATE TEXT NOT NULL DEFAULT '{}',
                 HISTORY TEXT NOT NULL DEFAULT '[]',
@@ -168,9 +168,9 @@ class TableCreate:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS personalities (
-                PERSONALITY_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                TITLE TEXT NOT NULL,
-                SPEC TEXT NOT NULL
+                PERSONALITY_ID TEXT PRIMARY KEY,
+                PERSONALITY_TITLE TEXT NOT NULL,
+                PERSONALITY_SPEC TEXT NOT NULL
             )
             """
         )
