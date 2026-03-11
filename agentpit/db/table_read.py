@@ -205,8 +205,8 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, SLUG,
-                   START_DATE, END_DATE, erc1155_TOKENS,
+             SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, SLUG,
+                   START_DATE, END_DATE, ERC1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -247,8 +247,8 @@ class TableRead:
         """
         cur = db.execute(
             """
-            SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, SLUG,
-                   START_DATE, END_DATE, erc1155_TOKENS,
+             SELECT MARKET_ID, POLYMARKET_ID, CONDITION_ID, QUESTION, DESCRIPTION, SLUG,
+                   START_DATE, END_DATE, ERC1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME
             FROM markets
@@ -300,7 +300,7 @@ class TableRead:
                    QUESTION,
                    DESCRIPTION,
                    SLUG,
-                   erc1155_TOKENS,
+                   ERC1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME,
                    START_DATE,
@@ -370,7 +370,7 @@ class TableRead:
                    QUESTION,
                    DESCRIPTION,
                    SLUG,
-                   erc1155_TOKENS,
+                   ERC1155_TOKENS,
                    COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
                    RESOLVED_OUTCOME,
                    START_DATE,
@@ -423,10 +423,10 @@ class TableRead:
         """
         cursor = db.execute(
             """
-            SELECT transaction_id, timestamp, transaction_type, market_id, details
+            SELECT TRANSACTION_ID, TIMESTAMP, TRANSACTION_TYPE, MARKET_ID, DETAILS
             FROM transactions
-            WHERE api_key = ?
-            ORDER BY timestamp DESC
+            WHERE API_KEY = ?
+            ORDER BY TIMESTAMP DESC
             """,
             (api_key,),
         )

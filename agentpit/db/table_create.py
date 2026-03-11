@@ -10,20 +10,20 @@ class TableCreate:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS trades (
-                trade_id TEXT PRIMARY KEY,
-                taker_order_id TEXT,
-                maker_orders TEXT,
-                market TEXT,
-                asset_id TEXT,
-                price INTEGER,
-                trade_size INTEGER,
-                remaining_size INTEGER,
-                side TEXT,
-                status TEXT,
-                match_time INTEGER,
-                transaction_hash TEXT,
-                bucket_index INTEGER,
-                fee_rate_bps INTEGER
+                TRADE_ID TEXT PRIMARY KEY,
+                TAKER_ORDER_ID TEXT,
+                MAKER_ORDERS TEXT,
+                MARKET TEXT,
+                ASSET_ID TEXT,
+                PRICE INTEGER,
+                TRADE_SIZE INTEGER,
+                REMAINING_SIZE INTEGER,
+                SIDE TEXT,
+                STATUS TEXT,
+                MATCH_TIME INTEGER,
+                TRANSACTION_HASH TEXT,
+                BUCKET_INDEX INTEGER,
+                FEE_RATE_BPS INTEGER
             )
             """
         )
@@ -34,42 +34,42 @@ class TableCreate:
             """
             CREATE TABLE IF NOT EXISTS orders (
                 API_KEY TEXT,
-                price INTEGER,
-                post_only INTEGER,
-                order_type TEXT,
-                salt INTEGER,
-                maker TEXT,
-                taker TEXT,
-                signer TEXT,
-                tokenId TEXT,
-                maker_amount INTEGER,
-                taker_amount INTEGER,
-                expiration INTEGER,
-                nonce INTEGER,
-                fee_rate_bps INTEGER,
-                side TEXT,
-                signature_type TEXT,
-                order_json TEXT,
-                status TEXT DEFAULT 'live',
-                remaining_amount INTEGER,
-                created_at INTEGER,
-                order_id TEXT PRIMARY KEY
+                PRICE INTEGER,
+                POST_ONLY INTEGER,
+                ORDER_TYPE TEXT,
+                SALT INTEGER,
+                MAKER TEXT,
+                TAKER TEXT,
+                SIGNER TEXT,
+                TOKEN_ID TEXT,
+                MAKER_AMOUNT INTEGER,
+                TAKER_AMOUNT INTEGER,
+                EXPIRATION INTEGER,
+                NONCE INTEGER,
+                FEE_RATE_BPS INTEGER,
+                SIDE TEXT,
+                SIGNATURE_TYPE TEXT,
+                ORDER_JSON TEXT,
+                STATUS TEXT DEFAULT 'live',
+                REMAINING_AMOUNT INTEGER,
+                CREATED_AT INTEGER,
+                ORDER_ID TEXT PRIMARY KEY
             )
             """
         )
         db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(price, side)"
+            "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(PRICE, SIDE)"
         )
         db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
-                ON orders(order_type, status, expiration)
+                ON orders(ORDER_TYPE, STATUS, EXPIRATION)
             """
         )
         db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_status_expiration
-                ON orders(status, expiration)
+                ON orders(STATUS, EXPIRATION)
             """
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
@@ -121,7 +121,7 @@ class TableCreate:
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
-                erc1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
+                ERC1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
                 START_DATE INTEGER NOT NULL, -- unix timestamp
                 END_DATE INTEGER,   -- unix timestamp
                 RESOLVED_OUTCOME INTEGER, -- index of the winning outcome
@@ -139,12 +139,12 @@ class TableCreate:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS transactions (
-                transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                api_key TEXT NOT NULL,
-                transaction_type TEXT NOT NULL,
-                market_id INTEGER,
-                details TEXT
+                TRANSACTION_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP,
+                API_KEY TEXT NOT NULL,
+                TRANSACTION_TYPE TEXT NOT NULL,
+                MARKET_ID INTEGER,
+                DETAILS TEXT
             )
             """
         )

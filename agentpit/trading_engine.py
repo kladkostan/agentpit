@@ -151,27 +151,27 @@ class TradingEngine:
 
         self.db.execute(
             """
-            INSERT INTO orders (api_key,
-                                price,
-                                post_only,
-                                order_type,
-                                salt,
-                                maker,
-                                taker,
-                                signer,
-                                tokenId,
-                                maker_amount,
-                                taker_amount,
-                                expiration,
-                                nonce,
-                                fee_rate_bps,
-                                side,
-                                signature_type,
-                                order_json,
-                                status,
-                                remaining_amount,
-                                created_at,
-                                order_id)
+            INSERT INTO orders (API_KEY,
+                                PRICE,
+                                POST_ONLY,
+                                ORDER_TYPE,
+                                SALT,
+                                MAKER,
+                                TAKER,
+                                SIGNER,
+                                TOKEN_ID,
+                                MAKER_AMOUNT,
+                                TAKER_AMOUNT,
+                                EXPIRATION,
+                                NONCE,
+                                FEE_RATE_BPS,
+                                SIDE,
+                                SIGNATURE_TYPE,
+                                ORDER_JSON,
+                                STATUS,
+                                REMAINING_AMOUNT,
+                                CREATED_AT,
+                                ORDER_ID)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -229,10 +229,10 @@ class TradingEngine:
     def _match_and_fill_order(self, order_id: str, dry_run: bool = False) -> tuple[int, int, str]:
         taker = self._get_existing_order(order_id)
 
-        taker_side = taker["side"]  # string "BUY"/"SELL"
-        taker_price = int(taker["price"])
-        taker_remaining = int(taker["remaining_amount"])
-        token_id = taker["tokenId"]
+        taker_side = taker["SIDE"]  # string "BUY"/"SELL"
+        taker_price = int(taker["PRICE"])
+        taker_remaining = int(taker["REMAINING_AMOUNT"])
+        token_id = taker["TOKEN_ID"]
 
         candidates = self._get_sorted_candidates(taker_side, taker_price, token_id)
 
@@ -241,7 +241,7 @@ class TradingEngine:
             if taker_remaining <= 0:
                 break
 
-            maker_remaining = int(maker["remaining_amount"])
+            maker_remaining = int(maker["REMAINING_AMOUNT"])
             if maker_remaining <= 0:
                 continue
 
@@ -257,7 +257,7 @@ class TradingEngine:
 
         # update taker by external order_id as well
         if not dry_run:
-            self._update_taker_remaining_in_db(taker["order_id"], taker_remaining)
+            self._update_taker_remaining_in_db(taker["ORDER_ID"], taker_remaining)
             self.set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(order_id)
 
         status = self.get_order_status(order_id)
@@ -267,10 +267,10 @@ class TradingEngine:
     @validate_call(config=_STRICT)
     def get_order_status(self, order_id: str) -> Any:
         row = self.db.execute(
-            "SELECT status FROM orders WHERE order_id = ?",
+            "SELECT STATUS FROM orders WHERE ORDER_ID = ?",
             (order_id,)
         ).fetchone()
-        status = row["status"]
+        status = row["STATUS"]
         return status
 
     @validate_call(config=_STRICT)
@@ -284,8 +284,8 @@ class TradingEngine:
            - Oldest orders first (Ascending) for both sides.
         """
         candidates.sort(
-            key=lambda m: (int(m["price"]), int(m["created_at"])) if taker_side == "BUY"
-            else (-int(m["price"]), int(m["created_at"]))
+            key=lambda m: (int(m["PRICE"]), int(m["CREATED_AT"])) if taker_side == "BUY"
+            else (-int(m["PRICE"]), int(m["CREATED_AT"]))
         )
 
     @validate_call(config=_STRICT)
@@ -306,20 +306,20 @@ class TradingEngine:
             sql = """
                   SELECT *
                   FROM orders
-                  WHERE side = ?
-                    AND status = ?
-                    AND price <= ?
-                    AND tokenId = ?
+                  WHERE SIDE = ?
+                    AND STATUS = ?
+                    AND PRICE <= ?
+                    AND TOKEN_ID = ?
                   """
         # Taker SELL matches with BUYS having price >= taker_price
         else:
             sql = """
                   SELECT *
                   FROM orders
-                  WHERE side = ?
-                    AND status = ?
-                    AND price >= ?
-                    AND tokenId = ?
+                  WHERE SIDE = ?
+                    AND STATUS = ?
+                    AND PRICE >= ?
+                    AND TOKEN_ID = ?
                   """
 
         # Execute query. Note: We use OrderStatus.LIVE explicitly.
@@ -338,7 +338,7 @@ class TradingEngine:
         maker_remaining -= trade_size
 
         if not dry_run:
-            self._update_maker_remaining_in_db(maker["order_id"], maker_remaining)
+            self._update_maker_remaining_in_db(maker["ORDER_ID"], maker_remaining)
 
             self._insert_trade_row(
                 taker_row=taker,
@@ -348,9 +348,9 @@ class TradingEngine:
             )
 
         match = Match(
-            taker_order_id=taker["order_id"],
-            maker_order_id=maker["order_id"],
-            price=int(maker["price"]),
+            taker_order_id=taker["ORDER_ID"],
+            maker_order_id=maker["ORDER_ID"],
+            price=int(maker["PRICE"]),
             trade_size=int(trade_size),
         )
         return match
@@ -361,8 +361,8 @@ class TradingEngine:
             """
             SELECT *
             FROM orders
-            WHERE order_id = ?
-              AND status = ?
+            WHERE ORDER_ID = ?
+              AND STATUS = ?
             """,
             (order_id, OrderStatus.LIVE),
         ).fetchone()
@@ -380,9 +380,9 @@ class TradingEngine:
         self.db.execute(
             """
             UPDATE orders
-            SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN ? ELSE ? END
-            WHERE order_id = ?
+            SET REMAINING_AMOUNT = ?,
+                STATUS           = CASE WHEN ? = 0 THEN ? ELSE ? END
+            WHERE ORDER_ID = ?
             """,
             (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
@@ -393,9 +393,9 @@ class TradingEngine:
         self.db.execute(
             """
             UPDATE orders
-            SET remaining_amount = ?,
-                status           = CASE WHEN ? = 0 THEN ? ELSE ? END
-            WHERE order_id = ?
+            SET REMAINING_AMOUNT = ?,
+                STATUS           = CASE WHEN ? = 0 THEN ? ELSE ? END
+            WHERE ORDER_ID = ?
             """,
             (remaining_int, remaining_int, OrderStatus.MATCHED, OrderStatus.LIVE, order_id)
         )
@@ -424,50 +424,50 @@ class TradingEngine:
         """
 
         trade_id = (
-            f"{taker_row['order_id']}-"
-            f"{maker_row['order_id']}-"
+            f"{taker_row['ORDER_ID']}-"
+            f"{maker_row['ORDER_ID']}-"
             f"{uuid.uuid4()}"
         )
 
         maker_orders_payload = [
             {
-                "order_id": maker_row["order_id"],
-                "owner": maker_row["maker"],
+                "order_id": maker_row["ORDER_ID"],
+                "owner": maker_row["MAKER"],
                 "matched_amount": str(trade_size),
             }
         ]
 
         trade = Trade(
             id=str(trade_id),
-            taker_order_id=str(taker_row["order_id"]),
+            taker_order_id=str(taker_row["ORDER_ID"]),
             maker_orders=maker_orders_payload,
-            market=taker_row["tokenId"],
-            asset_id=taker_row["tokenId"],
-            price=maker_row["price"],
+            market=taker_row["TOKEN_ID"],
+            asset_id=taker_row["TOKEN_ID"],
+            price=maker_row["PRICE"],
             trade_size=int(trade_size),
             remaining_size=int(remaining_taker),
-            side=taker_row["side"],  # string "BUY"/"SELL"
+            side=taker_row["SIDE"],  # string "BUY"/"SELL"
             match_time=int(datetime.utcnow().timestamp()),
             transaction_hash="",
             bucket_index=0,
-            fee_rate_bps=int(taker_row["fee_rate_bps"]),
+            fee_rate_bps=int(taker_row["FEE_RATE_BPS"]),
         )
         self.db.execute(
             """
-            INSERT INTO trades (trade_id,
-                                taker_order_id,
-                                maker_orders,
-                                market,
-                                asset_id,
-                                price,
-                                trade_size,
-                                remaining_size,
-                                side,
-                                status,
-                                match_time,
-                                transaction_hash,
-                                bucket_index,
-                                fee_rate_bps)
+            INSERT INTO trades (TRADE_ID,
+                                TAKER_ORDER_ID,
+                                MAKER_ORDERS,
+                                MARKET,
+                                ASSET_ID,
+                                PRICE,
+                                TRADE_SIZE,
+                                REMAINING_SIZE,
+                                SIDE,
+                                STATUS,
+                                MATCH_TIME,
+                                TRANSACTION_HASH,
+                                BUCKET_INDEX,
+                                FEE_RATE_BPS)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -542,10 +542,10 @@ class TradingEngine:
                 cur = self.db.execute(
                     """
                     UPDATE orders
-                    SET status = ?
-                    WHERE order_type = ?
-                      AND status = ?
-                      AND expiration <= ?
+                    SET STATUS = ?
+                    WHERE ORDER_TYPE = ?
+                      AND STATUS = ?
+                      AND EXPIRATION <= ?
                     """,
                     (
                         OrderStatus.EXPIRED,
@@ -563,8 +563,8 @@ class TradingEngine:
                 self.db.execute(
                     """
                     UPDATE orders
-                    SET status = ?
-                    WHERE order_id = ?
+                    SET STATUS = ?
+                    WHERE ORDER_ID = ?
                     """,
                     (status, order_id)
                 )
@@ -576,10 +576,10 @@ class TradingEngine:
                 self.db.execute(
                     """
                     UPDATE orders
-                    SET status = ?
-                    WHERE order_id = ?
-                      AND order_type = ?
-                      AND status = ?
+                    SET STATUS = ?
+                    WHERE ORDER_ID = ?
+                      AND ORDER_TYPE = ?
+                      AND STATUS = ?
                     """,
                     (OrderStatus.CANCELLED, order_id, ORDER_TYPE_FAK, OrderStatus.LIVE)
                 )
@@ -595,9 +595,9 @@ class TradingEngine:
                 cursor = self.db.execute(
                     """
                     UPDATE orders
-                    SET status = ?
-                    WHERE order_id = ?
-                      AND status = ?
+                    SET STATUS = ?
+                    WHERE ORDER_ID = ?
+                      AND STATUS = ?
                     """,
                     (OrderStatus.CANCELLED, order_id, OrderStatus.LIVE)
                 )

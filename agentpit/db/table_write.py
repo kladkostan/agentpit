@@ -76,7 +76,7 @@ class TableWrite:
                                  SLUG,
                                  START_DATE,
                                  END_DATE,
-                                 erc1155_TOKENS,
+                                 ERC1155_TOKENS,
                                  MARKET_STATE)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -136,7 +136,7 @@ class TableWrite:
                 SLUG           = ?,
                 START_DATE     = ?,
                 END_DATE       = ?,
-                erc1155_TOKENS = ?,
+                ERC1155_TOKENS = ?,
                 MARKET_STATE  = ?
             WHERE POLYMARKET_ID = ?
             """,
@@ -189,7 +189,7 @@ class TableWrite:
 
         db.execute(
             """
-            INSERT INTO transactions (api_key, transaction_type, market_id, details)
+            INSERT INTO transactions (API_KEY, TRANSACTION_TYPE, MARKET_ID, DETAILS)
             VALUES (?, ?, ?, ?)
             """,
             (api_key, transaction_type, market_id, details_json)
