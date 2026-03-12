@@ -47,6 +47,18 @@ class TableWrite:
         return personality_id
 
     @staticmethod
+    def create_agent(
+        db: sqlite3.Connection, agent_id: str, personality_id: str
+    ) -> None:
+        db.execute(
+            """
+            INSERT INTO agents (AGENT_ID, PERSONALITY)
+            VALUES (?, ?)
+            """,
+            (agent_id, personality_id),
+        )
+
+    @staticmethod
     def create_market(
             db : sqlite3.Connection,
             request: CreateMarketRequest, is_polygon_market: bool

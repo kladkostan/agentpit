@@ -150,6 +150,29 @@ class TableRead:
         return acct.address
 
     @staticmethod
+    def get_agent_by_id(db: sqlite3.Connection, agent_id: str) -> dict | None:
+        """
+        Fetch an agent by AGENT_ID.
+        Returns a dict with agent_id, personality_id, state, history, todo or None.
+        """
+        row = db.execute(
+            "SELECT PERSONALITY, STATE, HISTORY, TODO FROM agents WHERE AGENT_ID = ? LIMIT 1",
+            (agent_id,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        personality, state_json, history_json, todo_json = row
+        return {
+            "agent_id": agent_id,
+            "personality_id": personality,
+            "state": json.loads(state_json),
+            "history": json.loads(history_json),
+            "todo": json.loads(todo_json),
+        }
+
+    @staticmethod
     def get_user_by_userid(db: sqlite3.Connection, user_id: str) -> User | None:
         """
         Fetch a user by their user_id.

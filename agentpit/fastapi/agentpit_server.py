@@ -25,6 +25,8 @@ from agentpit.datastructures.create_user_request import CreateUserRequest
 from agentpit.datastructures.create_user_response import CreateUserResponse
 from agentpit.datastructures.create_personality_request import CreatePersonalityRequest
 from agentpit.datastructures.create_personality_response import CreatePersonalityResponse
+from agentpit.datastructures.create_agent_request import CreateAgentRequest
+from agentpit.datastructures.create_agent_response import CreateAgentResponse
 from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.db.table_read import TableRead
@@ -144,6 +146,12 @@ class AgentPitServer(FastAPI):
             methods=["POST"],
             response_model=CreatePersonalityResponse,
         )
+        self.add_api_route(
+            "/create_agent",
+            self.create_agent,
+            methods=["POST"],
+            response_model=CreateAgentResponse,
+        )
 
     def _connect_db(self) -> None:
         self._db = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -207,6 +215,42 @@ class AgentPitServer(FastAPI):
                 personality_id=personality_id,
                 title=payload.title,
                 spec=spec,
+            )
+
+    def create_agent(self, payload: CreateAgentRequest) -> CreateAgentResponse:
+        """Create a new agent linked to an existing personality."""
+        with self._rw_lock.write_lock():
+            self._ensure_db()
+            with self._db:
+                # Check if agent already exists
+                existing = TableRead.get_agent_by_id(self._db, payload.agent_id)
+                if existing is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Agent '{payload.agent_id}' already exists",
+                    )
+
+                # Verify personality exists
+                row = self._db.execute(
+                    "SELECT 1 FROM personalities WHERE PERSONALITY_ID = ? LIMIT 1",
+                    (payload.personality_id,),
+                ).fetchone()
+                if row is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Personality '{payload.personality_id}' not found",
+                    )
+
+                TableWrite.create_agent(self._db, payload.agent_id, payload.personality_id)
+
+            # Read back the created agent
+            agent = TableRead.get_agent_by_id(self._db, payload.agent_id)
+            return CreateAgentResponse(
+                agent_id=agent["agent_id"],
+                personality_id=agent["personality_id"],
+                state=agent["state"],
+                history=agent["history"],
+                todo=agent["todo"],
             )
 
     def create_market(self, payload: CreateMarketRequest) -> Market:
