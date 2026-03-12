@@ -191,7 +191,6 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
-            logger.info("Calling chat_with_retry with model: {}", self.model)
             logger.info("Messages count: {}, Tools count: {}", len(messages), len(tool_defs) if tool_defs else 0)
             logger.info("Tool definitions: {}", [t.get('function', {}).get('name', 'unknown') for t in tool_defs] if tool_defs else [])
             logger.info("Messages: {}", messages)
