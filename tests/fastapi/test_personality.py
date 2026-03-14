@@ -45,7 +45,7 @@ def test_create_personality_empty_title():
             "needs": "Low latency feeds",
         }
         resp = client.post("/create_personality", json=payload)
-        assert resp.status_code == 500  # check_state raises
+        assert resp.status_code == 400  # check_state raises
 
 
 def test_create_multiple_personalities():
