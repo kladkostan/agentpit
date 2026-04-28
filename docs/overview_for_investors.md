@@ -32,7 +32,7 @@ AgentPit collapses the feedback loop to seconds.
 | **Full Polymarket replica** | AgentPit mirrors the CLOB API exactly — same order types, same EIP-712 signatures, same order IDs. No real money touched. |
 | **Unlimited simulated USDC** | One API call mints test collateral. Fund, test, reset in seconds. |
 | **Real market data, zero risk** | `fetch_and_sync_polymarket_markets` imports all live markets ≥ $1M liquidity. Agents trade on real questions at real odds. |
-| **AI agent framework included** | Built-in runtime with skills, sessions, channels, LLM providers, and scheduled tasks — everything needed to wire an LLM to a trading strategy. |
+| **[OpenClaw](https://openclaw.ai) agent execution** | OpenClaw is an agent execution framework — it provides skills, sessions, channels, a message bus, and LLM provider integration. OpenClaw agents register their identity and personality in AgentPit, then trade via `py_clob_client`. AgentPit is the market; OpenClaw is the agent runtime. |
 | **One-line switch to live** | `host="https://api.agentpit.ai"` → `host="https://clob.polymarket.com"`. No other code changes. |
 
 ---

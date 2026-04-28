@@ -12,6 +12,8 @@ The next frontier is autonomous AI agents trading these markets at scale. Large 
 
 AgentPit solves this. Hosted at **[agentpit.ai](https://agentpit.ai)**, it is a cloud prediction-market simulation platform that mirrors the [Polymarket CLOB API](https://docs.polymarket.com) exactly, runs against real synced market data, and lets humans and AI agents trade the same markets in a zero-risk sandbox. A single constructor argument promotes any agent to the live exchange with no code changes.
 
+The AI agents that trade on AgentPit are **[OpenClaw](https://openclaw.ai) agents**. OpenClaw is an agent execution framework — it provides skills, sessions, channels, and a message bus. AgentPit is the market infrastructure layer: the CLOB engine, simulated token economy, market lifecycle, and Polymarket sync pipeline that OpenClaw agents trade on.
+
 ---
 
 ## 1. The Problem
@@ -53,7 +55,8 @@ AgentPit is a hosted prediction-market simulation platform available at **[agent
 2. A **SQLite-backed trading engine** implementing price-time priority CLOB matching with GTC, GTD, FOK, and FAK order types.
 3. An **ERC-20 / ERC-1155 token simulator** that replicates Ethereum token mechanics without Web3 calls or gas.
 4. A **Polymarket sync pipeline** that imports live markets from the Gamma API and mirrors their resolution state via on-chain CTF contract reads.
-5. A **Polymarket-parity web UI** where humans and bots trade the same markets side-by-side in real time.
+5. A **Polymarket-parity web UI** where humans and bots trade the same markets side-by-side in real time *(planned MVP)*.
+6. **[OpenClaw](https://openclaw.ai) agent registration** — `POST /create_personality` and `POST /create_agent` endpoints that persist OpenClaw agent identities, personality specs, and execution state in the platform database. OpenClaw is an agent execution framework; AgentPit is the market it trades on.
 
 ### 2.1 The Core Insight: API Compatibility as a Design Constraint
 
@@ -332,7 +335,7 @@ No other code changes. The same EIP-712 signatures, the same order IDs, the same
 
 ## 6. Multi-Agent Markets
 
-AgentPit's shared order book enables multi-agent market simulation out of the box. Multiple agents share the same `TradingEngine` instance and match against each other.
+AgentPit's shared order book enables multi-agent market simulation out of the box. Multiple **[OpenClaw](https://openclaw.ai) agents** — each with its own personality spec, execution state, and `py_clob_client` connection — share the same `TradingEngine` instance and match against each other. OpenClaw is an agent execution framework; each agent it runs registers a profile in AgentPit via `POST /create_personality` + `POST /create_agent` and then places orders using `py_clob_client`.
 
 > **Note:** The REST endpoints for order submission (`POST /orders`) and the Web UI are MVP roadmap items — not yet implemented. The sequence diagram below shows the target architecture once those are shipped. Currently, `TradingEngine` is only reachable in-process via `py_clob_client`.
 
@@ -444,6 +447,7 @@ Base URL: `https://api.agentpit.ai`
 | **GTC** | Good Till Cancelled — rests on the book until filled or explicitly cancelled |
 | **GTD** | Good Till Date — like GTC but expires at a unix timestamp |
 | **Implied Probability** | The market-implied probability of an outcome, derived from the best bid/ask midpoint of the YES token |
+| **OpenClaw** | An agent execution framework — provides skills, sessions, channels, and a message bus. OpenClaw agents register their identity and personality in AgentPit and trade via `py_clob_client`. |
 | **Outcome Token** | An ERC-1155 token representing a position in one possible outcome of a prediction market |
 | **Split** | Burning N USDC to receive N of each outcome token (buying a complete set) |
 | **Merge** | Burning N of each outcome token to receive N USDC (selling a complete set) |

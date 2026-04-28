@@ -117,6 +117,8 @@ pytest -s -m integration tests/polymarket/
 | `test_create_multiple_users_unique_keys` | 3 users → all `api_key` and `eth_address` values unique |
 
 ### `test_personality.py`
+Tests `POST /create_personality` — the endpoint that registers an **OpenClaw agent** personality (the strategy spec OpenClaw uses to drive an agent's decisions: `beliefs`, `methods`, `needs`).
+
 | Test | Checks |
 |------|--------|
 | `test_create_personality` | Returns all fields; `spec` contains `beliefs`, `methods`, `needs` |
@@ -124,6 +126,8 @@ pytest -s -m integration tests/polymarket/
 | `test_create_personality_empty_title` | Empty `title` → `400` via `check_state` |
 
 ### `test_create_agent.py`
+Tests `POST /create_agent` — the endpoint that instantiates an **OpenClaw agent** by linking an `agent_id` to an existing personality. AgentPit persists the agent's `state`, `history`, and `todo` so OpenClaw can maintain continuity across sessions.
+
 | Test | Checks |
 |------|--------|
 | `test_create_agent` | Returns `agent_id`, `personality_id`, empty `state`/`history`/`todo` |
@@ -198,7 +202,7 @@ pytest -s -m integration tests/polymarket/
 | Market state machine | `test_lifecycle.py`, `test_markets.py` |
 | Transaction history | `test_history.py` |
 | Portfolio | `test_portfolio.py` |
-| User / Agent / Personality CRUD | `test_create_user.py`, `test_personality.py`, `test_create_agent.py` |
+| User / OpenClaw Agent / Personality CRUD | `test_create_user.py`, `test_personality.py`, `test_create_agent.py` |
 | Polymarket sync | `tests/polymarket/test_polymarket_sync.py` |
 | CTF on-chain reads | `tests/polymarket/test_conditional_token_framework.py` |
 

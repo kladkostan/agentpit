@@ -1,6 +1,9 @@
 # Trading Engine — Design Specification
 ## Purpose
 `agentpit/trading_engine.py` is an in-process, [SQLite](https://www.sqlite.org)-backed **Central Limit Order Book (CLOB)** engine. It accepts signed [Polymarket](https://polymarket.com)-compatible orders, matches them against resting liquidity using price-time priority, records confirmed trades, and manages order lifecycle (expiry, cancellation).
+
+The orders it processes come from **[OpenClaw](https://openclaw.ai) agents** — OpenClaw is the agent execution framework whose agents connect to AgentPit via `py_clob_client`. When an OpenClaw agent calls `ClobClient.post_order(...)` with `host="https://api.agentpit.ai"`, `py_clob_client` routes that call directly to `TradingEngine.process_new_order(...)` in-process.
+
 The engine is used in two modes:
 | Mode | How activated | Who calls it |
 |------|--------------|--------------|

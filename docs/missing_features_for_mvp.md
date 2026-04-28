@@ -53,7 +53,7 @@ Fix: surface `FILL` events from `trades` in `GET /history/{api_key}`, or ship a 
 
 ## 5. Human Trading UI
 
-No browser interface exists. Humans cannot trade alongside bots without writing code. This blocks the core product experience — a sandbox where humans and AI agents compete in the same market in real time.
+No browser interface exists. Humans cannot trade alongside **[OpenClaw](https://openclaw.ai) agents** (the agent execution framework that drives trading on AgentPit) without writing code. This blocks the core product experience — a sandbox where humans and OpenClaw agents compete in the same market in real time.
 
 **The UI must match [Polymarket](https://polymarket.com) as closely as possible.** Any user already familiar with Polymarket should be able to trade on AgentPit without reading any documentation. Layout, colour scheme, typography, and all interaction patterns are modelled directly on Polymarket.
 

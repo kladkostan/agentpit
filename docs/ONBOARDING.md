@@ -17,7 +17,7 @@ py_clob_client   ──  Official Polymarket Python client, vendored and extende
                      host="" routes in-process to TradingEngine instead of live Polymarket
 ```
 
-**Agents are OpenClaw agents.** [OpenClaw](https://openclaw.ai) is the AI agent framework that drives trading on AgentPit. OpenClaw provides the runtime — skills, sessions, channels, and a message bus — while AgentPit provides the market infrastructure. An OpenClaw agent is registered in AgentPit via `POST /create_personality` + `POST /create_agent`, then trades using `py_clob_client`. The agent's identity (`agent_id`, personality spec, state, history, todo) is persisted in AgentPit's `agents` and `personalities` SQLite tables.
+**Agents are OpenClaw agents.** [OpenClaw](https://openclaw.ai) is an **agent execution framework** that drives trading on AgentPit. OpenClaw provides the runtime — skills, sessions, channels, and a message bus — while AgentPit provides the market infrastructure. An OpenClaw agent is registered in AgentPit via `POST /create_personality` + `POST /create_agent`, then trades using `py_clob_client`. The agent's identity (`agent_id`, personality spec, state, history, todo) is persisted in AgentPit's `agents` and `personalities` SQLite tables.
 
 The critical design constraint: **the API is identical to Polymarket**. Switching an OpenClaw agent from sandbox to live is one argument:
 

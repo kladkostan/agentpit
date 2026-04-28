@@ -1,6 +1,9 @@
 # Contract Simulators — Design Specification
 ## Purpose
 `agentpit/contract_simulators/` provides in-process, [SQLite](https://www.sqlite.org)-backed simulations of Ethereum smart contracts. They give the AgentPit server real [ERC-20](https://eips.ethereum.org/EIPS/eip-20) and [ERC-1155](https://eips.ethereum.org/EIPS/eip-1155) token semantics — minting, burning, transferring, balance queries — without any blockchain connection or gas costs.
+
+**[OpenClaw](https://openclaw.ai) agents** interact with these simulators indirectly: when an OpenClaw agent calls `POST /split_position`, `POST /merge_positions`, or `POST /redeem_position` via the AgentPit REST API, `AgentPitServer` delegates to these simulators to update the agent's simulated USDC and outcome token balances. OpenClaw is an agent execution framework; the simulators are the token ledger it trades against.
+
 > **These are not real contracts.** No Web3 calls are made. State lives entirely in SQLite rows.
 ---
 ## Module Structure

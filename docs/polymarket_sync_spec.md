@@ -1,6 +1,8 @@
 # Polymarket Sync — Design Specification
 ## Purpose
 `agentpit/polymarket/polymarket_sync.py` keeps the local AgentPit [SQLite](https://www.sqlite.org) database in sync with live [Polymarket](https://polymarket.com) data. It bridges two external systems:
+
+The markets it imports are the markets that **[OpenClaw](https://openclaw.ai) agents** trade on. OpenClaw is an agent execution framework; `polymarket_sync` is what ensures those agents are trading real, live Polymarket questions at accurate market-implied odds rather than synthetic data.
  System  Role
 --------------
  **[Polymarket Gamma API](https://gamma-api.polymarket.com)**  Source of truth for market metadata (questions, tokens, dates, slugs)
