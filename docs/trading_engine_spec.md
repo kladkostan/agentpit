@@ -418,3 +418,14 @@ engine = TradingEngine(
 )
 ```
 All tables are created automatically. No server startup needed.
+
+---
+
+## See Also
+
+- [`ONBOARDING.md`](ONBOARDING.md) — dev environment setup, first-contribution guide
+- [`high_level_design.md`](high_level_design.md) — how `TradingEngine` fits into the overall architecture
+- [`agentpit_api.md`](agentpit_api.md) — REST endpoints that eventually wrap this engine (`POST /orders` — MVP roadmap)
+- [`missing_features_for_mvp.md`](missing_features_for_mvp.md) — §1 (orders REST endpoints), §4 (trade fills in history)
+- [`tests_overview.md`](tests_overview.md) — test coverage map; `TradingEngine` has no dedicated tests yet
+

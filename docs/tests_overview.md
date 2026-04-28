@@ -205,3 +205,13 @@ pytest -s -m integration tests/polymarket/
 **Not covered:**
 - `TradingEngine` — no dedicated tests; exercised indirectly via `py_clob_client` integration
 - `PredictionMarket.split/merge` — server calls simulators directly, bypassing this class
+
+---
+
+## See Also
+
+- [`ONBOARDING.md`](ONBOARDING.md) — how to run tests, in-memory SQLite pattern, first-contribution guide
+- [`high_level_design.md`](high_level_design.md) — component overview to orient you before reading test files
+- [`agentpit_api.md`](agentpit_api.md) — endpoint reference; each endpoint has at least one test
+- [`missing_features_for_mvp.md`](missing_features_for_mvp.md) — features with no tests yet (orders, sync trigger)
+

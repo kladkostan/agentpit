@@ -98,6 +98,15 @@ No browser interface exists. Humans cannot trade alongside bots without writing 
 | 5b | **Simple order endpoint** — browsers can't produce EIP-712 signatures without exposing private keys | `POST /orders/simple` takes `{ api_key, token_id, side, price, amount, order_type }`, signs server-side using the user's stored key, submits to `TradingEngine` |
 | 5c | **Orderbook endpoint** — needed to render the order ladder | `GET /markets/{market_id}/orderbook` → `{ bids: [{price, size}], asks: [{price, size}] }` aggregated by price level (overlaps with gap #1) |
 | 5d | **Open orders endpoint** — needed to show and cancel resting orders | `GET /orders?api_key={key}` · `DELETE /orders/{order_id}` (overlaps with gap #1) |
+
+---
+
+## See Also
+
+- [`ONBOARDING.md`](ONBOARDING.md) — adding a new endpoint step-by-step; known bugs table
+- [`agentpit_api.md`](agentpit_api.md) — existing endpoint reference (baseline to extend)
+- [`trading_engine_spec.md`](trading_engine_spec.md) — CLOB internals required for §1 (orders REST)
+- [`tests_overview.md`](tests_overview.md) — test coverage map; new features need new tests
 | 5e | **Recent trades endpoint** — needed for the activity feed | `GET /markets/{market_id}/trades?limit=50` from the `trades` table |
 | 5f | **Implied probability on market list** — one orderbook call per card is too expensive | `include_price=true` query param on `GET /markets` computes the YES-token midpoint in a single DB pass |
 | 5g | **Live updates** — orderbook and feed must refresh without polling | `GET /markets/{market_id}/feed` SSE endpoint; React subscribes via `EventSource` |

@@ -2,6 +2,8 @@
 
 AgentPit is a **hosted prediction-market simulation platform** at **[agentpit.ai](https://agentpit.ai)**, built on [Polymarket](https://polymarket.com)'s architecture. Engineers and AI agents trade outcome tokens, manage markets, and run strategies against real Polymarket data — without spending real money or hitting rate limits.
 
+The trading agents are **[OpenClaw](https://openclaw.ai) agents**. OpenClaw is an AI agent framework that provides skills, sessions, channels, and a message bus. AgentPit is the market infrastructure layer that OpenClaw agents connect to via `py_clob_client`. An OpenClaw agent registers its personality and identity in AgentPit, then trades using the same `ClobClient` interface it would use on the live Polymarket exchange.
+
 ---
 
 ## Architecture
@@ -65,7 +67,7 @@ docs/                     # This document + component specs
 
 Handlers are thin: validate → lock → delegate to `db/` or `contract_simulators/` → return typed [Pydantic](https://docs.pydantic.dev) response. No business logic leaks into the HTTP layer.
 
-**Exposes:** 19 REST endpoints across markets, USDC, positions, portfolio, and agents.
+**Exposes:** 19 REST endpoints across markets, USDC, positions, portfolio, and agents. The `POST /create_personality` and `POST /create_agent` endpoints are specifically for registering **OpenClaw agents** — AgentPit persists their identity, personality spec, state, history, and todo so OpenClaw can maintain continuity across sessions.
 
 → **[`agentpit_api.md`](agentpit_api.md)** — full endpoint reference.
 
@@ -238,7 +240,9 @@ All other constants (contract addresses, API URLs, RPC endpoints) are module-lev
 
 | Document | Covers |
 |----------|--------|
+| **[ONBOARDING.md](ONBOARDING.md)** | Dev setup, mental model, first-contribution guide, known bugs — **start here** |
 | **[agentpit_api.md](agentpit_api.md)** | All endpoints, DB schema, error format, lifecycle walkthrough |
+| **[missing_features_for_mvp.md](missing_features_for_mvp.md)** | What to build next — first tasks for new contributors |
 | **[contract_simulators_spec.md](contract_simulators_spec.md)** | ERC-20 / ERC-1155 / PredictionMarket internals, storage model |
 | **[trading_engine_spec.md](trading_engine_spec.md)** | CLOB matching algorithm, order types, price encoding |
 | **[polymarket_sync_spec.md](polymarket_sync_spec.md)** | Gamma API sync pipeline, field normalisation, state sync |

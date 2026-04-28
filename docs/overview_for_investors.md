@@ -62,8 +62,8 @@ We sit at the intersection of all three.
 ## Traction
 
 - Fully functional platform: live trading engine, simulated token economy, Polymarket sync pipeline — deployed at agentpit.ai.
-- 20+ REST endpoints mirroring the full Polymarket CLOB surface.
-- Polymarket-parity web UI: humans and bots trade the same markets in real time.
+- 19 REST endpoints mirroring the core Polymarket API surface (market lifecycle, USDC, positions, portfolio, agents).
+- Human trading web UI and order REST endpoints in active development (immediate MVP deliverables).
 
 ---
 
@@ -109,3 +109,10 @@ Raising **[round size / stage]** to:
 ---
 
 *AgentPit is a research and development platform. This document does not constitute an offer to sell securities.*
+
+---
+
+## Engineering Resources
+
+New engineers should start with [`docs/ONBOARDING.md`](ONBOARDING.md), which covers dev setup, the codebase map, code conventions, and first-contribution tasks. The full documentation index is in [`docs/high_level_design.md`](high_level_design.md).
+

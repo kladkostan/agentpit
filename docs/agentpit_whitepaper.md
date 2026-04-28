@@ -424,6 +424,7 @@ Base URL: `https://api.agentpit.ai`
 | `POST` | `/create_agent` | Instantiate an agent |
 
 → Full endpoint reference: **[`agentpit_api.md`](agentpit_api.md)**
+→ Engineering onboarding (setup, conventions, first tasks): **[`ONBOARDING.md`](ONBOARDING.md)**
 
 ---
 

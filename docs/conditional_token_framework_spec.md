@@ -216,3 +216,13 @@ assert status.get_winner_index() == 1
 - Each call to `condition_exists`, `get_outcome_slot_count`, or `get_onchain_resolution_status` creates a **new Web3 HTTP connection** and makes **1–3 RPC calls**.
 - For large syncs (hundreds of markets), this is the dominant latency source.
 - Future improvement: cache the Web3 instance and condition results per sync run, or batch via `eth_call` multicall.
+
+---
+
+## See Also
+
+- [`ONBOARDING.md`](ONBOARDING.md) — dev setup and first-contribution guide
+- [`polymarket_sync_spec.md`](polymarket_sync_spec.md) — calls `CTF.condition_exists()` and `get_onchain_resolution_status()` during market sync
+- [`high_level_design.md`](high_level_design.md) — Polymarket sync architecture overview
+- [`tests_overview.md`](tests_overview.md) — `test_conditional_token_framework.py` (live Polygon RPC, `@pytest.mark.integration`)
+
