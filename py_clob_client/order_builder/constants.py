@@ -1,2 +1,0 @@
-BUY = "BUY"
-SELL = "SELL"
