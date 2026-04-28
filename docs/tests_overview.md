@@ -11,6 +11,26 @@ pytest -s -m integration                                         # live network 
 
 `pytest.ini` streams logs at INFO level on every run — no `-v` flag needed.
 
+**Test layers:**
+
+```
+                    ┌──────────────────────────┐
+                    │   Integration (live net)  │  @pytest.mark.integration
+                    │   test_polymarket_sync    │  hits Gamma API + Polygon RPC
+                    │   test_conditional_token  │  not run by default
+                    └──────────────────────────┘
+              ┌──────────────────────────────────────────┐
+              │        FastAPI / HTTP layer               │  make test
+              │  TestClient + in-memory SQLite            │
+              │  test_usdc · test_positions · test_markets│
+              │  test_lifecycle · test_resolution · etc.  │
+              └──────────────────────────────────────────┘
+        ┌──────────────────────────────────────────────────────┐
+        │             py_clob_client utilities                  │  make test
+        │  test_utilities.py — orderbook parsing, order_to_json │
+        └──────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## Layout
