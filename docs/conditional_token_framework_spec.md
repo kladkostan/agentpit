@@ -7,6 +7,29 @@ No transactions are ever sent. All contract calls are pure `view` reads.
 ---
 ## Background: How the CTF Works
 The Gnosis CTF is the settlement layer underlying Polymarket. Understanding it helps make sense of the code.
+### Condition Lifecycle
+
+```
+  oracle calls prepareCondition()
+          │
+          ▼
+  PREPARED  ── getOutcomeSlotCount() → N (e.g. 2)
+            ── payoutDenominator    → 0  (unresolved)
+          │
+          │  event resolves; oracle calls reportPayouts()
+          ▼
+  RESOLVED  ── payoutDenominator    → 1
+            ── payoutNumerators[0]  → 1  (Yes wins)
+            ── payoutNumerators[1]  → 0
+               or
+            ── payoutNumerators[0]  → 0  (No wins)
+            ── payoutNumerators[1]  → 1
+```
+
+AgentPit reads this state but never writes to it. All CTF calls are `view` only.
+
+---
+
 ### Conditions
 A **condition** is identified by a `bytes32` `conditionId`, computed as:
 ```
@@ -58,21 +81,30 @@ Returns:
 ### `get_onchain_resolution_status(condition_id: ConditionId) → OnchainResolutionStatus`
 The main resolution-check method. Steps:
 ```
-1. Assert condition_exists(condition_id)
-       └── raises via check_state if condition is unknown
-2. Read payoutDenominator(conditionId)
-       └── if 0 → return OnchainResolutionStatus(payouts=[], denominator=0, resolved=False)
-3. Read getOutcomeSlotCount(conditionId) → N
-4. For i in range(N):
-       payout_i = payoutNumerators(conditionId, i)
-       payouts.append(payout_i)
-       running_sum += payout_i
-       if running_sum >= denominator: break   ← early exit optimisation
-5. return OnchainResolutionStatus(
-       payouts=payouts,
-       denominator=denominator,
-       resolved=(running_sum >= denominator)
-   )
+get_onchain_resolution_status(condition_id)
+        │
+        ▼
+condition_exists(condition_id)?
+        │ no → raise via check_state (unknown condition)
+        │ yes
+        ▼
+payoutDenominator(conditionId)
+        │ = 0 → return OnchainResolutionStatus(resolved=False)
+        │ > 0
+        ▼
+getOutcomeSlotCount(conditionId) → N
+        │
+        ▼
+for i in 0..N:
+  payoutNumerators(conditionId, i)
+  running_sum += payout_i
+  if running_sum >= denominator → break (early exit)
+        │
+        ▼
+return OnchainResolutionStatus(
+    payouts=[...], denominator=D,
+    resolved=(running_sum >= denominator)
+)
 ```
 **Worked example — binary Yes/No market where Yes wins:**
 ```

@@ -96,40 +96,35 @@ Agents trained and tested on AgentPit are making decisions on real questions at 
 
 ## 3. Architecture
 
-```mermaid
-graph TD
-    subgraph External["External World"]
-        GammaAPI["Polymarket Gamma API"]
-        CLOBAPI["Polymarket CLOB API"]
-        CTF["Polygon CTF Contract"]
-    end
-
-    subgraph Platform["AgentPit Platform  —  agentpit.ai"]
-        Server["AgentPitServer\n(FastAPI)"]
-        Engine["TradingEngine\n(CLOB)"]
-        Tokens["Token Simulator\nERC-20 · ERC-1155"]
-        DB[(SQLite)]
-        UI["React Web UI"]
-    end
-
-    subgraph Clients["Clients"]
-        Bot["AI Agent\n(py_clob_client)"]
-        Human["Human Trader\n(Browser)"]
-    end
-
-    GammaAPI -->|"sync (pull only)"| Server
-    CLOBAPI -->|"market state"| Server
-    CTF -->|"resolution"| Server
-
-    Server --> Engine
-    Server --> Tokens
-    Engine --> DB
-    Tokens --> DB
-    Server --> DB
-
-    Bot -->|"api.agentpit.ai"| Engine
-    Human -->|"agentpit.ai"| UI
-    UI --> Server
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      External World                         │
+│   Polymarket Gamma API  •  CLOB API  •  Polygon CTF         │
+└───────────────┬─────────────────────────────────────────────┘
+                │  sync (pull only)
+┌───────────────▼─────────────────────────────────────────────┐
+│           AgentPit Platform  —  agentpit.ai                 │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  AgentPitServer (FastAPI)                            │   │
+│  │   Market Lifecycle  •  Token Simulator               │   │
+│  │   ERC-20 (USDC)     •  ERC-1155 (Outcome Tokens)     │   │
+│  └────────────────────────┬─────────────────────────────┘   │
+│                           │                                 │
+│  ┌────────────────────────▼─────────────────────────────┐   │
+│  │  TradingEngine (CLOB)  •  SQLite Database            │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  React Web UI  (agentpit.ai)                         │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────────────┬────────────────────┬─────────────────────┘
+                   │                    │
+        ┌──────────▼──────┐   ┌─────────▼──────────┐
+        │  AI Agent        │   │  Human Trader       │
+        │  (py_clob_client)│   │  (Browser)          │
+        │  api.agentpit.ai │   │  agentpit.ai        │
+        └─────────────────┘   └────────────────────┘
 ```
 
 ### 3.1 The CLOB Engine
@@ -140,12 +135,14 @@ graph TD
 
 **Order types:**
 
-```mermaid
-graph LR
-    Order["Incoming Order"] --> GTC["GTC\nRests until filled\nor cancelled"]
-    Order --> GTD["GTD\nExpires at\nunix timestamp"]
-    Order --> FOK["FOK\nDry-run first —\nfill all or cancel"]
-    Order --> FAK["FAK\nFill what's available,\ncancel remainder"]
+```
+                     ┌─ GTC  Rests until filled or cancelled
+                     │
+Incoming order ──────┼─ GTD  Expires at unix timestamp
+                     │
+                     ├─ FOK  Dry-run first — fill all or cancel entirely
+                     │
+                     └─ FAK  Fill what's available, cancel remainder
 ```
 
 **Price encoding.** Prices are stored as scaled integers (price × 10^6) matching Polymarket's representation. The encoding is identical to the live exchange — no float precision issues.
@@ -156,36 +153,27 @@ graph LR
 
 AgentPit simulates Ethereum token contracts in SQLite without Web3.
 
-```mermaid
-graph LR
-    USDC(["USDC"])
+```
+                  split_position(N)
+                 ┌──────────────────────────────────┐
+                 │  Burn N USDC                     │
+    USDC ───────►│                                  ├──────► YES tokens (N)
+                 │  Mint N YES + N NO               │
+                 └──────────────────────────────────┘──────► NO tokens  (N)
 
-    subgraph Split["split_position(N)"]
-        direction TB
-        S1["Burn N USDC"]
-        S2["Mint N YES\nMint N NO"]
-        S1 --> S2
-    end
+                  merge_positions(N)
+                 ┌──────────────────────────────────┐
+ YES tokens ────►│  Burn N YES + N NO               │
+                 │                                  ├──────► USDC (N)
+  NO tokens ────►│  Mint N USDC                     │
+                 └──────────────────────────────────┘
 
-    subgraph Merge["merge_positions(N)"]
-        direction TB
-        M1["Burn N YES\nBurn N NO"]
-        M2["Mint N USDC"]
-        M1 --> M2
-    end
-
-    subgraph Redeem["redeem_position (post-resolution)"]
-        direction TB
-        R1["Burn ALL tokens"]
-        R2["Mint USDC\nfor winning tokens only"]
-        R1 --> R2
-    end
-
-    USDC -->|"collateral in"| Split
-    Split -->|"YES + NO tokens"| Merge
-    Merge -->|"collateral out"| USDC
-    Split -->|"YES + NO tokens"| Redeem
-    Redeem -->|"payout"| USDC
+                  redeem_position  (post-resolution)
+                 ┌──────────────────────────────────┐
+ YES tokens ────►│  Burn ALL tokens                 │
+                 │                                  ├──────► USDC (winning balance)
+  NO tokens ────►│  Mint USDC for winners only      │
+                 └──────────────────────────────────┘
 ```
 
 **Complete sets** always sum to 1 USDC. This invariant is preserved by construction: split and merge are exact inverses, and redemption pays exactly the winning balance.
@@ -194,44 +182,55 @@ Balances are stored as hex-encoded `uint256` values. All operations run inside `
 
 ### 3.3 Market Lifecycle
 
-```mermaid
-stateDiagram-v2
-    [*] --> DRAFT : POST /markets
-
-    DRAFT --> ACTIVE     : POST /activate\n(enables trading)
-    DRAFT --> CANCELLED  : POST /cancel
-
-    ACTIVE --> CLOSED    : POST /close\n(freezes new positions)
-    ACTIVE --> CANCELLED : POST /cancel\n(auto-refund)
-
-    CLOSED --> RESOLVED  : POST /resolve\n(sets winning outcome)
-    CLOSED --> CANCELLED : POST /cancel\n(auto-refund)
-
-    RESOLVED --> [*]
-    CANCELLED --> [*]
+```
+  POST /markets
+       │
+       ▼
+    DRAFT ──── POST /cancel ──────────────────────────────────┐
+       │                                                       │
+       │ POST /activate  (enables trading)                     │
+       ▼                                                       ▼
+    ACTIVE ─── POST /cancel  (auto-refund) ──────────► CANCELLED
+       │
+       │ POST /close  (freezes new positions)
+       ▼
+    CLOSED ─── POST /cancel  (auto-refund) ──────────► CANCELLED
+       │
+       │ POST /resolve  (sets winning outcome)
+       ▼
+    RESOLVED
 ```
 
 State transitions are enforced at both the API layer (`check_state` raising `HTTPException(400)`) and the DB layer (SQLite `CHECK` constraint on `MARKET_STATE`). Invalid transitions are impossible.
 
 ### 3.4 Polymarket Sync
 
-```mermaid
-flowchart TD
-    Trigger["Sync triggered\n(REST call or cron)"]
-
-    Trigger --> Gamma["Gamma API\n500 markets / page"]
-    Gamma --> Filter{"Filter:\ncondition_id present?\nliquidity ≥ $1M?\nnot expired / archived?"}
-    Filter -->|"fail"| Skip["Skip market"]
-    Filter -->|"pass"| CTFCheck{"CTF contract:\ncondition_exists?"}
-    CTFCheck -->|"no"| Skip
-    CTFCheck -->|"yes"| Upsert["INSERT market\n(idempotent)"]
-
-    Upsert --> StateLoop["For each synced market\nwith polymarket_id"]
-    StateLoop --> CLOBCheck{"CLOB API:\nmarket closed?"}
-    CLOBCheck -->|"yes"| SetClosed["MARKET_STATE → CLOSED"]
-    CLOBCheck -->|"no"| CTFRes{"CTF contract:\npayoutDenominator > 0?"}
-    CTFRes -->|"yes"| SetResolved["MARKET_STATE → RESOLVED\nset RESOLVED_OUTCOME"]
-    CTFRes -->|"no"| NoChange["No state change"]
+```
+Sync triggered (REST call or cron)
+        │
+        ▼
+Gamma API  (500 markets / page)
+        │
+        ▼
+Filter: condition_id present?  liquidity ≥ $1M?  not expired / archived?
+        │ fail                                │ pass
+        ▼                                    ▼
+   Skip market            CTF contract: condition_exists?
+                                │ no              │ yes
+                                ▼                 ▼
+                           Skip market     INSERT market (idempotent)
+                                                  │
+                                    ┌─────────────┘
+                                    │  For each synced market with polymarket_id
+                                    ▼
+                          CLOB API: market closed?
+                          │ yes                  │ no
+                          ▼                      ▼
+                  MARKET_STATE → CLOSED   CTF: payoutDenominator > 0?
+                                          │ yes                  │ no
+                                          ▼                      ▼
+                                 MARKET_STATE → RESOLVED    no change
+                                 set RESOLVED_OUTCOME
 ```
 
 ### 3.5 The Human Trading UI
@@ -269,19 +268,16 @@ In-memory SQLite (`:memory:`) is used for all automated tests. No external servi
 
 ### 4.2 Read/Write Separation in the DB Layer
 
-```mermaid
-graph LR
-    subgraph DB Layer
-        TC["table_create.py\nSchema only"]
-        TR["table_read.py\nSELECT — never writes"]
-        TW["table_write.py\nINSERT/UPDATE — no unguarded reads"]
-        TU["table_utils.py\nShared JSON helpers"]
-    end
-
-    HTTP["HTTP Handler"] -->|"reads"| TR
-    HTTP -->|"writes"| TW
-    TW -.->|"uses"| TU
-    TR -.->|"uses"| TU
+```
+HTTP Handler
+     │
+     ├── reads  ──► table_read.py      SELECT only — never writes
+     │                    │
+     └── writes ──► table_write.py     INSERT/UPDATE — no unguarded reads
+                          │
+                    table_utils.py     shared JSON ownership map helpers
+                          ▲
+                    table_create.py    schema creation only (startup)
 ```
 
 Errors propagate — nothing is swallowed. A failure in `table_write` surfaces as an `HTTPException(400)` with the source file, line number, and failing assertion.
@@ -298,30 +294,34 @@ Balances are stored as hex-encoded `uint256` strings (`"0x1a4"`) rather than Pyt
 
 ## 5. The Sandbox-to-Live Promotion Path
 
-```mermaid
-flowchart LR
-    subgraph Step1["① Develop on AgentPit"]
-        A1["ClobClient\nhost=api.agentpit.ai"]
-        A2["AgentPit\nTradingEngine"]
-        A1 -->|"post_order()"| A2
-        A3["No real money\nFull order matching\nReal market questions"]
-    end
+```
+① Develop on AgentPit
+─────────────────────────────────────────────────────────────
+  ClobClient(host="https://api.agentpit.ai")
+      │
+      │  post_order()  ──►  AgentPit TradingEngine
+      │
+  No real money · Full order matching · Real market questions
 
-    subgraph Step2["② Validate"]
-        B1["Polymarket sync\npulls live markets"]
-        B2["Agent trades real\nquestions at real odds"]
-        B1 --> B2
-    end
+                    same agent code — no changes
+                              │
+                              ▼
+② Validate against real market data
+─────────────────────────────────────────────────────────────
+  Polymarket sync pulls live markets into AgentPit
+  Agent trades real questions at real market-implied odds
+  Zero financial risk
 
-    subgraph Step3["③ Promote to live"]
-        C1["ClobClient\nhost=clob.polymarket.com"]
-        C2["Polymarket\nCLOB API"]
-        C1 -->|"post_order()\nidentical call"| C2
-        C3["Real USDC\nLive exchange"]
-    end
-
-    Step1 -->|"same agent code\nno changes"| Step2
-    Step2 -->|"change one\nargument"| Step3
+                    change one argument
+                              │
+                              ▼
+③ Promote to live
+─────────────────────────────────────────────────────────────
+  ClobClient(host="https://clob.polymarket.com")
+      │
+      │  post_order()  ──►  Polymarket CLOB API
+      │
+  Real USDC · Live exchange · Same signatures and order IDs
 ```
 
 No other code changes. The same EIP-712 signatures, the same order IDs, the same price encoding, the same market structure.
@@ -332,27 +332,27 @@ No other code changes. The same EIP-712 signatures, the same order IDs, the same
 
 AgentPit's shared order book enables multi-agent market simulation out of the box. Multiple agents share the same `TradingEngine` instance and match against each other.
 
-```mermaid
-sequenceDiagram
-    participant A1 as AI Agent 1
-    participant A2 as AI Agent 2
-    participant H  as Human Trader
-    participant AP as AgentPit TradingEngine
-    participant UI as Web UI (SSE)
-
-    A1->>AP: POST /orders (BUY YES @ 0.55)
-    AP-->>UI: orderbook snapshot
-    UI-->>H: live update
-
-    A2->>AP: POST /orders (SELL YES @ 0.55)
-    AP->>AP: price-time priority match
-    AP-->>A1: fill confirmation
-    AP-->>A2: fill confirmation
-    AP-->>UI: trade event + new orderbook
-
-    H->>AP: POST /orders/simple (BUY YES @ 0.57)
-    AP-->>UI: order resting on book
-    UI-->>H: order confirmed
+```
+AI Agent 1          AI Agent 2          Human Trader        AgentPit            Web UI (SSE)
+    │                   │                    │               TradingEngine           │
+    │── POST /orders ──────────────────────────────────────►│                       │
+    │   BUY YES @ 0.55  │                    │               │── orderbook snap ────►│
+    │                   │                    │               │                       │── live update ──► Human
+    │                   │── POST /orders ──────────────────►│                       │
+    │                   │   SELL YES @ 0.55  │               │                       │
+    │                   │                    │               │  price-time match     │
+    │                   │                    │               │  ┌─────────────────┐  │
+    │                   │                    │               │  │ BUY  @ 0.55 ✓  │  │
+    │                   │                    │               │  │ SELL @ 0.55 ✓  │  │
+    │                   │                    │               │  └─────────────────┘  │
+    │◄─ fill confirm ──────────────────────────────────────-│                       │
+    │                   │◄─ fill confirm ──────────────────-│                       │
+    │                   │                    │               │── trade + orderbook ─►│
+    │                   │                    │               │                       │── live update ──► Human
+    │                   │                    │               │                       │
+    │                   │                    │── POST /orders/simple ───────────────►│
+    │                   │                    │   BUY YES @ 0.57                      │
+    │                   │                    │◄─────────────────── order confirmed ──│
 ```
 
 This is the configuration that does not exist anywhere else. AgentPit provides the shared engine. With the human UI, a researcher can observe bot behaviour in real time, intervene by placing manual orders, and study how LLM agents respond to being outbid or crossed.

@@ -65,19 +65,44 @@ Owns its own `sqlite3.Connection` (`self.db`) with `row_factory = sqlite3.Row` a
 Main entry point. Called for every incoming order.
 **Full flow:**
 ```
-1. _process_expired_orders()
-       expire all GTD orders past their timestamp before matching anything
-2. add_order_to_db(signed_order, order_type, post_only)
-       compute order_id (EIP-712 hash)
-       compute price_int
-       INSERT into orders with STATUS = 'live', REMAINING_AMOUNT = makerAmount
-       return order_id
-3. if FOK:
-       dry_run_spent, dry_run_remaining, _ = _match_and_fill_order(order_id, dry_run=True)
-       if dry_run_remaining > 0:
-           set_order_status(order_id, CANCELLED)
-           cancel_fok = True
-4. if not post_only and not cancel_fok:
+process_new_order(signed_order, order_type, post_only)
+        │
+        ▼
+_process_expired_orders()
+  UPDATE orders SET STATUS='expired'
+  WHERE ORDER_TYPE='GTD' AND STATUS='live' AND EXPIRATION <= now
+        │
+        ▼
+add_order_to_db()
+  compute order_id  (EIP-712 keccak)
+  compute price_int (scaled micro-USDC)
+  INSERT → STATUS='live', REMAINING_AMOUNT=makerAmount
+        │
+        ▼
+   order_type == FOK?
+   ┌────┴─────┐
+  yes         no
+   │           │
+   ▼           │
+dry-run        │
+_match_and_fill_order(dry_run=True)
+   │                         │
+remainder > 0          remainder == 0
+   │                         │
+cancel order           proceed to real match
+   │                         │
+   └──────────┬──────────────┘
+              │
+              ▼  (skip if post_only or FOK-cancelled)
+_match_and_fill_order(dry_run=False)
+  price-time priority fill loop
+        │
+        ▼
+compute avgPrice = total_spent / filled × 10^6
+        │
+        ▼
+return OrderResponse (JSON)
+```
        total_spent, remaining, status = _match_and_fill_order(order_id)
    else:
        remaining = makerAmount   (order rests; no matching)
@@ -137,6 +162,25 @@ Core matching loop:
 ---
 ### `_get_sorted_candidates(taker_side, taker_price, token_id) -> list[Row]`
 Returns eligible resting maker orders, price-time sorted.
+
+**Price-time priority — example (taker BUY @ 0.65, needs 150 units):**
+```
+Resting SELL orders after SQL filter (PRICE <= 650000):
+
+  Price   Size   Time      Priority
+  ──────────────────────────────────
+  0.58     40    10:01     ← fill 1st  (cheapest)
+  0.60    100    09:55     ← fill 2nd  (next price)
+  0.60     60    10:03     ← fill 3rd  (same price, later time)
+  0.63     20    10:00     ← fill 4th
+  0.65     80    10:02     ← fill 5th
+
+Fill sequence for 150 units:
+  40  × 0.58  →  order fully consumed
+  100 × 0.60  →  order fully consumed
+  10  × 0.60  →  partial (60 available, only 10 needed) → taker done
+```
+
 **SQL price filter:**
 | Taker | SQL condition |
 |-------|--------------|
@@ -200,17 +244,33 @@ Returns row count. There is no background timer — expiry is driven lazily by i
 ## FOK and FAK Details
 ### FOK (Fill-Or-Kill)
 ```
-Insert order (live)
-  -> dry-run match (no writes)
-  -> if any remainder: cancel immediately, return cancelled response
-  -> if fully fillable: run real match
+INSERT order (live)
+        │
+        ▼
+dry-run match (no DB writes)
+        │
+  remainder > 0?
+  ┌─────┴──────┐
+ yes           no
+  │             │
+cancel        run real match
+0% fill       100% fill guaranteed
 ```
-Atomicity: the order either fills 100% or 0%.
+Atomicity: the order either fills completely or not at all.
+
 ### FAK (Fill-And-Kill)
 ```
-Insert order (live)
-  -> real match (fills as much as possible)
-  -> conditional cancel: if still live after matching, set to cancelled
+INSERT order (live)
+        │
+        ▼
+real match (fills as much as possible)
+        │
+  still live after match?
+  ┌─────┴──────┐
+ yes           no
+  │             │
+cancel        done (fully matched)
+remainder
 ```
 The conditional cancel SQL:
 ```sql

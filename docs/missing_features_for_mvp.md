@@ -106,6 +106,26 @@ No browser interface exists. Humans cannot trade alongside bots without writing 
 
 ## Summary
 
+```
+Dependency order — backend first, UI last:
+
+  ① Order & Orderbook REST endpoints   (Backend)
+          │
+          │  required by ③ and ⑤
+          ▼
+  ② Market state guard on split/merge  (Backend — independent)
+
+  ③ Polymarket sync REST trigger        (Backend — independent)
+
+  ④ Trade fills in transaction history  (Backend — independent)
+          │
+          │  all four backend gaps must ship before
+          ▼
+  ⑤ Human trading UI                   (Frontend + 7 backend additions)
+     depends on ①  (orderbook, order placement, cancellation)
+     depends on ④  (fill events in history)
+```
+
 | # | Feature | Scope |
 |---|---|---|
 | 1 | Order & orderbook REST endpoints | Backend |
@@ -114,4 +134,4 @@ No browser interface exists. Humans cannot trade alongside bots without writing 
 | 4 | Trade fills in transaction history | Backend |
 | 5 | Human trading UI (Polymarket-parity) | Frontend + 7 backend additions |
 
-Ship all five to unblock human-vs-bot trading in local simulation.
+Ship all five to unblock human-vs-bot trading on agentpit.ai.

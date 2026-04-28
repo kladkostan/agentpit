@@ -119,29 +119,30 @@ INFO Synced 12/150 Polymarket markets locally
 ---
 ### `create_polygon_market_if_does_not_exist(db, pm_market) → Market | None`
 Per-market creation logic:
+
 ```
-1. build_create_market_request_from_json(pm_market)
-       │
-       ▼
-2. assert request.polymarket_id is set
-       │
-       ▼
-3. ConditionalTokenFramework.condition_exists(condition_id)
-       │                │
-     False             True
-       │                │
-     skip              ▼
-               4. TableRead.read_condition_id_by_polymarket_id(db, polymarket_id)
-                         │                  │
-                     not None             None
-                         │                  │
-                       skip               ▼
-                               5. TableWrite.create_market(db, request, is_polygon_market=True)
-                                          │
-                                          ▼
-                               return new Market
+build_create_market_request_from_json(pm_market)
+        │
+        ▼
+polymarket_id is set?
+        │ no → skip
+        │ yes
+        ▼
+CTF.condition_exists(condition_id)?
+        │ no → skip
+        │ yes
+        ▼
+TableRead: market already in DB by polymarket_id?
+        │ yes → skip (idempotent)
+        │ no
+        ▼
+TableWrite.create_market(request, is_polygon_market=True)
+        │
+        ▼
+return new Market
 ```
-Passing `is_polygon_market=True` tells `TableWrite.create_market` to use the condition ID from the request directly, rather than computing one from the question text.
+
+`is_polygon_market=True` tells `TableWrite.create_market` to use the condition ID from the request directly rather than computing one from question text.
 ---
 ### `build_create_market_request_from_json(pm_market) → CreateMarketRequest`
 Maps normalized Gamma fields to `CreateMarketRequest`:
@@ -169,16 +170,31 @@ Handles both `token_id` (snake_case) and `tokenId` (camelCase) field names.
 ## Stage 4 — Syncing Market State
 ### `sync_market_state(db, condition_id)`
 Called for every existing local market that has a `polymarket_id`. Checks two sources and applies state transitions:
+
 ```
-Current local state    Action
-─────────────────────────────────────────────────────────────────────
-DRAFT or ACTIVE        → query CLOB API: fetch_is_polymarket_market_closed(condition_id)
-                           if closed=True → update_market_state_to_closed_if_needed(db)
-DRAFT, ACTIVE,         → query CTF: get_onchain_resolution_status(condition_id)
-or CLOSED                  assert condition_exists (raises if not)
-                           if resolved=True → update_market_state_to_resolved_if_needed(db, winner_index)
+sync_market_state(db, condition_id)
+        │
+        ├─ local state is DRAFT or ACTIVE?
+        │       │ yes
+        │       ▼
+        │  CLOB API: fetch_is_polymarket_market_closed(condition_id)
+        │       │ closed=True              │ closed=False
+        │       ▼                          │ (skip)
+        │  update_market_state_to_closed   │
+        │                                  │
+        ├─ local state is DRAFT, ACTIVE, or CLOSED?
+        │       │ yes
+        │       ▼
+        │  CTF: get_onchain_resolution_status(condition_id)
+        │       │ resolved=True            │ resolved=False
+        │       ▼                          │ (skip)
+        │  update_market_state_to_resolved │
+        │  (winner_index)                  │
+        │                                  │
+        └─ done
 ```
-Both checks can run in the same call. A market can go from `ACTIVE → CLOSED → RESOLVED` in a single `sync_market_state` invocation if the CTF already shows a resolution.
+
+Both checks run in the same call. A market can move `ACTIVE → CLOSED → RESOLVED` in a single invocation if the CTF already shows resolution.
 ---
 ### `fetch_is_polymarket_market_closed(condition_id) → bool`
 Queries the CLOB API:

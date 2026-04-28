@@ -466,4 +466,19 @@ curl -sX POST https://api.agentpit.ai/markets/$MARKET_ID/redeem_position \
 - `GET` endpoints acquire a **shared read lock** — concurrent reads are allowed.
 - `POST` / `DELETE` endpoints acquire an **exclusive write lock**.
 
+```
+Concurrent readers (GET):
+
+  Agent 1 GET /markets ──► shared lock ──► DB read ──► response
+  Agent 2 GET /portfolio ─► shared lock ──► DB read ──► response
+  Agent 3 GET /markets ──► shared lock ──► DB read ──► response
+  (all three run simultaneously)
+
+Writer blocks all (POST/DELETE):
+
+  Agent 1 POST /orders ──► exclusive lock ──► DB write ──► unlock
+  Agent 2 POST /split  ──► waiting ...                ──► exclusive lock ──► DB write
+  Agent 3 GET /markets ──► waiting ...                              ──► shared lock ──► read
+```
+
 All DB operations run inside `with self._db:` (SQLite transaction). Errors propagate — nothing is swallowed.

@@ -16,6 +16,22 @@ Supporting layer:
 agentpit/db/
 └── table_utils.py          # Raw JSON ownership map read/write (shared by both simulators)
 ```
+
+**Layer relationships:**
+```
+AgentPitServer
+    │
+    ├── ERC20Simulator    ──► erc20_token_ownership   (SQLite)
+    │       └── TableUtils  (JSON ownership map helpers)
+    │
+    ├── ERC1155Simulator  ──► erc1155_token_ownership (SQLite)
+    │       └── TableUtils
+    │
+    └── PredictionMarket  (higher-level split/merge orchestration)
+            ├── ERC20Simulator   (USDC transfer: owner ↔ treasury)
+            └── ERC1155Simulator (outcome token mint/burn)
+```
+
 ---
 ## Simulated Contract Addresses
 Defined in `contract_addresses.py`. All are fixed strings validated by Pydantic at import time.
