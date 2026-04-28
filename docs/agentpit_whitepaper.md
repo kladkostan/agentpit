@@ -6,11 +6,11 @@
 
 ## Abstract
 
-Prediction markets are among the most information-efficient financial instruments ever designed. They aggregate probabilistic beliefs across diverse participants into a single, tradeable price signal — one that consistently outperforms expert forecasters on questions ranging from election outcomes to scientific discoveries. Polymarket, the leading decentralised prediction market exchange, now processes over $1B in monthly volume.
+Prediction markets are among the most information-efficient financial instruments ever designed. They aggregate probabilistic beliefs across diverse participants into a single, tradeable price signal — one that consistently outperforms expert forecasters on questions ranging from election outcomes to scientific discoveries. [Polymarket](https://polymarket.com), the leading decentralised prediction market exchange, now processes over $1B in monthly volume.
 
 The next frontier is autonomous AI agents trading these markets at scale. Large language models can synthesise news, historical base rates, and market microstructure into actionable probability estimates. But deploying such agents on live prediction markets today requires risking real capital on every iteration of a strategy — a feedback loop so slow and expensive that it blocks most serious development.
 
-AgentPit solves this. Hosted at **[agentpit.ai](https://agentpit.ai)**, it is a cloud prediction-market simulation platform that mirrors the Polymarket CLOB API exactly, runs against real synced market data, and lets humans and AI agents trade the same markets in a zero-risk sandbox. A single constructor argument promotes any agent to the live exchange with no code changes.
+AgentPit solves this. Hosted at **[agentpit.ai](https://agentpit.ai)**, it is a cloud prediction-market simulation platform that mirrors the [Polymarket CLOB API](https://docs.polymarket.com) exactly, runs against real synced market data, and lets humans and AI agents trade the same markets in a zero-risk sandbox. A single constructor argument promotes any agent to the live exchange with no code changes.
 
 ---
 
@@ -57,7 +57,7 @@ AgentPit is a hosted prediction-market simulation platform available at **[agent
 
 ### 2.1 The Core Insight: API Compatibility as a Design Constraint
 
-The most important decision in AgentPit's design is not what it adds — it is what it refuses to change. The `py_clob_client` interface is identical in sandbox and live modes:
+The most important decision in AgentPit's design is not what it adds — it is what it refuses to change. The [`py_clob_client`](https://github.com/Polymarket/py-clob-client) interface is identical in sandbox and live modes:
 
 ```python
 # AgentPit sandbox
@@ -73,7 +73,7 @@ One argument. No other changes. An agent developed and validated on AgentPit run
 
 ### 2.2 EIP-712 Correctness
 
-Order IDs in AgentPit are computed identically to Polymarket:
+Order IDs in AgentPit are computed identically to Polymarket using [EIP-712](https://eips.ethereum.org/EIPS/eip-712) typed structured data signing:
 
 ```
 order_id = keccak256(EIP-712 struct hash of the order)
@@ -116,7 +116,7 @@ Agents trained and tested on AgentPit are making decisions on real questions at 
 │  └──────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │  React Web UI  (agentpit.ai)                         │   │
+│  │  React Web UI  (agentpit.ai) — planned MVP           │   │
 │  └──────────────────────────────────────────────────────┘   │
 └──────────────────┬────────────────────┬─────────────────────┘
                    │                    │
@@ -151,7 +151,7 @@ Incoming order ──────┼─ GTD  Expires at unix timestamp
 
 ### 3.2 The Token Economy
 
-AgentPit simulates Ethereum token contracts in SQLite without Web3.
+AgentPit simulates Ethereum token contracts in SQLite without Web3. [ERC-20](https://eips.ethereum.org/EIPS/eip-20) mechanics are used for USDC; [ERC-1155](https://eips.ethereum.org/EIPS/eip-1155) mechanics are used for outcome tokens.
 
 ```
                   split_position(N)
@@ -233,13 +233,15 @@ Filter: condition_id present?  liquidity ≥ $1M?  not expired / archived?
                                  set RESOLVED_OUTCOME
 ```
 
-### 3.5 The Human Trading UI
+### 3.5 The Human Trading UI *(planned — MVP roadmap)*
 
-AgentPit ships a Polymarket-parity React frontend at **agentpit.ai** that allows non-engineers to trade the same markets as bots, in real time.
+> **Not yet implemented.** The web UI is an immediate MVP deliverable. See `docs/missing_features_for_mvp.md` §5 for the full spec and required backend additions.
 
-**Design principle:** Any user familiar with Polymarket should need zero documentation to trade on AgentPit. Layout, colour scheme, component shapes, and interaction patterns are modelled directly on Polymarket.
+The planned UI is a [Polymarket](https://polymarket.com)-parity React frontend at **agentpit.ai** that will let non-engineers trade the same markets as bots in real time, with zero onboarding friction.
 
-Key components:
+**Design principle:** Any user already familiar with Polymarket should need zero documentation to trade on AgentPit. Layout, colour scheme, component shapes, and interaction patterns will be modelled directly on Polymarket.
+
+Planned components:
 
 | Component | Description |
 |-----------|-------------|
@@ -250,9 +252,9 @@ Key components:
 | **Activity feed** | Real-time fills feed per market |
 | **Portfolio** | Position cards with implied value and unrealised P&L |
 
-The UI uses Server-Sent Events (SSE) to stream live orderbook snapshots and trade events without polling. A human watching the AgentPit market detail page sees bot orders arriving and matching in real time.
+The UI will use Server-Sent Events (SSE) to stream live orderbook snapshots and trade events without polling. A human watching the AgentPit market detail page will see bot orders arriving and matching in real time.
 
-Human order submission does not require EIP-712 signing from the browser. The server signs orders on behalf of the user using their stored private key, accepting a simple JSON payload: `{ api_key, token_id, side, price, amount, order_type }`.
+Human order submission will not require EIP-712 signing from the browser. A planned `POST /orders/simple` endpoint will sign orders server-side using the user's stored key, accepting `{ api_key, token_id, side, price, amount, order_type }`.
 
 ---
 
@@ -260,7 +262,7 @@ Human order submission does not require EIP-712 signing from the browser. The se
 
 ### 4.1 SQLite as the Platform Database
 
-AgentPit uses SQLite as its primary datastore. There is no Postgres cluster, no Redis, no message queue to operate. This is an intentional architectural choice: SQLite's transactional guarantees, zero-configuration deployment, and in-memory mode for test isolation make it the right fit for a platform where correctness and fast iteration matter more than horizontal throughput.
+AgentPit uses [SQLite](https://www.sqlite.org) as its primary datastore. There is no Postgres cluster, no Redis, no message queue to operate. This is an intentional architectural choice: SQLite's transactional guarantees, zero-configuration deployment, and in-memory mode for test isolation make it the right fit for a platform where correctness and fast iteration matter more than horizontal throughput.
 
 The read/write boundary is enforced in code: `table_read.py` never writes; `table_write.py` never does unguarded reads. All writes run inside `with db:` SQLite transaction blocks — atomicity is guaranteed at the DB level, not by application-layer retry logic.
 
@@ -284,7 +286,7 @@ Errors propagate — nothing is swallowed. A failure in `table_write` surfaces a
 
 ### 4.3 Pydantic Strict Mode on Simulators
 
-All `TradingEngine` and simulator methods use `@validate_call(config=_STRICT)` with `ConfigDict(strict=True, arbitrary_types_allowed=True)`. Wrong argument types at the boundary — an `int` passed as a `str`, a `float` where a `Decimal` is expected — raise `ValidationError` immediately rather than producing silent coercion bugs that surface as incorrect balances.
+All `TradingEngine` and simulator methods use [`@validate_call`](https://docs.pydantic.dev/latest/concepts/validation_decorator/) with `ConfigDict(strict=True, arbitrary_types_allowed=True)`. Wrong argument types at the boundary — an `int` passed as a `str`, a `float` where a `Decimal` is expected — raise `ValidationError` immediately rather than producing silent coercion bugs that surface as incorrect balances.
 
 ### 4.4 Hex-uint256 for Token Balances
 
@@ -331,6 +333,8 @@ No other code changes. The same EIP-712 signatures, the same order IDs, the same
 ## 6. Multi-Agent Markets
 
 AgentPit's shared order book enables multi-agent market simulation out of the box. Multiple agents share the same `TradingEngine` instance and match against each other.
+
+> **Note:** The REST endpoints for order submission (`POST /orders`) and the Web UI are MVP roadmap items — not yet implemented. The sequence diagram below shows the target architecture once those are shipped. Currently, `TradingEngine` is only reachable in-process via `py_clob_client`.
 
 ```
 AI Agent 1          AI Agent 2          Human Trader        AgentPit            Web UI (SSE)
@@ -387,7 +391,7 @@ Prediction markets are entering a period of rapid growth. Polymarket's $1B+ mont
 
 The barrier is not capability. It is tooling. Engineers who want to build prediction market agents have nowhere safe to iterate, no sandboxed order book to test against, and no path from prototype to live deployment that does not involve losing real money.
 
-AgentPit removes every barrier. Agents connect to `api.agentpit.ai` using the exact same `py_clob_client` interface as the live exchange. Swapping to production is a one-line change. The web UI at agentpit.ai gives non-engineers and researchers a Polymarket-parity interface to trade alongside bots in real time.
+AgentPit removes every barrier. Agents connect to `api.agentpit.ai` using the exact same `py_clob_client` interface as the live exchange. Swapping to production is a one-line change. Once the planned web UI ships at agentpit.ai, non-engineers and researchers will get a Polymarket-parity interface to trade alongside bots in real time.
 
 The adoption path is clear: engineers adopt AgentPit as the standard development environment for prediction market agents, the way Hardhat became the standard for Ethereum smart contract development. From that installed base, the team workspace, agent marketplace, and live execution layer follow naturally.
 

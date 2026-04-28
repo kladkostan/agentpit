@@ -1,6 +1,6 @@
 # AgentPit — High-Level Design
 
-AgentPit is a **hosted prediction-market simulation platform** at **[agentpit.ai](https://agentpit.ai)**, built on Polymarket's architecture. Engineers and AI agents trade outcome tokens, manage markets, and run strategies against real Polymarket data — without spending real money or hitting rate limits.
+AgentPit is a **hosted prediction-market simulation platform** at **[agentpit.ai](https://agentpit.ai)**, built on [Polymarket](https://polymarket.com)'s architecture. Engineers and AI agents trade outcome tokens, manage markets, and run strategies against real Polymarket data — without spending real money or hitting rate limits.
 
 ---
 
@@ -61,11 +61,11 @@ docs/                     # This document + component specs
 
 ### 1. AgentPit Server (`agentpit/fastapi/`)
 
-`AgentPitServer` subclasses `FastAPI` — it is both the application and its own router. It owns a single SQLite connection and a `ReaderWriterLock` that serialises writes while allowing concurrent reads.
+`AgentPitServer` subclasses [FastAPI](https://fastapi.tiangolo.com) — it is both the application and its own router. It owns a single [SQLite](https://www.sqlite.org) connection and a `ReaderWriterLock` that serialises writes while allowing concurrent reads.
 
-Handlers are thin: validate → lock → delegate to `db/` or `contract_simulators/` → return typed Pydantic response. No business logic leaks into the HTTP layer.
+Handlers are thin: validate → lock → delegate to `db/` or `contract_simulators/` → return typed [Pydantic](https://docs.pydantic.dev) response. No business logic leaks into the HTTP layer.
 
-**Exposes:** 20 REST endpoints across markets, USDC, positions, portfolio, and agents.
+**Exposes:** 19 REST endpoints across markets, USDC, positions, portfolio, and agents.
 
 → **[`agentpit_api.md`](agentpit_api.md)** — full endpoint reference.
 
@@ -73,7 +73,7 @@ Handlers are thin: validate → lock → delegate to `db/` or `contract_simulato
 
 ### 2. SQLite Database (`agentpit/db/`)
 
-All state lives in a single SQLite file (`:memory:` by default for tests; set `AGENTPIT_DB_PATH` for persistence). The DB layer enforces a hard read/write boundary:
+All state lives in a single [SQLite](https://www.sqlite.org) file (`:memory:` by default for tests; set `AGENTPIT_DB_PATH` for persistence). The DB layer enforces a hard read/write boundary:
 
 | Module | Responsibility |
 |--------|---------------|
@@ -90,7 +90,7 @@ All state lives in a single SQLite file (`:memory:` by default for tests; set `A
 
 ### 3. Contract Simulators (`agentpit/contract_simulators/`)
 
-ERC-20 and ERC-1155 token mechanics simulated entirely in SQLite. No Web3, no gas.
+[ERC-20](https://eips.ethereum.org/EIPS/eip-20) and [ERC-1155](https://eips.ethereum.org/EIPS/eip-1155) token mechanics simulated entirely in SQLite. No Web3, no gas.
 
 | Class | What it simulates |
 |-------|------------------|

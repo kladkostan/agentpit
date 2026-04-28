@@ -9,7 +9,7 @@ pytest -s tests/fastapi/test_usdc.py::test_mint_usdc            # single test
 pytest -s -m integration                                         # live network only
 ```
 
-`pytest.ini` streams logs at INFO level on every run — no `-v` flag needed.
+All tests use [pytest](https://docs.pytest.org). `pytest.ini` streams logs at INFO level on every run — no `-v` flag needed.
 
 **Test layers:**
 
@@ -21,7 +21,7 @@ pytest -s -m integration                                         # live network 
                     └──────────────────────────┘
               ┌──────────────────────────────────────────┐
               │        FastAPI / HTTP layer               │  make test
-              │  TestClient + in-memory SQLite            │
+              │  [TestClient](https://fastapi.tiangolo.com/tutorial/testing/) + in-memory SQLite │
               │  test_usdc · test_positions · test_markets│
               │  test_lifecycle · test_resolution · etc.  │
               └──────────────────────────────────────────┘

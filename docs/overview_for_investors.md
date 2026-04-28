@@ -80,9 +80,9 @@ Open-source core drives developer adoption. Monetisation follows:
 
 ## Technology Differentiation
 
-- **API-compatible by design.** We implement the exact Polymarket interface. Agents developed on AgentPit run on the live exchange with zero code changes.
-- **SQLite-first internals.** No Postgres, Redis, or message queue to operate. The platform is simple to run and simple to reason about — correctness and auditability over infrastructure complexity.
-- **EIP-712 correctness.** Order IDs, signatures, and price encoding are byte-for-byte identical to Polymarket. Agents test real cryptographic security, not a toy approximation.
+- **API-compatible by design.** We implement the exact [Polymarket CLOB API](https://docs.polymarket.com) interface. Agents developed on AgentPit run on the live exchange with zero code changes.
+- **[SQLite](https://www.sqlite.org)-first internals.** No Postgres, Redis, or message queue to operate. The platform is simple to run and simple to reason about — correctness and auditability over infrastructure complexity.
+- **[EIP-712](https://eips.ethereum.org/EIPS/eip-712) correctness.** Order IDs, signatures, and price encoding are byte-for-byte identical to Polymarket. Agents test real cryptographic security, not a toy approximation.
 - **Modular agent framework.** The agent runtime is fully decoupled from the trading engine. Skills, channels, and LLM providers are independently pluggable.
 
 ---

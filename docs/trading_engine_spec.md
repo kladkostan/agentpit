@@ -1,11 +1,11 @@
 # Trading Engine — Design Specification
 ## Purpose
-`agentpit/trading_engine.py` is an in-process, SQLite-backed **Central Limit Order Book (CLOB)** engine. It accepts signed Polymarket-compatible orders, matches them against resting liquidity using price-time priority, records confirmed trades, and manages order lifecycle (expiry, cancellation).
+`agentpit/trading_engine.py` is an in-process, [SQLite](https://www.sqlite.org)-backed **Central Limit Order Book (CLOB)** engine. It accepts signed [Polymarket](https://polymarket.com)-compatible orders, matches them against resting liquidity using price-time priority, records confirmed trades, and manages order lifecycle (expiry, cancellation).
 The engine is used in two modes:
 | Mode | How activated | Who calls it |
 |------|--------------|--------------|
-| **Local / AgentPit** | `ClobClient(host="")` | `py_clob_client` routes calls to `TradingEngine` directly instead of hitting the network |
-| **Remote / Polymarket** | `ClobClient(host="https://clob.polymarket.com")` | Standard HTTP calls; `TradingEngine` is not involved |
+| **AgentPit sandbox** | `ClobClient(host="https://api.agentpit.ai")` | [`py_clob_client`](https://github.com/Polymarket/py-clob-client) routes calls to `TradingEngine` directly |
+| **Live Polymarket** | `ClobClient(host="https://clob.polymarket.com")` | Standard HTTP calls to the [Polymarket CLOB API](https://docs.polymarket.com); `TradingEngine` is not involved |
 The local mode is detected in `py_clob_client/client.py` by the `# BEGIN_AGENTPIT` guards:
 ```python
 if self.host == "":
@@ -42,7 +42,7 @@ Examples: `0.75` -> `750000`, `0.01` -> `10000`
 | `expired` | GTD order past its `EXPIRATION` timestamp |
 | `cancelled` | Explicitly cancelled, FOK dry-run failed, or FAK leftover |
 ### Order ID
-Order IDs are Polymarket-compatible EIP-712 struct hashes:
+Order IDs are Polymarket-compatible [EIP-712](https://eips.ethereum.org/EIPS/eip-712) struct hashes:
 ```python
 domain = get_clob_auth_domain(chain_id)
 signable = order.signable_bytes(domain)
@@ -158,7 +158,7 @@ Core matching loop:
        set_order_type_to_cancelled_if_order_is_fak_and_order_status_is_live(order_id)
 6. return (total_spent, taker_remaining, get_order_status(order_id))
 ```
-`dry_run=True` skips all writes. Used exclusively for FOK feasibility checking.
+`dry_run=True` skips only the **taker**-side writes (`_update_taker_remaining_in_db` and the FAK cancel). Importantly, `_fill_order` is always called **without** a `dry_run` flag, so maker-order DB updates and trade-row insertions still occur even during the FOK dry run. If the FOK then cancels (remainder > 0), those maker updates remain in the DB. This is a known implementation detail — see `missing_features_for_mvp.md` for planned corrections.
 ---
 ### `_get_sorted_candidates(taker_side, taker_price, token_id) -> list[Row]`
 Returns eligible resting maker orders, price-time sorted.

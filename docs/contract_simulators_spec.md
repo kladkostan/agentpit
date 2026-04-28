@@ -1,6 +1,6 @@
 # Contract Simulators — Design Specification
 ## Purpose
-`agentpit/contract_simulators/` provides in-process, SQLite-backed simulations of Ethereum smart contracts. They give the AgentPit server real ERC-20 and ERC-1155 token semantics — minting, burning, transferring, balance queries — without any blockchain connection or gas costs.
+`agentpit/contract_simulators/` provides in-process, [SQLite](https://www.sqlite.org)-backed simulations of Ethereum smart contracts. They give the AgentPit server real [ERC-20](https://eips.ethereum.org/EIPS/eip-20) and [ERC-1155](https://eips.ethereum.org/EIPS/eip-1155) token semantics — minting, burning, transferring, balance queries — without any blockchain connection or gas costs.
 > **These are not real contracts.** No Web3 calls are made. State lives entirely in SQLite rows.
 ---
 ## Module Structure

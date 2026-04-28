@@ -1,11 +1,11 @@
 # Polymarket Sync — Design Specification
 ## Purpose
-`agentpit/polymarket/polymarket_sync.py` keeps the local AgentPit SQLite database in sync with live Polymarket data. It bridges two external systems:
-| System | Role |
-|--------|------|
-| **Polymarket Gamma API** | Source of truth for market metadata (questions, tokens, dates, slugs) |
-| **Polymarket CLOB API** | Source of truth for per-market `closed` status |
-| **Polygon CTF contract** | Source of truth for on-chain resolution and payout data |
+`agentpit/polymarket/polymarket_sync.py` keeps the local AgentPit [SQLite](https://www.sqlite.org) database in sync with live [Polymarket](https://polymarket.com) data. It bridges two external systems:
+ System  Role
+--------------
+ **[Polymarket Gamma API](https://gamma-api.polymarket.com)**  Source of truth for market metadata (questions, tokens, dates, slugs)
+ **[Polymarket CLOB API](https://docs.polymarket.com)**  Source of truth for per-market `closed` status
+ **[Polygon CTF contract](https://polygonscan.com/address/0x4D97DCd97eC945f40cF65F87097ACe5EA0476045)**  Source of truth for on-chain resolution and payout data
 The sync is one-directional: Polymarket → local DB. The local DB is never written back to Polymarket.
 ---
 ## When to Run Sync
@@ -20,9 +20,9 @@ Or schedule it with `nanobot/cron/` for periodic updates (e.g. every 15 minutes)
 ## External Dependencies
 | Dependency | URL | Purpose |
 |------------|-----|---------|
-| Polymarket Gamma API | `https://gamma-api.polymarket.com` | Market metadata (question, description, tokens, dates, condition_id) |
-| Polymarket CLOB API | `https://clob.polymarket.com/markets` | Per-market `closed` flag |
-| Polygon CTF Contract | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | On-chain condition existence check and payout resolution |
+| [Polymarket Gamma API](https://gamma-api.polymarket.com) | `https://gamma-api.polymarket.com` | Market metadata (question, description, tokens, dates, condition_id) |
+| [Polymarket CLOB API](https://docs.polymarket.com) | `https://clob.polymarket.com/markets` | Per-market `closed` flag |
+| [Polygon CTF Contract](https://polygonscan.com/address/0x4D97DCd97eC945f40cF65F87097ACe5EA0476045) | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` | On-chain condition existence check and payout resolution |
 | Polygon RPC | `https://tenderly.rpc.polygon.community` | Web3 provider for CTF contract calls |
 HTTP logs from `httpx` and `httpcore` are suppressed to `WARNING` to reduce noise from per-request logs.
 ---

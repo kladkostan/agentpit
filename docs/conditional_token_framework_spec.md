@@ -1,6 +1,6 @@
 # Conditional Token Framework — Design Specification
 ## Purpose
-`agentpit/polymarket/conditional_token_framework.py` is a thin read-only wrapper around the **Gnosis Conditional Token Framework (CTF)** ERC-1155 smart contract on Polygon Mainnet. It answers two questions during market sync:
+`agentpit/polymarket/conditional_token_framework.py` is a thin read-only wrapper around the **[Gnosis Conditional Token Framework (CTF)](https://docs.gnosis.io/conditionaltokens/)** [ERC-1155](https://eips.ethereum.org/EIPS/eip-1155) smart contract on [Polygon Mainnet](https://polygon.technology). It answers two questions during market sync:
 1. **Does this condition exist on-chain?** (Is the condition prepared by an oracle?)
 2. **Has this condition been resolved, and if so, which outcome won?**
 No transactions are ever sent. All contract calls are pure `view` reads.
@@ -55,9 +55,9 @@ The contract is considered resolved when `payoutDenominator > 0` and `sum(payout
 ## Contract Details
 | Property | Value |
 |----------|-------|
-| Contract | Gnosis `ConditionalTokens` (ERC-1155) |
-| Network | Polygon Mainnet |
-| Address | `0x4D97DCd97eC945f40cF65F87097ACe5EA0476045` |
+| Contract | [Gnosis `ConditionalTokens`](https://docs.gnosis.io/conditionaltokens/) ([ERC-1155](https://eips.ethereum.org/EIPS/eip-1155)) |
+| Network | [Polygon Mainnet](https://polygon.technology) |
+| Address | [`0x4D97DCd97eC945f40cF65F87097ACe5EA0476045`](https://polygonscan.com/address/0x4D97DCd97eC945f40cF65F87097ACe5EA0476045) |
 | RPC | `https://tenderly.rpc.polygon.community` |
 A new `Web3` + contract instance is created on every static method call. No connection pooling or caching is done.
 ---

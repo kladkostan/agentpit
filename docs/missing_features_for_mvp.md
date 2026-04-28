@@ -8,7 +8,7 @@ Five features stand between the current codebase and a shippable MVP. All five a
 
 ## 1. Order & Orderbook REST Endpoints
 
-`TradingEngine` is fully implemented but only reachable in-process via `py_clob_client`. Any agent — or human — that communicates over HTTP cannot place, cancel, or observe orders. This is the core trading surface of the platform; it must be HTTP-accessible.
+`TradingEngine` is fully implemented but only reachable in-process via [`py_clob_client`](https://github.com/Polymarket/py-clob-client). Any agent — or human — that communicates over HTTP cannot place, cancel, or observe orders. This is the core trading surface of the platform; it must be HTTP-accessible.
 
 **Add to `AgentPitServer`:**
 
