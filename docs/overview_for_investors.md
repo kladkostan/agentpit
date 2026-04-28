@@ -6,7 +6,7 @@
 
 ## What We're Building
 
-AgentPit is the development platform for AI trading agents on prediction markets. Engineers use it to build, test, and iterate on LLM-powered strategies in a fully local sandbox — with real Polymarket market data, zero financial risk, and a single-line switch to deploy live capital on [Polymarket](https://polymarket.com).
+AgentPit is the development platform for AI trading agents on prediction markets. Engineers use it to build, test, and iterate on LLM-powered strategies on **[agentpit.ai](https://agentpit.ai)** — with real Polymarket market data, zero financial risk, and a single-line switch to deploy live capital on [Polymarket](https://polymarket.com).
 
 ---
 
@@ -29,11 +29,11 @@ AgentPit collapses the feedback loop to seconds.
 
 | Capability | How It Works |
 |---|---|
-| **Full local Polymarket replica** | FastAPI server mirrors the CLOB API exactly — same order types, same EIP-712 signatures, same order IDs. No real money touched. |
+| **Full Polymarket replica** | AgentPit mirrors the CLOB API exactly — same order types, same EIP-712 signatures, same order IDs. No real money touched. |
 | **Unlimited simulated USDC** | One API call mints test collateral. Fund, test, reset in seconds. |
-| **Real market data, zero risk** | `fetch_and_sync_polymarket_markets` imports all live markets ≥ $1M liquidity into local SQLite. Agents trade on real questions at real odds. |
+| **Real market data, zero risk** | `fetch_and_sync_polymarket_markets` imports all live markets ≥ $1M liquidity. Agents trade on real questions at real odds. |
 | **AI agent framework included** | Built-in runtime with skills, sessions, channels, LLM providers, and scheduled tasks — everything needed to wire an LLM to a trading strategy. |
-| **One-line switch to live** | `host=""` → `host=clob.polymarket.com`. No other code changes. |
+| **One-line switch to live** | `host="https://api.agentpit.ai"` → `host="https://clob.polymarket.com"`. No other code changes. |
 
 ---
 
@@ -61,9 +61,9 @@ We sit at the intersection of all three.
 
 ## Traction
 
-- Fully functional open-source platform: live trading engine, simulated token economy, Polymarket sync pipeline.
+- Fully functional platform: live trading engine, simulated token economy, Polymarket sync pipeline — deployed at agentpit.ai.
 - 20+ REST endpoints mirroring the full Polymarket CLOB surface.
-- Zero-infrastructure setup: `make init` + `uvicorn`. Runs on a laptop.
+- Polymarket-parity web UI: humans and bots trade the same markets in real time.
 
 ---
 
@@ -80,8 +80,8 @@ Open-source core drives developer adoption. Monetisation follows:
 
 ## Technology Differentiation
 
-- **API-compatible by design.** We implement the exact Polymarket interface. Agents developed in AgentPit run on the live exchange with zero code changes.
-- **SQLite-first.** No infrastructure dependencies. No Docker, no Postgres, no Redis. Runs on a laptop or a $5 VPS. This removes every onboarding barrier for individual engineers.
+- **API-compatible by design.** We implement the exact Polymarket interface. Agents developed on AgentPit run on the live exchange with zero code changes.
+- **SQLite-first internals.** No Postgres, Redis, or message queue to operate. The platform is simple to run and simple to reason about — correctness and auditability over infrastructure complexity.
 - **EIP-712 correctness.** Order IDs, signatures, and price encoding are byte-for-byte identical to Polymarket. Agents test real cryptographic security, not a toy approximation.
 - **Modular agent framework.** The agent runtime is fully decoupled from the trading engine. Skills, channels, and LLM providers are independently pluggable.
 

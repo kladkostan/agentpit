@@ -1,6 +1,6 @@
 # AgentPit — High-Level Design
 
-AgentPit is a **local prediction-market simulation platform** built on Polymarket's architecture. Engineers and AI agents trade outcome tokens, manage markets, and run strategies entirely offline — against real Polymarket data — without spending real money or hitting rate limits.
+AgentPit is a **hosted prediction-market simulation platform** at **[agentpit.ai](https://agentpit.ai)**, built on Polymarket's architecture. Engineers and AI agents trade outcome tokens, manage markets, and run strategies against real Polymarket data — without spending real money or hitting rate limits.
 
 ---
 
@@ -16,8 +16,8 @@ Three layers, cleanly separated:
 └───────────────────────┬──────────────────────────────────────┘
                         │  sync (one-way, pull only)
 ┌───────────────────────▼──────────────────────────────────────┐
-│                   AgentPit Server                            │
-│  FastAPI HTTP API  ──►  AgentPitServer (subclasses FastAPI)  │
+│              AgentPit Platform  (agentpit.ai)                │
+│  REST API  ──►  AgentPitServer (subclasses FastAPI)          │
 │                                                              │
 │  ┌─────────────────┐   ┌──────────────────┐                 │
 │  │ Market Lifecycle │   │ Token Simulation │                 │
@@ -32,8 +32,8 @@ Three layers, cleanly separated:
                         │
 ┌───────────────────────▼──────────────────────────────────────┐
 │              py_clob_client  +  TradingEngine                │
-│  ClobClient(host="") ──► TradingEngine (local CLOB)          │
-│  ClobClient(host=URL) ──► Real Polymarket CLOB API           │
+│  ClobClient(host="agentpit.ai") ──► TradingEngine (sandbox)  │
+│  ClobClient(host="polymarket") ──► Real Polymarket CLOB API  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -127,11 +127,11 @@ One-directional pull from Polymarket into local SQLite. Never writes back.
 
 A self-contained SQLite-backed CLOB. Price-time priority matching, all four order types (GTC / GTD / FOK / FAK), lazy GTD expiry, and trade recording.
 
-Used in **local mode only** — when `ClobClient` is constructed with `host=""`.
+Used in **sandbox mode** — when `ClobClient` is constructed with `host="https://api.agentpit.ai"`.
 
 ```
-ClobClient(host="")            →  TradingEngine  (local, in-process)
-ClobClient(host="https://...") →  Polymarket CLOB API (remote, HTTP)
+ClobClient(host="https://api.agentpit.ai") →  TradingEngine  (AgentPit sandbox)
+ClobClient(host="https://clob.polymarket.com") →  Polymarket CLOB API (live)
 ```
 
 The switch is invisible to agent code. Same interface, different routing.
@@ -178,10 +178,10 @@ fetch_and_sync_polymarket_markets(db)
             CTF      → resolved? → update_market_state_to_resolved(winner)
 ```
 
-### Local Order Matching
+### Sandbox Order Matching
 ```
 Agent
-    │  ClobClient(host="").post_order(signed_order, GTC)
+    │  ClobClient(host="https://api.agentpit.ai").post_order(signed_order, GTC)
     ▼
 TradingEngine.process_new_order()
     ├── _process_expired_orders()       sweep GTD orders
@@ -197,13 +197,13 @@ TradingEngine.process_new_order()
 
 | Decision | Rationale |
 |----------|-----------|
-| **SQLite as the only datastore** | Zero infrastructure — `make init && uvicorn`. In-memory mode means no test cleanup. |
+| **SQLite as the only datastore** | No infrastructure dependencies — no Postgres, Redis, or message queue to operate. In-memory mode for tests means no cleanup needed. |
 | **`AgentPitServer` subclasses `FastAPI`** | Server is its own router; no `APIRouter` registration step. |
 | **DB split by operation** | `table_read` never writes; `table_write` never does unguarded reads. Data flow is auditable. Errors propagate — nothing is swallowed. |
 | **Hex-uint256 in JSON** | Mirrors on-chain storage semantics; eliminates Python integer precision issues. |
-| **Lazy sync, one-directional** | No background threads. Sync is explicit. Local DB is source of truth for local state; Polymarket is source of truth for market existence and resolution. |
-| **`host=""` toggles simulation vs live** | Zero agent code changes to switch modes. |
-| **EIP-712 order IDs** | Locally matched order IDs are valid on Polymarket — no re-signing needed on promotion to live. |
+| **Lazy sync, one-directional** | No background threads. Sync is explicit. AgentPit is source of truth for sandbox state; Polymarket is source of truth for market existence and resolution. |
+| **`host` URL toggles sandbox vs live** | Zero agent code changes to switch from AgentPit to Polymarket. |
+| **EIP-712 order IDs** | Sandbox-matched order IDs are valid on Polymarket — no re-signing needed on promotion to live. |
 | **Pydantic strict mode on simulators** | `@validate_call(config=_STRICT)` catches type errors at the boundary; prevents silent coercion bugs. |
 | **`check_state` raises `HTTPException(400)`** | Validation failures deep in business logic surface as clean 400s with call-site detail. |
 
@@ -213,26 +213,12 @@ TradingEngine.process_new_order()
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `AGENTPIT_DB_PATH` | `:memory:` | SQLite path; set to a file path for persistence across restarts |
+| `AGENTPIT_DB_PATH` | `:memory:` | SQLite path on the server; set to a file path for persistence across restarts |
 
-All other constants (contract addresses, API URLs, RPC endpoints) are module-level — no `.env` needed for basic operation. Private keys for live trading are stored in environment variables; never hardcoded.
-
----
-
-## Starting the Server
-
-```bash
-make init    # pip install -r requirements.txt
-
-# In-memory (dev / test)
-uvicorn agentpit.fastapi.main:app --host 0.0.0.0 --port 8000 --reload
-
-# Persistent DB
-AGENTPIT_DB_PATH=/path/to/agentpit.db \
-  uvicorn agentpit.fastapi.main:app --host 0.0.0.0 --port 8000 --reload
-```
+All other constants (contract addresses, API URLs, RPC endpoints) are module-level. Private keys for live trading are stored in environment variables; never hardcoded.
 
 ---
+
 
 ## Documentation Index
 
@@ -244,3 +230,4 @@ AGENTPIT_DB_PATH=/path/to/agentpit.db \
 | **[polymarket_sync_spec.md](polymarket_sync_spec.md)** | Gamma API sync pipeline, field normalisation, state sync |
 | **[conditional_token_framework_spec.md](conditional_token_framework_spec.md)** | On-chain CTF condition checks, resolution payout model |
 | **[tests_overview.md](tests_overview.md)** | Test map, how to run, coverage |
+| **[agentpit_whitepaper.md](agentpit_whitepaper.md)** | Full technical and product whitepaper |

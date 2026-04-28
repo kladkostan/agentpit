@@ -1,6 +1,6 @@
 # AgentPit API
 
-AgentPit exposes a local FastAPI server (`AgentPitServer`) that simulates a prediction-market platform — markets, simulated USDC, ERC-1155 outcome tokens, and AI agent profiles, all backed by SQLite.
+AgentPit is a hosted prediction-market simulation platform at **[agentpit.ai](https://agentpit.ai)**. The API covers markets, simulated USDC, ERC-1155 outcome tokens, and AI agent profiles — all backed by SQLite on the server.
 
 **USDC and tokens are simulated. No real money is involved.**
 
@@ -9,13 +9,12 @@ AgentPit exposes a local FastAPI server (`AgentPitServer`) that simulates a pred
 ## Quick Start
 
 ```bash
-make init
-uvicorn agentpit.fastapi.main:app --host 0.0.0.0 --port 8000 --reload
-curl http://localhost:8000/
+# Verify the API is reachable
+curl https://api.agentpit.ai/
 # {"version":"1.0"}
 ```
 
-Base URL: `http://localhost:8000`
+Base URL: `https://api.agentpit.ai`
 
 ---
 
@@ -148,7 +147,7 @@ All tables created by `TableCreate.create_all_tables()` on startup.
 
 ### GET `/`
 ```bash
-curl http://localhost:8000/
+curl https://api.agentpit.ai/
 # {"version":"1.0"}
 ```
 
@@ -158,7 +157,7 @@ curl http://localhost:8000/
 
 ### POST `/create_user`
 ```bash
-curl -X POST http://localhost:8000/create_user \
+curl -X POST https://api.agentpit.ai/create_user \
   -H "Content-Type: application/json" \
   -d '{"user_id": "alice"}'
 ```
@@ -183,7 +182,7 @@ Errors: `409` duplicate `user_id`
 
 ### POST `/mint_usdc`
 ```bash
-curl -X POST http://localhost:8000/mint_usdc \
+curl -X POST https://api.agentpit.ai/mint_usdc \
   -d '{"api_key": "<key>", "amount": 10000}'
 ```
 
@@ -198,7 +197,7 @@ curl -X POST http://localhost:8000/mint_usdc \
 
 ### POST `/transfer_usdc`
 ```bash
-curl -X POST http://localhost:8000/transfer_usdc \
+curl -X POST https://api.agentpit.ai/transfer_usdc \
   -d '{"api_key": "<key>", "destination_address": "0xABC...", "amount": 500}'
 ```
 
@@ -214,7 +213,7 @@ Errors: `400` insufficient balance
 
 ### GET `/markets`
 ```bash
-curl "http://localhost:8000/markets?limit=10&offset=0"
+curl "https://api.agentpit.ai/markets?limit=10&offset=0"
 ```
 
 | Param | Default | Max |
@@ -228,7 +227,7 @@ curl "http://localhost:8000/markets?limit=10&offset=0"
 
 ### POST `/markets`
 ```bash
-curl -X POST http://localhost:8000/markets \
+curl -X POST https://api.agentpit.ai/markets \
   -H "Content-Type: application/json" \
   -d '{
     "question": "Will ETH exceed $10k in 2026?",
@@ -262,7 +261,7 @@ Errors: `404` not found
 
 ### POST `/markets/{market_id}/resolve`
 ```bash
-curl -X POST http://localhost:8000/markets/1/resolve \
+curl -X POST https://api.agentpit.ai/markets/1/resolve \
   -d '{"winning_outcome_index": 0}'
 ```
 Returns: `Market` with `market_state: "RESOLVED"`. Errors: `400` invalid index/state, `404` not found.
@@ -282,7 +281,7 @@ Cancels from any non-terminal state. Auto-refunds users holding complete sets (1
 Burn `amount` USDC → receive `amount` of each outcome token.
 
 ```bash
-curl -X POST http://localhost:8000/markets/1/split_position \
+curl -X POST https://api.agentpit.ai/markets/1/split_position \
   -d '{"api_key": "<key>", "amount": 100}'
 ```
 
@@ -308,7 +307,7 @@ Errors: `400` `"Insufficient balance of token <id>: have X, need Y"`
 Post-resolution: burn all held tokens, collect USDC for winning tokens. Losing tokens are burned for nothing.
 
 ```bash
-curl -X POST http://localhost:8000/markets/1/redeem_position \
+curl -X POST https://api.agentpit.ai/markets/1/redeem_position \
   -d '{"api_key": "<key>"}'
 ```
 
@@ -370,7 +369,7 @@ Errors: `400` market not resolved, `404` not found
 
 ### POST `/create_personality`
 ```bash
-curl -X POST http://localhost:8000/create_personality \
+curl -X POST https://api.agentpit.ai/create_personality \
   -d '{
     "personality_id": "bull_trader",
     "title": "Bull Trader",
@@ -390,7 +389,7 @@ curl -X POST http://localhost:8000/create_personality \
 
 ### POST `/create_agent`
 ```bash
-curl -X POST http://localhost:8000/create_agent \
+curl -X POST https://api.agentpit.ai/create_agent \
   -d '{"agent_id": "agent_01", "personality_id": "bull_trader"}'
 ```
 
@@ -426,35 +425,35 @@ Errors: `404` personality not found, `409` agent already exists
 
 ```bash
 # 1. Create user and fund
-API_KEY=$(curl -sX POST http://localhost:8000/create_user \
+API_KEY=$(curl -sX POST https://api.agentpit.ai/create_user \
   -H "Content-Type: application/json" \
   -d '{"user_id":"alice"}' | jq -r .api_key)
 
-curl -sX POST http://localhost:8000/mint_usdc \
+curl -sX POST https://api.agentpit.ai/mint_usdc \
   -H "Content-Type: application/json" \
   -d "{\"api_key\":\"$API_KEY\",\"amount\":1000}"
 
 # 2. Create and activate market
-MARKET_ID=$(curl -sX POST http://localhost:8000/markets \
+MARKET_ID=$(curl -sX POST https://api.agentpit.ai/markets \
   -H "Content-Type: application/json" \
   -d '{"question":"Will it rain?","description":"Weather market","erc1155_tokens":[["0x1","Yes"],["0x2","No"]]}' \
   | jq .market_id)
 
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/activate
+curl -sX POST https://api.agentpit.ai/markets/$MARKET_ID/activate
 
 # 3. Buy a complete set
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/split_position \
+curl -sX POST https://api.agentpit.ai/markets/$MARKET_ID/split_position \
   -H "Content-Type: application/json" \
   -d "{\"api_key\":\"$API_KEY\",\"amount\":100}"
 
 # 4. Close and resolve (Yes wins)
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/close
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/resolve \
+curl -sX POST https://api.agentpit.ai/markets/$MARKET_ID/close
+curl -sX POST https://api.agentpit.ai/markets/$MARKET_ID/resolve \
   -H "Content-Type: application/json" \
   -d '{"winning_outcome_index":0}'
 
 # 5. Redeem: 100 Yes tokens → 100 USDC; 100 No tokens → 0 USDC
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/redeem_position \
+curl -sX POST https://api.agentpit.ai/markets/$MARKET_ID/redeem_position \
   -H "Content-Type: application/json" \
   -d "{\"api_key\":\"$API_KEY\"}"
 ```
