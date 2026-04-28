@@ -155,16 +155,18 @@ Same agent code runs against both local simulation and live Polymarket.
 User / Agent
     │  POST /markets
     ▼
-AgentPitServer → TableWrite.create_market() → SQLite: markets table
+AgentPitServer ──► TableWrite.create_market() ──► SQLite: markets table
+    │
     │  POST /mint_usdc
     ▼
-ERC20Simulator.mint() → erc20_token_ownership table
+ERC20Simulator.mint() ──► erc20_token_ownership table
+    │
     │  POST /split_position
     ▼
-ERC20Simulator.burn(USDC)
-ERC1155Simulator.mint(yes_token)
-ERC1155Simulator.mint(no_token)
-TableWrite.log_transaction(SPLIT) → erc1155_token_ownership + transactions tables
+ERC20Simulator.burn(USDC)       ─┐
+ERC1155Simulator.mint(yes_token)  ├──► erc1155_token_ownership table
+ERC1155Simulator.mint(no_token)  ─┘
+TableWrite.log_transaction(SPLIT) ──► transactions table
 ```
 
 ### Polymarket Sync
@@ -172,10 +174,13 @@ TableWrite.log_transaction(SPLIT) → erc1155_token_ownership + transactions tab
 cron (or manual call)
     ▼
 fetch_and_sync_polymarket_markets(db)
-    ├─► Gamma API → normalise → TableWrite.create_market (gated by CTF.condition_exists())
+    │
+    ├─► Gamma API ──► normalise fields ──► CTF.condition_exists()? ──► TableWrite.create_market
+    │                                             │ no → skip
+    │
     └─► for each market with polymarket_id:
-            CLOB API → closed?   → update_market_state_to_closed
-            CTF      → resolved? → update_market_state_to_resolved(winner)
+            CLOB API ──► closed?   ──► update_market_state_to_closed
+            CTF      ──► resolved? ──► update_market_state_to_resolved(winner_index)
 ```
 
 ### Sandbox Order Matching
@@ -184,11 +189,20 @@ Agent
     │  ClobClient(host="https://api.agentpit.ai").post_order(signed_order, GTC)
     ▼
 TradingEngine.process_new_order()
-    ├── _process_expired_orders()       sweep GTD orders
-    ├── add_order_to_db()               insert as 'live'
-    ├── _match_and_fill_order()         price-time priority
-    │       └── _fill_order()           update REMAINING_AMOUNT, insert trade
-    └── return OrderResponse (JSON)
+    │
+    ├── _process_expired_orders()          expire stale GTD orders
+    │
+    ├── add_order_to_db()                  INSERT as 'live'
+    │
+    ├── FOK? ──► dry-run match ──► remainder > 0? ──► cancel, return
+    │
+    └── _match_and_fill_order()            price-time priority sweep
+            │
+            └── for each maker candidate:
+                    _fill_order() ──► UPDATE REMAINING_AMOUNT
+                                  ──► INSERT trade row
+            │
+            └── return OrderResponse (JSON)
 ```
 
 ---
