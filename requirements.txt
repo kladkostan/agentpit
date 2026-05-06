@@ -4,6 +4,7 @@ eth-utils>=4,<5
 eth-typing>=3,<5
 poly_eip712_structs==0.0.1
 py_order_utils==0.3.2
+py-clob-client
 pytest==8.2.2
 python-dotenv>=0.21.0
 websockets==12.0
