@@ -1,0 +1,123 @@
+import { Link, useParams } from "react-router-dom";
+import { useMarket } from "@/api/markets";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import type { MarketState } from "@/types/market";
+
+const STATE_STYLES: Record<MarketState, string> = {
+  DRAFT: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200",
+  ACTIVE:
+    "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200",
+  CLOSED: "bg-slate-200 text-slate-700 dark:bg-slate-700/50 dark:text-slate-200",
+  RESOLVED: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200",
+  CANCELLED:
+    "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-200",
+};
+
+export function MarketDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { data: market, isLoading, error, refetch } = useMarket(id);
+
+  if (isLoading) {
+    return <MarketDetailSkeleton />;
+  }
+
+  if (error || !market) {
+    return (
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-6">
+        <p className="text-sm font-medium text-destructive">
+          Failed to load market
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {error instanceof Error ? error.message : "Market not found"}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void refetch();
+            }}
+          >
+            Retry
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/">Back to markets</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <article className="mx-auto max-w-3xl space-y-6">
+      <Link
+        to="/"
+        className="text-sm text-muted-foreground hover:text-foreground"
+      >
+        ← Back to markets
+      </Link>
+
+      <header className="space-y-3">
+        <Badge
+          variant="secondary"
+          className={cn(
+            "w-fit border-transparent",
+            STATE_STYLES[market.market_state],
+          )}
+        >
+          {market.market_state}
+        </Badge>
+        <h1 className="text-3xl font-bold tracking-tight">{market.question}</h1>
+        {market.description ? (
+          <p className="whitespace-pre-line text-sm text-muted-foreground">
+            {market.description}
+          </p>
+        ) : null}
+      </header>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Outcomes
+        </h2>
+        <ul className="divide-y rounded-lg border">
+          {market.erc1155_tokens.map(([tokenId, label]) => (
+            <li
+              key={tokenId}
+              className="flex items-center justify-between gap-4 px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{label}</p>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {tokenId}
+                </p>
+              </div>
+              <span className="tabular-nums text-sm font-semibold text-muted-foreground">
+                —¢
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <div className="rounded-lg border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+        Order ticket, orderbook and AI agent panel coming soon
+      </div>
+    </article>
+  );
+}
+
+function MarketDetailSkeleton() {
+  return (
+    <article className="mx-auto max-w-3xl space-y-6">
+      <Skeleton className="h-4 w-32" />
+      <Skeleton className="h-5 w-20 rounded-full" />
+      <Skeleton className="h-9 w-3/4" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-5/6" />
+      <Skeleton className="h-40 w-full rounded-lg" />
+    </article>
+  );
+}
