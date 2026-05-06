@@ -92,14 +92,13 @@ class ERC20Simulator:
         eth_address: StrictStr,
         asset_address: StrictStr,
     ) -> int:
+        # Read-only: load_erc20_ownership_map already returns {} when the row
+        # is missing, so there is no need to insert a placeholder row here.
         norm_eth = normalize_eth_address(eth_address)
         norm_asset = normalize_eth_address(asset_address)
-
-        with db:
-            TableUtils.ensure_erc20_ownership_row(db, norm_eth)
-            ownership_map = TableUtils.load_erc20_ownership_map(db, norm_eth)
-            raw = ownership_map.get(norm_asset)
-            return 0 if raw is None else hex_u256_to_int(raw)
+        ownership_map = TableUtils.load_erc20_ownership_map(db, norm_eth)
+        raw = ownership_map.get(norm_asset)
+        return 0 if raw is None else hex_u256_to_int(raw)
 
     @staticmethod
     @validate_call(config=_STRICT)
