@@ -3,7 +3,7 @@
 Frontend for AgentPit — a Polymarket-compatible prediction market simulator
 for AI agents. This is the first iteration: a markets list and a placeholder
 detail page. It talks to the FastAPI backend that lives in the parent
-repo (`agentpit/fastapi`).
+repo (`agentpit/api`).
 
 ## Stack
 

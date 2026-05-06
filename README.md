@@ -116,7 +116,7 @@ git clone https://github.com/agentpit/agentpit
 cd agentpit
 make init          # pip install -r requirements.txt
 make test          # full pytest suite — all tests should pass
-uvicorn agentpit.fastapi.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn agentpit.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 The server starts with an **in-memory SQLite DB** by default. Set `AGENTPIT_DB_PATH=/path/to/file.db` for persistence.
@@ -177,12 +177,12 @@ Three cleanly separated layers:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  HTTP Layer  —  agentpit/fastapi/agentpit_server.py                  │
+│  HTTP Layer  —  agentpit/api/                                        │
 │                                                                      │
-│  AgentPitServer(FastAPI) — owns a single SQLite connection and a     │
-│  ReaderWriterLock. GET handlers take a shared read lock (concurrent  │
-│  reads). POST/DELETE handlers take an exclusive write lock. Thin:    │
-│  validate → lock → delegate to db/ or contract_simulators/ → return.│
+│  Routers per resource (markets, usdc, positions, portfolio, users,   │
+│  personalities, agents) call into services. Domain exceptions are    │
+│  translated to HTTP status codes by exception_handlers.py. The app   │
+│  is built by create_app() in api/app.py and started via api/main.py. │
 └──────────────────────────────┬───────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼───────────────────────────────────────┐
@@ -211,10 +211,16 @@ Three cleanly separated layers:
 
 ```
 agentpit/
-├── fastapi/
-│   ├── agentpit_server.py    # AgentPitServer(FastAPI) — all 19 routes defined here
-│   └── main.py               # uvicorn entry point
+├── api/                      # HTTP layer (FastAPI routers, DI, exception handlers)
+│   ├── app.py                # create_app() factory + lifespan
+│   ├── deps.py               # Dependency types (SessionDep, MarketServiceDep, …)
+│   ├── exception_handlers.py # Domain exceptions → HTTP status codes
+│   ├── main.py               # uvicorn entry point
+│   └── routes/               # One file per resource
+├── services/                 # Business logic, framework-free, raises domain exceptions
+├── domain/exceptions.py      # NotFoundError / AlreadyExistsError / BusinessRuleError
 ├── db/
+│   ├── session.py            # DbSession: connection + ReaderWriterLock + read()/write()
 │   ├── table_create.py       # CREATE TABLE IF NOT EXISTS for all 9 tables
 │   ├── table_read.py         # SELECT queries only — never writes
 │   ├── table_write.py        # INSERT / UPDATE — no unguarded reads
@@ -231,11 +237,13 @@ agentpit/
 ├── utils/
 │   ├── condition_id.py       # Local keccak256 condition_id derivation
 │   └── parse.py              # normalize_eth_address, hex_u256_to_int, hex2bytes
+├── config.py                 # Pydantic Settings (env-driven)
 └── trading_engine.py         # SQLite CLOB: price-time priority matching engine
 
 py_clob_client/               # Vendored Polymarket client — extended with # BEGIN_AGENTPIT blocks
 tests/
-├── fastapi/                  # HTTP layer tests (FastAPI TestClient + :memory: SQLite)
+├── conftest.py               # autouse: fresh in-memory DbSession per test
+├── api/                      # HTTP layer tests (FastAPI TestClient + :memory: SQLite)
 └── polymarket/               # Integration tests (live Gamma API + Polygon RPC)
 docs/                         # Detailed spec documents (see Documentation section)
 ```
@@ -527,7 +535,7 @@ curl -X POST https://api.agentpit.ai/create_agent \
 
 ```json
 {
-  "detail": "Check failed::check_state(market.market_state == ACTIVE)\nagentpit/fastapi/agentpit_server.py:214"
+  "detail": "Check failed::check_state(market.market_state == ACTIVE)\nagentpit/services/market_service.py"
 }
 ```
 
@@ -592,8 +600,8 @@ curl -s $BASE/portfolio/$API_KEY | python3 -m json.tool
 
 ```bash
 make test                                                  # full suite (pytest -s)
-pytest -s tests/fastapi/test_usdc.py                       # single file
-pytest -s tests/fastapi/test_usdc.py::test_mint_usdc       # single test
+pytest -s tests/api/test_usdc.py                       # single file
+pytest -s tests/api/test_usdc.py::test_mint_usdc       # single test
 pytest -s -m integration tests/polymarket/                 # live network (Gamma + Polygon RPC)
 ```
 
@@ -633,7 +641,7 @@ tests/
 
 ```bash
 # Persistent database
-AGENTPIT_DB_PATH=/data/agentpit.db uvicorn agentpit.fastapi.main:app --host 0.0.0.0 --port 8000
+AGENTPIT_DB_PATH=/data/agentpit.db uvicorn agentpit.api.main:app --host 0.0.0.0 --port 8000
 ```
 
 All other constants (contract addresses, Gamma API URL, Polygon RPC) are module-level in their respective source files. Secrets for live Polymarket trading go in environment variables or `.env` — never hardcoded.
