@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 
 def test_get_transaction_history():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         api_key = "history_test_key"
 
         # 1. Initially, history should be empty

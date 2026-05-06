@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 
 def test_create_and_get_market():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # First create a market
         payload = {
             "question": "Will it snow today?",
@@ -34,7 +34,7 @@ def test_create_and_get_market():
 
 
 def test_list_markets():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # List markets when empty
         resp = client.get("/markets")
         assert resp.status_code == 200

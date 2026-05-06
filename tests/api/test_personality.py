@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 
 def test_create_personality():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         payload = {
             "personality_id": "contrarian_1",
             "title": "Contrarian Trader",
@@ -23,7 +23,7 @@ def test_create_personality():
 
 
 def test_create_personality_missing_field():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # Missing 'needs'
         payload = {
             "personality_id": "incomplete_1",
@@ -36,7 +36,7 @@ def test_create_personality_missing_field():
 
 
 def test_create_personality_empty_title():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         payload = {
             "personality_id": "empty_title_1",
             "title": "",
@@ -49,7 +49,7 @@ def test_create_personality_empty_title():
 
 
 def test_create_multiple_personalities():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         ids = []
         for i in range(3):
             payload = {
