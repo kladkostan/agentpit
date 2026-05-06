@@ -30,6 +30,25 @@ class TableWrite:
         return api_key
 
     @staticmethod
+    def create_anonymous_user_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
+        """Insert an anonymous user row for an API key and return its eth address.
+
+        Caller must have verified that no row exists for this api_key. The
+        USER_ID is generated as a uuid since this user came in without a handle.
+        """
+        acct: LocalAccount = Account.create()
+        key_hex: str = Web3.to_hex(acct.key)
+        user_id: str = str(uuid.uuid4())
+        db.execute(
+            """
+            INSERT INTO users (USER_ID, API_KEY, ETH_PRIVATE_KEY)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, api_key, key_hex),
+        )
+        return acct.address
+
+    @staticmethod
     def create_personality(
         db: sqlite3.Connection, personality_id: str, title: str, beliefs: str, methods: str, needs: str
     ) -> str:

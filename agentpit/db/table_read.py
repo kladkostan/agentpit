@@ -145,6 +145,21 @@ class TableRead:
         return acct
 
     @staticmethod
+    def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str | None:
+        """Return the eth address for an API key, or None if no user has been created yet.
+
+        Read-only — never writes to the database.
+        """
+        row = db.execute(
+            "SELECT ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
+            (api_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        existing_key = parse_32b_hex_private_key(row[0])
+        return Account.from_key(existing_key).address
+
+    @staticmethod
     def get_eth_address_for_api_key_creating_if_needed(db: sqlite3.Connection, api_key: str) -> str:
         acct = TableRead.get_private_key_for_api_key(db, api_key)
         return acct.address
