@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 def test_cancel_market():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # Create a market
         market_payload = {
             "question": "Cancel test?",
@@ -25,7 +25,7 @@ def test_cancel_market():
 
 
 def test_market_lifecycle_happy_path():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # 1. Create Market (DRAFT)
         market_payload = {
             "question": "Lifecycle test?",
@@ -69,7 +69,7 @@ def test_market_lifecycle_happy_path():
 
 
 def test_cancel_market_with_positions():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         api_key = "canceller"
         market_payload = {
             "question": "Cancel with positions?",
@@ -98,7 +98,7 @@ def test_cancel_market_with_positions():
 
 
 def test_invalid_state_transitions():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # Create a market, it starts in DRAFT
         market_payload = {"question": "Invalid transitions?", "description": "Test", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)

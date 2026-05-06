@@ -2,18 +2,16 @@ from fastapi.testclient import TestClient
 import pytest
 import secrets
 
-from agentpit.fastapi import main
-from agentpit.fastapi.agentpit_server import AgentPitServer
+from agentpit.api.app import create_app
+from agentpit.config import Settings
 
 
 @pytest.fixture
 def client():
     """Fixture to create a test client with an in-memory database."""
-    db_path = ":memory:"
-    server = AgentPitServer(db_path=db_path)
-    with TestClient(server) as test_client:
+    app = create_app(Settings(db_path=":memory:"))
+    with TestClient(app) as test_client:
         yield test_client
-    server.shutdown()
 
 
 @pytest.fixture
