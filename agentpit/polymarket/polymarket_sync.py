@@ -218,7 +218,7 @@ def fetch_all_polymarket_markets(
         else:
             data = []
 
-        # Client-side filtering to match test expectations (tests/fastapi/test_polymarket_sync.py)
+        # Client-side filtering to match test expectations (tests/api/test_polymarket_sync.py)
         filtered_data = []
         for m in data:
             m = _normalize_market_fields(m)
