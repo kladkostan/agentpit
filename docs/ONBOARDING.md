@@ -37,7 +37,7 @@ ClobClient(host="https://clob.polymarket.com", key=private_key, chain_id=137)
 git clone <repo> && cd agentpit
 make init          # pip install -r requirements.txt
 make test          # full pytest suite — all tests should pass
-uvicorn agentpit.fastapi.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn agentpit.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 The server starts with an in-memory SQLite DB by default. Set `AGENTPIT_DB_PATH=/path/to/file.db` for a persistent DB.
@@ -52,7 +52,7 @@ This table is the fastest way to understand where to contribute. The roadmap ite
 
 | Feature | Status | Where |
 |---------|--------|-------|
-| REST API — markets, USDC, positions, agents | ✅ Built | `agentpit/fastapi/agentpit_server.py` |
+| REST API — markets, USDC, positions, agents | ✅ Built | `agentpit/api/` + `agentpit/services/` |
 | CLOB matching engine (GTC/GTD/FOK/FAK) | ✅ Built | `agentpit/trading_engine.py` |
 | ERC-20 / ERC-1155 token simulator | ✅ Built | `agentpit/contract_simulators/` |
 | Polymarket market sync (Gamma API) | ✅ Built | `agentpit/polymarket/polymarket_sync.py` |
@@ -69,11 +69,28 @@ This table is the fastest way to understand where to contribute. The roadmap ite
 
 ```
 agentpit/
-├── fastapi/
-│   ├── agentpit_server.py    # AgentPitServer(FastAPI) — ALL routes registered here
-│   └── main.py               # uvicorn entry point: app = AgentPitServer()
+├── api/                      # HTTP layer — thin, FastAPI-aware
+│   ├── app.py                # create_app() factory: lifespan, middleware, router include
+│   ├── deps.py               # DI types (SessionDep, MarketServiceDep, …)
+│   ├── exception_handlers.py # Domain exceptions → HTTP status codes
+│   ├── main.py               # uvicorn entry point: app = create_app()
+│   └── routes/               # One file per resource (markets, usdc, positions, …)
+│
+├── services/                 # Business logic — framework-free, raises domain exceptions
+│   ├── accounts.py           # get_or_create_eth_address (double-checked locking)
+│   ├── market_service.py
+│   ├── usdc_service.py
+│   ├── position_service.py
+│   ├── user_service.py
+│   ├── personality_service.py
+│   ├── agent_service.py
+│   └── portfolio_service.py
+│
+├── domain/
+│   └── exceptions.py         # NotFoundError / AlreadyExistsError / BusinessRuleError
 │
 ├── db/
+│   ├── session.py            # DbSession: connection + ReaderWriterLock + read()/write() context managers
 │   ├── table_create.py       # Schema: CREATE TABLE IF NOT EXISTS (9 tables)
 │   ├── table_read.py         # SELECT only — never writes
 │   ├── table_write.py        # INSERT/UPDATE — no unguarded reads
@@ -94,13 +111,15 @@ agentpit/
 │   ├── condition_id.py       # Local keccak256 condition_id derivation
 │   └── parse.py              # normalize_eth_address, hex_u256_to_int, hex2bytes
 │
+├── config.py                 # Pydantic Settings: env-driven config (AGENTPIT_DB_PATH, SYNC, …)
 └── trading_engine.py         # SQLite CLOB: price-time priority matching engine
 
 py_clob_client/               # Vendored Polymarket client — extended with # BEGIN_AGENTPIT blocks
 
 tests/
+├── conftest.py               # autouse: fresh in-memory DbSession per test on main.app
 ├── test_utilities.py         # py_clob_client utility helpers
-├── fastapi/                  # HTTP layer tests (TestClient + in-memory SQLite)
+├── api/                      # HTTP layer tests (TestClient + in-memory SQLite)
 │   ├── test_basic.py         # GET /
 │   ├── test_create_user.py
 │   ├── test_markets.py
@@ -163,31 +182,48 @@ stored  = Web3.to_hex(balance).lower()                # → "0x3e8"
 
 Never add writes to `table_read.py`. Never add unguarded reads to `table_write.py`. Errors propagate — nothing is swallowed.
 
-### Concurrency — `ReaderWriterLock` in `AgentPitServer`
+### Concurrency — `DbSession.read()` / `DbSession.write()`
+
+`DbSession` (in `agentpit/db/session.py`) owns the SQLite connection and a `ReaderWriterLock`. Services don't touch the lock directly — they call `db.read()` for queries and `db.write()` for mutations. `db.write()` also wraps the work in a SQLite transaction.
 
 ```python
-with self._rw_lock.read_lock():    # GET handlers — concurrent reads OK
-    ...
-with self._rw_lock.write_lock():   # POST/DELETE handlers — exclusive
-    self._ensure_db()
-    with self._db:                 # SQLite transaction
-        ...
+def list_markets(self, limit, offset):
+    with self._db.read() as conn:                  # shared read lock — concurrent reads OK
+        return TableRead.list_markets(conn, limit=limit, offset=offset)
+
+def create_market(self, payload):
+    with self._db.write() as conn:                 # exclusive write lock + transaction
+        return TableWrite.create_market(conn, payload, False)
 ```
+
+For the rare "read in the common case, write only on first miss" pattern (e.g. `get_or_create_eth_address`), use double-checked locking — see `agentpit/services/accounts.py` for the canonical example.
 
 ---
 
 ## Adding a New REST Endpoint — Step-by-Step
 
-1. **Register the route** in `AgentPitServer.__init__` (follow the existing pattern):
+1. **Add a service method** on the appropriate service in `agentpit/services/`. Take a `DbSession`, return a typed response, raise domain exceptions (from `agentpit/domain/exceptions.py`) — never `HTTPException`.
    ```python
-   self.add_api_route("/my_endpoint", self.my_handler, methods=["POST"], response_model=MyResponse)
+   # agentpit/services/market_service.py
+   def archive_market(self, market_id: int) -> Market:
+       with self._db.write() as conn:
+           market = TableRead.read_market(conn, market_id)
+           if market is None:
+               raise MarketNotFoundError(market_id)
+           # ... mutate ...
+           return market
    ```
-2. **Write the handler** as a method on `AgentPitServer`. Signature: `def my_handler(self, payload: MyRequest) -> MyResponse`.
-3. **Acquire the right lock**: `read_lock()` for GETs, `write_lock()` for POSTs.
-4. **Call `self._ensure_db()`** at the top of every handler.
+2. **Add the route** in the matching file under `agentpit/api/routes/`. Routes are thin pass-throughs:
+   ```python
+   # agentpit/api/routes/markets.py
+   @router.post("/markets/{market_id}/archive", response_model=Market)
+   def archive_market(market_id: int, service: MarketServiceDep) -> Market:
+       return service.archive_market(market_id)
+   ```
+3. **If you need a new domain exception**, add it to `agentpit/domain/exceptions.py` as a subclass of `NotFoundError` (→ 404), `AlreadyExistsError` (→ 409), or `BusinessRuleError` (→ 400). The handlers in `api/exception_handlers.py` map base classes to status codes — no per-exception wiring needed.
 5. **Delegate to `TableRead`/`TableWrite`** — no raw SQL in the server.
 6. **Return a Pydantic model** — FastAPI serialises it automatically.
-7. **Write a test** in `tests/fastapi/` using `TestClient(main.app)`.
+7. **Write a test** in `tests/api/` using `TestClient(main.app)`.
 
 ---
 
@@ -195,8 +231,8 @@ with self._rw_lock.write_lock():   # POST/DELETE handlers — exclusive
 
 ```bash
 make test                                               # full suite
-pytest -s tests/fastapi/test_usdc.py                   # single file
-pytest -s tests/fastapi/test_usdc.py::test_mint_usdc   # single test
+pytest -s tests/api/test_usdc.py                   # single file
+pytest -s tests/api/test_usdc.py::test_mint_usdc   # single test
 pytest -s -m integration tests/polymarket/             # live network (Gamma API + Polygon RPC)
 ```
 

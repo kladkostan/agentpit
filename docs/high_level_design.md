@@ -61,11 +61,11 @@ docs/                     # This document + component specs
 
 ## Components
 
-### 1. AgentPit Server (`agentpit/fastapi/`)
+### 1. AgentPit Server (`agentpit/api/` + `agentpit/services/`)
 
-`AgentPitServer` subclasses [FastAPI](https://fastapi.tiangolo.com) — it is both the application and its own router. It owns a single [SQLite](https://www.sqlite.org) connection and a `ReaderWriterLock` that serialises writes while allowing concurrent reads.
+The HTTP layer (`agentpit/api/`) is built from a [FastAPI](https://fastapi.tiangolo.com) factory (`create_app`) that wires per-resource [APIRouter](https://fastapi.tiangolo.com/tutorial/bigger-applications/)s, dependency-injected services, and a single shared [`DbSession`](../agentpit/db/session.py) (one [SQLite](https://www.sqlite.org) connection guarded by a `ReaderWriterLock`).
 
-Handlers are thin: validate → lock → delegate to `db/` or `contract_simulators/` → return typed [Pydantic](https://docs.pydantic.dev) response. No business logic leaks into the HTTP layer.
+Routes are thin pass-throughs: validate → call service → return typed [Pydantic](https://docs.pydantic.dev) response. Business logic lives in `agentpit/services/`, which is framework-free and raises domain exceptions translated to HTTP status codes by `api/exception_handlers.py`.
 
 **Exposes:** 19 REST endpoints across markets, USDC, positions, portfolio, and agents. The `POST /create_personality` and `POST /create_agent` endpoints are specifically for registering **OpenClaw agents** — AgentPit persists their identity, personality spec, state, history, and todo so OpenClaw can maintain continuity across sessions.
 

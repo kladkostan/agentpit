@@ -242,11 +242,11 @@ Final state:
 ## Tests
 | Test file | Coverage |
 |-----------|----------|
-| `tests/fastapi/test_usdc.py` | `mint_usdc`, `usdc_balance`, `transfer_usdc`, insufficient-balance rejection |
-| `tests/fastapi/test_positions.py` | `split_position`, `merge_positions`, insufficient USDC, insufficient tokens |
-| `tests/fastapi/test_resolution.py` | `redeem_position` payout mechanics |
-| `tests/fastapi/test_lifecycle.py` | Full market lifecycle including cancel refund |
+| `tests/api/test_usdc.py` | `mint_usdc`, `usdc_balance`, `transfer_usdc`, insufficient-balance rejection |
+| `tests/api/test_positions.py` | `split_position`, `merge_positions`, insufficient USDC, insufficient tokens |
+| `tests/api/test_resolution.py` | `redeem_position` payout mechanics |
+| `tests/api/test_lifecycle.py` | Full market lifecycle including cancel refund |
 Run:
 ```bash
-pytest -s tests/fastapi/test_usdc.py tests/fastapi/test_positions.py
+pytest -s tests/api/test_usdc.py tests/api/test_positions.py
 ```

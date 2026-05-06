@@ -4,8 +4,8 @@
 
 ```bash
 make test                                                        # full suite
-pytest -s tests/fastapi/test_usdc.py                            # single file
-pytest -s tests/fastapi/test_usdc.py::test_mint_usdc            # single test
+pytest -s tests/api/test_usdc.py                            # single file
+pytest -s tests/api/test_usdc.py::test_mint_usdc            # single test
 pytest -s -m integration                                         # live network only
 ```
 
@@ -64,7 +64,7 @@ tests/
 
 ```python
 from fastapi.testclient import TestClient
-from agentpit.fastapi import main
+from agentpit.api import main
 
 def test_something():
     with TestClient(main.app) as client:
@@ -197,7 +197,7 @@ Tests `POST /create_agent` — the endpoint that instantiates an **OpenClaw agen
 
 | Component | Test Files |
 |-----------|-----------|
-| `AgentPitServer` | `tests/fastapi/test_*.py` |
+| `AgentPitServer` | `tests/api/test_*.py` |
 | `ERC20Simulator` / `ERC1155Simulator` | `test_usdc.py`, `test_positions.py`, `test_resolution.py`, `test_lifecycle.py` |
 | Market state machine | `test_lifecycle.py`, `test_markets.py` |
 | Transaction history | `test_history.py` |
