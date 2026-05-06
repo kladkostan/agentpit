@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 
 def test_resolve_market_and_redeem():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         api_key_winner = "winner_key"
         api_key_loser = "loser_key"
 
@@ -93,7 +93,7 @@ def test_resolve_market_and_redeem():
 
 
 def test_resolve_market_not_found():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         resolve_payload = {"winning_outcome_index": 0}
         resolve_resp = client.post("/markets/9999/resolve", json=resolve_payload)
         assert resolve_resp.status_code == 404
@@ -101,7 +101,7 @@ def test_resolve_market_not_found():
 
 
 def test_resolve_market_already_resolved():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         market_payload = {"question": "Q", "description": "D", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
@@ -116,7 +116,7 @@ def test_resolve_market_already_resolved():
 
 
 def test_resolve_market_invalid_outcome_index():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         market_payload = {"question": "Q", "description": "D", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
         market_id = market_resp.json()["market_id"]
@@ -133,7 +133,7 @@ def test_resolve_market_invalid_outcome_index():
 
 
 def test_redeem_position_unresolved_market():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         api_key = "eager_redeemer"
         market_payload = {"question": "Q", "description": "D", "erc1155_tokens": [["1", "A"], ["2", "B"]]}
         market_resp = client.post("/markets", json=market_payload)
@@ -148,7 +148,7 @@ def test_redeem_position_unresolved_market():
 
 
 def test_redeem_position_market_not_found():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         redeem_resp = client.post("/markets/9999/redeem_position", json={"api_key": "any_key"})
         assert redeem_resp.status_code == 404
         assert "Market not found" in redeem_resp.json()["detail"]
