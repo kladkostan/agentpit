@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 
 def test_create_user():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         payload = {"user_id": "alice"}
         resp = client.post("/create_user", json=payload)
         assert resp.status_code == 200
@@ -16,7 +16,7 @@ def test_create_user():
 
 
 def test_create_user_duplicate():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         payload = {"user_id": "bob"}
         resp = client.post("/create_user", json=payload)
         assert resp.status_code == 200
@@ -28,7 +28,7 @@ def test_create_user_duplicate():
 
 
 def test_create_user_invalid_handle():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         # Too long (>15 chars)
         resp = client.post("/create_user", json={"user_id": "a" * 16})
         assert resp.status_code == 400  # check_state raises
@@ -43,13 +43,13 @@ def test_create_user_invalid_handle():
 
 
 def test_create_user_missing_field():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         resp = client.post("/create_user", json={})
         assert resp.status_code == 422
 
 
 def test_create_multiple_users_unique_keys():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         api_keys = []
         eth_addresses = []
         for name in ["user1", "user2", "user3"]:

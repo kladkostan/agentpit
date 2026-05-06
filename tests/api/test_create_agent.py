@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from agentpit.fastapi import main
+from agentpit.api.main import app as _app
 
 
 def _create_personality(client, personality_id="default_personality"):
@@ -17,7 +17,7 @@ def _create_personality(client, personality_id="default_personality"):
 
 
 def test_create_agent():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         _create_personality(client, "p1")
         payload = {
             "agent_id": "agent_1",
@@ -34,7 +34,7 @@ def test_create_agent():
 
 
 def test_create_agent_duplicate():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         _create_personality(client, "p2")
         payload = {
             "agent_id": "agent_dup",
@@ -50,7 +50,7 @@ def test_create_agent_duplicate():
 
 
 def test_create_agent_missing_personality():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         payload = {
             "agent_id": "agent_orphan",
             "personality_id": "nonexistent_personality",
@@ -61,7 +61,7 @@ def test_create_agent_missing_personality():
 
 
 def test_create_agent_empty_agent_id():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         _create_personality(client, "p3")
         payload = {
             "agent_id": "",
@@ -72,7 +72,7 @@ def test_create_agent_empty_agent_id():
 
 
 def test_create_agent_empty_personality_id():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         payload = {
             "agent_id": "agent_no_personality",
             "personality_id": "",
@@ -82,13 +82,13 @@ def test_create_agent_empty_personality_id():
 
 
 def test_create_agent_missing_field():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         resp = client.post("/create_agent", json={"agent_id": "agent_x"})
         assert resp.status_code == 422
 
 
 def test_create_multiple_agents():
-    with TestClient(main.app) as client:
+    with TestClient(_app) as client:
         _create_personality(client, "shared_personality")
         for i in range(3):
             payload = {

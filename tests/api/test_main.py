@@ -1,6 +1,6 @@
 """
 Main test file - imports all tests from submodules for backward compatibility.
-This allows running all tests with: pytest tests/fastapi/test_main.py
+This allows running all tests with: pytest tests/api/test_main.py
 """
 
 # Import all test functions from submodules
