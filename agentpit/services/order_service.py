@@ -3,11 +3,11 @@ import logging
 import secrets
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from eth_utils import keccak
+from eth_utils.crypto import keccak
 from web3 import Web3
 
 from agentpit.datastructures.order_response import OrderResponse
@@ -15,7 +15,6 @@ from agentpit.datastructures.place_order_request import PlaceOrderRequest
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
-from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
     InsufficientBalanceError,
     MarketNotFoundError,
@@ -50,7 +49,7 @@ class OrderService:
         if self._onchain is None:
             raise MarketStateError("on-chain integration disabled")
 
-        market, token_id_int, token_id_str = self._resolve_market(payload)
+        _, token_id_int, _ = self._resolve_market(payload)
         maker_amount, taker_amount = self._amounts_from_price_size(
             payload.side, payload.price, payload.size
         )
@@ -142,7 +141,7 @@ class OrderService:
             return cur.rowcount > 0
 
     def get_orderbook(self, market_id: int, outcome: str) -> dict[str, Any]:
-        market, _token_id_int, token_id_str = self._resolve_market_lookup(market_id, outcome)
+        _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
         with self._db.read() as conn:
             cur = conn.execute(
                 "SELECT ORDER_ID, SIDE, PRICE, REMAINING_AMOUNT, MAKER, CREATED_AT "
@@ -260,7 +259,7 @@ class OrderService:
                 order_json,
                 "live",
                 outcome_remaining,
-                int(datetime.utcnow().timestamp()),
+                int(datetime.now(timezone.utc).timestamp()),
                 order_id,
             ),
         )
@@ -422,7 +421,7 @@ class OrderService:
                 taker_row["REMAINING_AMOUNT"],
                 taker_row["SIDE"],
                 "PENDING",
-                int(datetime.utcnow().timestamp()),
+                int(datetime.now(timezone.utc).timestamp()),
                 "",
                 0,
                 int(taker_row["FEE_RATE_BPS"]),
@@ -467,7 +466,7 @@ class OrderService:
             maker_fill_amount = self._maker_fill_amount(maker_order, m["trade_size"])
             maker_fill_amounts.append(maker_fill_amount)
             taker_fill_amount += self._taker_fill_amount(
-                taker_order, maker_order, m["trade_size"]
+                taker_order, m["trade_size"]
             )
 
         fn = exchange.functions.matchOrders(
@@ -510,7 +509,7 @@ class OrderService:
         return int((Decimal(trade_size) * ratio).to_integral_value(rounding=ROUND_HALF_UP))
 
     @staticmethod
-    def _taker_fill_amount(taker: OrderData, maker: OrderData, trade_size: int) -> int:
+    def _taker_fill_amount(taker: OrderData, trade_size: int) -> int:
         # takerFillAmount is in the taker's makerAsset units.
         if taker.side == 0:  # BUY taker → makerAsset = collateral
             ratio = Decimal(taker.makerAmount) / Decimal(taker.takerAmount)
