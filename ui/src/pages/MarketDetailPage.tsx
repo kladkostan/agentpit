@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMarket } from "@/api/markets";
 import { Badge } from "@/components/ui/badge";
@@ -5,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { MarketState } from "@/types/market";
+import { OutcomeChips } from "@/components/orders/OutcomeChips";
+import { Orderbook } from "@/components/orders/Orderbook";
+import { OrderTicket } from "@/components/orders/OrderTicket";
 
 const STATE_STYLES: Record<MarketState, string> = {
   DRAFT: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200",
@@ -19,6 +23,13 @@ const STATE_STYLES: Record<MarketState, string> = {
 export function MarketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: market, isLoading, error, refetch } = useMarket(id);
+
+  const firstOutcome = useMemo(
+    () => market?.erc1155_tokens[0]?.[1] ?? "",
+    [market],
+  );
+  const [selectedOutcome, setSelectedOutcome] = useState<string>(firstOutcome);
+  const outcome = selectedOutcome || firstOutcome;
 
   if (isLoading) {
     return <MarketDetailSkeleton />;
@@ -51,8 +62,13 @@ export function MarketDetailPage() {
     );
   }
 
+  const isTradingDisabled = market.market_state !== "ACTIVE";
+  const disabledReason = isTradingDisabled
+    ? `Market is ${market.market_state}`
+    : undefined;
+
   return (
-    <article className="mx-auto max-w-3xl space-y-6">
+    <article className="mx-auto max-w-5xl space-y-6">
       <Link
         to="/"
         className="text-sm text-muted-foreground hover:text-foreground"
@@ -78,32 +94,20 @@ export function MarketDetailPage() {
         ) : null}
       </header>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Outcomes
-        </h2>
-        <ul className="divide-y rounded-lg border">
-          {market.erc1155_tokens.map(([tokenId, label]) => (
-            <li
-              key={tokenId}
-              className="flex items-center justify-between gap-4 px-4 py-3"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{label}</p>
-                <p className="truncate font-mono text-xs text-muted-foreground">
-                  {tokenId}
-                </p>
-              </div>
-              <span className="tabular-nums text-sm font-semibold text-muted-foreground">
-                —¢
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <OutcomeChips
+        tokens={market.erc1155_tokens}
+        selected={outcome}
+        onSelect={setSelectedOutcome}
+      />
 
-      <div className="rounded-lg border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">
-        Order ticket, orderbook and AI agent panel coming soon
+      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
+        <Orderbook marketId={market.market_id} outcome={outcome} />
+        <OrderTicket
+          marketId={market.market_id}
+          outcome={outcome}
+          isTradingDisabled={isTradingDisabled}
+          {...(disabledReason !== undefined ? { disabledReason } : {})}
+        />
       </div>
     </article>
   );
@@ -111,13 +115,13 @@ export function MarketDetailPage() {
 
 function MarketDetailSkeleton() {
   return (
-    <article className="mx-auto max-w-3xl space-y-6">
+    <article className="mx-auto max-w-5xl space-y-6">
       <Skeleton className="h-4 w-32" />
       <Skeleton className="h-5 w-20 rounded-full" />
       <Skeleton className="h-9 w-3/4" />
       <Skeleton className="h-4 w-full" />
       <Skeleton className="h-4 w-5/6" />
-      <Skeleton className="h-40 w-full rounded-lg" />
+      <Skeleton className="h-64 w-full rounded-lg" />
     </article>
   );
 }

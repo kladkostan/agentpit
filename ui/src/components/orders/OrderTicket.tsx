@@ -1,12 +1,16 @@
 import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { useOrderbook } from "@/api/orders";
+import { placeOrder, useOrderbook } from "@/api/orders";
+import { useRequireAuth } from "@/auth/useRequireAuth";
 import {
   MAX_PROB,
   MIN_PROB,
+  SHARES_SCALE,
   SLIPPAGE_CAP,
   computeMarketBuy,
   computeMarketSell,
@@ -14,6 +18,7 @@ import {
   sharesFromDollars,
 } from "@/components/orders/orderMath";
 import type { OrderSide } from "@/types/order";
+import { ApiError } from "@/api/client";
 
 type Mode = "Limit" | "Market";
 
@@ -36,15 +41,63 @@ export function OrderTicket({
   const [limitShares, setLimitShares] = useState<string>("");
   const [marketAmount, setMarketAmount] = useState<string>("");
 
+  const requireAuth = useRequireAuth();
+  const queryClient = useQueryClient();
   const { data: book } = useOrderbook(marketId, outcome);
-  const bestAsk = book && book.asks.length > 0
-    ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
-    : null;
-  const bestBid = book && book.bids.length > 0
-    ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
-    : null;
+
+  const bestAsk =
+    book && book.asks.length > 0
+      ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
+      : null;
+  const bestBid =
+    book && book.bids.length > 0
+      ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
+      : null;
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({
+      queryKey: ["orderbook", marketId, outcome],
+    });
+    void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+  };
+
+  const limitMutation = useMutation({
+    mutationFn: async () => {
+      const price = Number(limitPrice);
+      const shares = Number(limitShares);
+      return placeOrder({
+        market_id: marketId,
+        outcome,
+        side,
+        price,
+        size: Math.floor(shares * SHARES_SCALE),
+        order_type: "GTC",
+      });
+    },
+    onSuccess: (res) => {
+      if (!res.success) {
+        toast.error(`Order failed: ${res.errorMsg ?? "unknown"}`);
+        return;
+      }
+      const filled = Number(res.filledSize) / SHARES_SCALE;
+      const remaining = Number(res.remainingSize) / SHARES_SCALE;
+      toast.success(
+        remaining > 0
+          ? `Order placed: ${filled.toFixed(2)} filled, ${remaining.toFixed(
+              2,
+            )} resting`
+          : `Order filled: ${filled.toFixed(2)} shares`,
+      );
+      setLimitShares("");
+      invalidate();
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : String(err));
+    },
+  });
 
   const preview = useMemo(() => {
+    /* unchanged from Task 12 — preserved exactly */
     if (mode === "Limit") {
       const price = Number(limitPrice);
       const shares = Number(limitShares);
@@ -91,8 +144,18 @@ export function OrderTicket({
   const canSubmit =
     !isTradingDisabled &&
     preview !== null &&
+    !limitMutation.isPending &&
     (mode === "Limit" ||
       (side === "BUY" ? bestAsk !== null : bestBid !== null));
+
+  const onSubmit = requireAuth(() => {
+    if (mode === "Limit") {
+      limitMutation.mutate();
+    } else {
+      // Wired in Task 14.
+      toast.message("Market orders coming next");
+    }
+  });
 
   return (
     <section className="space-y-4 rounded-lg border bg-card p-4 shadow-sm">
@@ -221,13 +284,13 @@ export function OrderTicket({
         size="lg"
         disabled={!canSubmit}
         className="w-full"
-        onClick={() => {
-          /* wired in Task 13 / 14 */
-        }}
+        onClick={onSubmit}
       >
         {isTradingDisabled
           ? (disabledReason ?? "Trading disabled")
-          : `${side === "BUY" ? "Buy" : "Sell"} ${outcome}`}
+          : limitMutation.isPending
+            ? "Placing…"
+            : `${side === "BUY" ? "Buy" : "Sell"} ${outcome}`}
       </Button>
     </section>
   );
