@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Deploy CTFExchange to the local forked node.
+# Deploy the agentpit local stack (AgentpitUSD + Faucet + CTFExchange) to the local forked node.
 # Usage: ./scripts/deploy_exchange.sh
 #
 # Requires the node from run_node.sh to be running on RPC_URL.
-# Writes the resulting exchange address (and all dependency addresses) to
-# agentpit/deployments/local.json so the Python side can load them.
+# Writes all resulting addresses to agentpit/deployments/local.json so the
+# Python side can load them.
 
 set -euo pipefail
 
@@ -12,6 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTPIT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$AGENTPIT_DIR/.env"
 CTF_EXCHANGE_DIR="${CTF_EXCHANGE_DIR:-$AGENTPIT_DIR/../ctf-exchange}"
+
+# Faucet drip amount: 1,000,000 apUSD (6 decimals) = 1_000_000_000_000.
+SIGNUP_GRANT_RAW="${SIGNUP_GRANT_RAW:-1000000000000}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Error: $ENV_FILE not found. Copy .env.example and edit." >&2
@@ -21,7 +24,7 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
-for var in PK ADMIN RPC_URL COLLATERAL CTF PROXY_FACTORY SAFE_FACTORY; do
+for var in PK ADMIN RPC_URL CTF PROXY_FACTORY SAFE_FACTORY; do
   if [ -z "${!var:-}" ]; then
     echo "Error: $var is not set in $ENV_FILE" >&2
     exit 1
@@ -41,13 +44,13 @@ fi
 
 DEPLOYER="$(cast wallet address --private-key "$PK")"
 
-echo "Deploying CTFExchange to $RPC_URL"
+echo "Deploying agentpit stack to $RPC_URL"
 echo "  deployer:      $DEPLOYER"
 echo "  admin:         $ADMIN"
-echo "  collateral:    $COLLATERAL"
 echo "  ctf:           $CTF"
 echo "  proxy_factory: $PROXY_FACTORY"
 echo "  safe_factory:  $SAFE_FACTORY"
+echo "  signup grant:  $SIGNUP_GRANT_RAW raw apUSD"
 echo
 
 # Fund the deployer with 10,000 native MATIC on the local fork so it has gas.
@@ -59,19 +62,36 @@ OUTPUT="$(cd "$CTF_EXCHANGE_DIR" && forge script ExchangeDeployment \
     --rpc-url "$RPC_URL" \
     --json \
     --broadcast \
-    -s "deployExchange(address,address,address,address,address)" \
-    "$ADMIN" "$COLLATERAL" "$CTF" "$PROXY_FACTORY" "$SAFE_FACTORY")"
+    -s "deployAgentpitStack(address,address,address,address,uint256)" \
+    "$ADMIN" "$CTF" "$PROXY_FACTORY" "$SAFE_FACTORY" "$SIGNUP_GRANT_RAW")"
 
-EXCHANGE="$(echo "$OUTPUT" | grep -E '^\{' | jq -r 'select(.returns) | .returns.exchange.value' 2>/dev/null | head -n1)"
+# The script returns (address usd, address faucet, address exchange).
+# forge --json prints the returns map; pick fields by their declared names.
+RETURNS_JSON="$(echo "$OUTPUT" | grep -E '^\{' | jq -c 'select(.returns)' 2>/dev/null | head -n1)"
 
-if [ -z "$EXCHANGE" ] || [ "$EXCHANGE" = "null" ]; then
-  echo "Failed to parse exchange address from forge output." >&2
+if [ -z "$RETURNS_JSON" ]; then
+  echo "Failed to parse forge output." >&2
   echo "Raw output:" >&2
   echo "$OUTPUT" >&2
   exit 1
 fi
 
-echo "Exchange deployed: $EXCHANGE"
+USD="$(echo "$RETURNS_JSON" | jq -r '.returns.usd.value')"
+FAUCET="$(echo "$RETURNS_JSON" | jq -r '.returns.faucet.value')"
+EXCHANGE="$(echo "$RETURNS_JSON" | jq -r '.returns.exchange.value')"
+
+for var in USD FAUCET EXCHANGE; do
+  if [ -z "${!var}" ] || [ "${!var}" = "null" ]; then
+    echo "Failed to extract $var from forge output." >&2
+    echo "Raw output:" >&2
+    echo "$OUTPUT" >&2
+    exit 1
+  fi
+done
+
+echo "AgentpitUSD deployed: $USD"
+echo "Faucet      deployed: $FAUCET"
+echo "Exchange    deployed: $EXCHANGE"
 
 mkdir -p "$AGENTPIT_DIR/deployments"
 cat > "$AGENTPIT_DIR/deployments/local.json" <<EOF
@@ -79,11 +99,13 @@ cat > "$AGENTPIT_DIR/deployments/local.json" <<EOF
   "chain_id": 137,
   "rpc_url": "$RPC_URL",
   "admin": "$ADMIN",
-  "collateral": "$COLLATERAL",
+  "usd": "$USD",
+  "faucet": "$FAUCET",
   "ctf": "$CTF",
   "proxy_factory": "$PROXY_FACTORY",
   "safe_factory": "$SAFE_FACTORY",
-  "exchange": "$EXCHANGE"
+  "exchange": "$EXCHANGE",
+  "signup_grant_raw": "$SIGNUP_GRANT_RAW"
 }
 EOF
 
