@@ -1,12 +1,11 @@
 const DEFAULT_BASE_URL = "http://localhost:8000";
 
-function getBaseUrl(): string {
-  const fromEnv = import.meta.env.VITE_API_BASE_URL;
-  return (typeof fromEnv === "string" && fromEnv.length > 0
-    ? fromEnv
+const BASE_URL = (
+  typeof import.meta.env.VITE_API_BASE_URL === "string" &&
+  import.meta.env.VITE_API_BASE_URL.length > 0
+    ? import.meta.env.VITE_API_BASE_URL
     : DEFAULT_BASE_URL
-  ).replace(/\/+$/, "");
-}
+).replace(/\/+$/, "");
 
 export class ApiError extends Error {
   readonly status: number;
@@ -20,21 +19,50 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Auth providers register a getter so apiFetch can read the live token without
+ * importing React. Kept as a module-scoped function pointer to avoid a
+ * client → context circular import.
+ */
+type TokenGetter = () => string | null;
+let tokenGetter: TokenGetter = () => null;
+
+export function setAccessTokenGetter(getter: TokenGetter): void {
+  tokenGetter = getter;
+}
+
+/** Event name dispatched on window when a 401 hits with a token attached. */
+export const UNAUTHORIZED_EVENT = "agentpit:unauthorized";
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  const token = tokenGetter();
+  const baseHeaders: Record<string, string> = { Accept: "application/json" };
+  if (init?.body && typeof init.body === "string") {
+    baseHeaders["Content-Type"] = "application/json";
+  }
+  if (token) {
+    baseHeaders.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(url, {
     ...init,
     headers: {
-      Accept: "application/json",
+      ...baseHeaders,
       ...init?.headers,
     },
   });
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    if (response.status === 401 && token) {
+      // Server rejected our token (expired, secret rotated, account deleted).
+      // The provider listens for this and clears local auth state.
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    }
     throw new ApiError(
       response.status,
       body,

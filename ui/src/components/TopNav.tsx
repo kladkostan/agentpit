@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { AuthButtons } from "@/components/auth/AuthButtons";
 
 const linkClasses = ({ isActive }: { isActive: boolean }): string =>
   cn(
@@ -26,6 +27,9 @@ export function TopNav() {
             Portfolio
           </NavLink>
         </nav>
+        <div className="ml-auto flex items-center gap-2">
+          <AuthButtons />
+        </div>
       </div>
     </header>
   );
