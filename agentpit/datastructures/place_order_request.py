@@ -1,28 +1,16 @@
-from pydantic import field_validator, BaseModel
-from agentpit.common import check_state
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class PlaceOrderRequest(BaseModel):
-    api_key: str
-    market_id: int
-    side: str  # "BUY" or "SELL"
-    token_id: str
-    price: int  # in USDC
-    amount: int  # quantity
-    order_type: str = "LIMIT"  # "LIMIT" or "MARKET"
+    """Inputs for the simple-trade UX: pick outcome, side, price and size."""
 
-    def model_post_init(self, __context):
-        check_state(len(self.api_key) > 0,
-                    "API key must not be empty")
-        check_state(self.market_id >= 0,
-                    "Market ID must be non-negative")
-        check_state(self.side in ["BUY", "SELL"],
-                    "Side must be either BUY or SELL")
-        check_state(len(self.token_id) > 0,
-                    "Token ID must not be empty")
-        check_state(self.price >= 0,
-                    "Price must be non-negative")
-        check_state(self.amount > 0,
-                    "Amount must be positive")
-        check_state(self.order_type in ["LIMIT", "MARKET"],
-                    "Order type must be LIMIT or MARKET")
+    market_id: int = Field(ge=0)
+    outcome: str = Field(min_length=1)    # e.g. "YES" / "NO" — looked up against the market's labels
+    side: Literal["BUY", "SELL"]
+    price: Decimal = Field(gt=0, lt=1)    # probability, 0 < p < 1
+    size: int = Field(gt=0)               # outcome-token quantity (raw 10^6 units)
+    order_type: Literal["GTC", "FOK", "FAK", "GTD"] = "GTC"
+    expiration: int = 0                   # unix seconds, required if GTD

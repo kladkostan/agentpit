@@ -1,20 +1,11 @@
-from pydantic import field_validator, BaseModel
-from pydantic import field_validator, BaseModel
-from agentpit.common import check_state
-
-
-class RedeemPositionRequest(BaseModel):
-    api_key: str
-
-    def model_post_init(self, __context):
-        check_state(self.api_key, "api_key must not be empty")
-
-
+from pydantic import BaseModel, Field
 
 
 class SplitPositionRequest(BaseModel):
-    api_key: str
-    amount: int  # number of complete sets to split
+    """Lock `amount` apUSD on-chain to mint equal amounts of every outcome token."""
+    amount: int = Field(gt=0)
 
-    def model_post_init(self, __context):
-        check_state(self.amount > 0, "Amount must be positive")
+
+class MergePositionRequest(BaseModel):
+    """Burn `amount` of each outcome token to recover `amount` apUSD."""
+    amount: int = Field(gt=0)
