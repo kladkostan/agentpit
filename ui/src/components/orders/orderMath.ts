@@ -39,3 +39,21 @@ export function computeMarketBuy(
   if (sizeWire <= 0) return null;
   return { priceCap, sizeWire, bestAsk: best };
 }
+
+export interface MarketSellComputation {
+  priceCap: number;
+  sizeWire: number;
+  bestBid: number;
+}
+
+export function computeMarketSell(
+  bids: OrderbookEntry[],
+  shares: number,
+): MarketSellComputation | null {
+  if (bids.length === 0 || shares <= 0) return null;
+  const best = Math.max(...bids.map((b) => b.PRICE)) / 1_000_000;
+  const priceCap = Math.max(best - SLIPPAGE_CAP, MIN_PROB);
+  const sizeWire = Math.floor(shares * SHARES_SCALE);
+  if (sizeWire <= 0) return null;
+  return { priceCap, sizeWire, bestBid: best };
+}

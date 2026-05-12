@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMarketBuy, dollarsFromShares, sharesFromDollars } from "./orderMath";
+import { computeMarketBuy, computeMarketSell, dollarsFromShares, sharesFromDollars } from "./orderMath";
 import type { OrderbookEntry } from "@/types/order";
 
 describe("sharesFromDollars", () => {
@@ -62,5 +62,38 @@ describe("computeMarketBuy", () => {
   it("returns null for non-positive amount", () => {
     expect(computeMarketBuy([ask(0.65, 100)], 0)).toBeNull();
     expect(computeMarketBuy([ask(0.65, 100)], -1)).toBeNull();
+  });
+});
+
+const bid = (
+  price: number,
+  remainingShares: number,
+): OrderbookEntry => ({
+  ORDER_ID: `bid-${price}-${remainingShares}`,
+  SIDE: "BUY",
+  PRICE: Math.round(price * 1_000_000),
+  REMAINING_AMOUNT: remainingShares * 1_000_000,
+  MAKER: "0x0",
+  CREATED_AT: 0,
+});
+
+describe("computeMarketSell", () => {
+  it("returns null for an empty book", () => {
+    expect(computeMarketSell([], 100)).toBeNull();
+  });
+
+  it("caps at best_bid - SLIPPAGE_CAP", () => {
+    const result = computeMarketSell([bid(0.65, 100)], 50);
+    expect(result!.priceCap).toBeCloseTo(0.63, 5);
+    expect(result!.sizeWire).toBe(50 * 1_000_000);
+  });
+
+  it("clamps price cap at MIN_PROB (0.01)", () => {
+    const result = computeMarketSell([bid(0.02, 100)], 50);
+    expect(result!.priceCap).toBeCloseTo(0.01, 5);
+  });
+
+  it("returns null for non-positive shares", () => {
+    expect(computeMarketSell([bid(0.65, 100)], 0)).toBeNull();
   });
 });
