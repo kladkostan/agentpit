@@ -1,3 +1,5 @@
+import type { OrderbookEntry } from "@/types/order";
+
 export const SLIPPAGE_CAP = 0.02;
 export const MIN_PROB = 0.01;
 export const MAX_PROB = 0.99;
@@ -13,4 +15,27 @@ export function sharesFromDollars(amount: number, price: number): number {
 export function dollarsFromShares(shares: number, price: number): number {
   if (shares <= 0 || price <= 0) return 0;
   return shares * price;
+}
+
+export interface MarketBuyComputation {
+  priceCap: number;     // probability used for the wire price
+  sizeWire: number;     // integer micro-shares for the wire size
+  bestAsk: number;      // top-of-book ask for preview display
+}
+
+/**
+ * Given asks (sorted or unsorted) and a dollar budget, derive the
+ * (price, size) for a GTC limit that fills against the book up to the
+ * slippage cap. The remainder, if any, can be DELETE'd by the caller.
+ */
+export function computeMarketBuy(
+  asks: OrderbookEntry[],
+  dollarAmount: number,
+): MarketBuyComputation | null {
+  if (asks.length === 0 || dollarAmount <= 0) return null;
+  const best = Math.min(...asks.map((a) => a.PRICE)) / 1_000_000;
+  const priceCap = Math.min(best + SLIPPAGE_CAP, MAX_PROB);
+  const sizeWire = Math.floor((dollarAmount * SHARES_SCALE) / priceCap);
+  if (sizeWire <= 0) return null;
+  return { priceCap, sizeWire, bestAsk: best };
 }
