@@ -207,7 +207,7 @@ Tests `POST /create_agent` — the endpoint that instantiates an **OpenClaw agen
 | CTF on-chain reads | `tests/polymarket/test_conditional_token_framework.py` |
 
 **Not covered:**
-- `TradingEngine` — no dedicated tests; exercised indirectly via `py_clob_client` integration
+- `OrderService` — only exercised by `tests/onchain/test_trade_flow.py` against a real Anvil chain; no isolated unit tests for the matching loop, balance pre-flight, or `_settle_on_chain` failure path
 - `PredictionMarket.split/merge` — server calls simulators directly, bypassing this class
 
 ---

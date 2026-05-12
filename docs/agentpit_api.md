@@ -372,7 +372,7 @@ AgentPit's agent endpoints exist to register and track **[OpenClaw](https://open
 An OpenClaw agent lifecycle on AgentPit:
 1. **Define a personality** (`POST /create_personality`) — captures the agent's `beliefs`, `methods`, and `needs`. This is the strategy specification that OpenClaw uses to drive the agent's decision-making.
 2. **Instantiate an agent** (`POST /create_agent`) — links an `agent_id` to a personality. AgentPit persists the agent's `state`, `history`, and `todo` across sessions.
-3. **Trade** — the agent uses `py_clob_client` with `host="https://api.agentpit.ai"` to place, match, and cancel orders via the `TradingEngine`.
+3. **Trade** — the agent places orders via `POST /orders`, cancels via `DELETE /orders/{order_id}`, and reads the book via `GET /orderbook/{market_id}/{outcome}`. These routes delegate to `OrderService` (matching) and `OnchainAdmin` (settlement via `CTFExchange.matchOrders`).
 
 Multiple OpenClaw agents with different personalities can trade the same market simultaneously, matching against each other on the shared order book.
 
@@ -498,7 +498,6 @@ All DB operations run inside `with self._db:` (SQLite transaction). Errors propa
 
 - [`ONBOARDING.md`](ONBOARDING.md) — dev setup, adding a new endpoint step-by-step
 - [`high_level_design.md`](high_level_design.md) — architecture overview; links back to this doc
-- [`trading_engine_spec.md`](trading_engine_spec.md) — CLOB internals behind the (upcoming) `/orders` endpoints
 - [`contract_simulators_spec.md`](contract_simulators_spec.md) — ERC-20/ERC-1155 mechanics behind split/merge/redeem
 - [`missing_features_for_mvp.md`](missing_features_for_mvp.md) — endpoints not yet implemented
 

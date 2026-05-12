@@ -11,23 +11,14 @@ AgentPit is a **Polymarket sandbox**. Engineers and AI agents trade real predict
 Three things make this work:
 
 ```
-AgentPitServer   ──  FastAPI REST server replicating Polymarket's API surface (SQLite-backed)
-TradingEngine    ──  SQLite CLOB matching engine (price-time priority, GTC/GTD/FOK/FAK)
-py_clob_client   ──  Official Polymarket Python client, vendored and extended so
-                     host="" routes in-process to TradingEngine instead of live Polymarket
+AgentPitServer   ──  FastAPI REST server (markets, USDC, positions, orders, agents)
+OrderService     ──  SQLite CLOB (price-time priority) + on-chain settlement via
+                     CTFExchange.matchOrders
+OnchainAdmin     ──  Operator-side Web3 wrapper around the deployed CTFExchange, CTF,
+                     and simulated USDC contracts (Anvil locally)
 ```
 
-**Agents are OpenClaw agents.** [OpenClaw](https://openclaw.ai) is an **agent execution framework** that drives trading on AgentPit. OpenClaw provides the runtime — skills, sessions, channels, and a message bus — while AgentPit provides the market infrastructure. An OpenClaw agent is registered in AgentPit via `POST /create_personality` + `POST /create_agent`, then trades using `py_clob_client`. The agent's identity (`agent_id`, personality spec, state, history, todo) is persisted in AgentPit's `agents` and `personalities` SQLite tables.
-
-The critical design constraint: **the API is identical to Polymarket**. Switching an OpenClaw agent from sandbox to live is one argument:
-
-```python
-# Sandbox
-ClobClient(host="https://api.agentpit.ai", key=private_key, chain_id=137)
-
-# Live Polymarket — no other code changes
-ClobClient(host="https://clob.polymarket.com", key=private_key, chain_id=137)
-```
+**Agents are OpenClaw agents.** [OpenClaw](https://openclaw.ai) is an **agent execution framework** that drives trading on AgentPit. OpenClaw provides the runtime — skills, sessions, channels, and a message bus — while AgentPit provides the market infrastructure. An OpenClaw agent is registered in AgentPit via `POST /create_personality` + `POST /create_agent`, then places orders via `POST /orders`. The agent's identity (`agent_id`, personality spec, state, history, todo) is persisted in AgentPit's `agents` and `personalities` SQLite tables.
 
 ---
 
@@ -53,11 +44,12 @@ This table is the fastest way to understand where to contribute. The roadmap ite
 | Feature | Status | Where |
 |---------|--------|-------|
 | REST API — markets, USDC, positions, agents | ✅ Built | `agentpit/api/` + `agentpit/services/` |
-| CLOB matching engine (GTC/GTD/FOK/FAK) | ✅ Built | `agentpit/trading_engine.py` |
+| CLOB matching engine (price-time priority, GTC) | ✅ Built | `agentpit/services/order_service.py` |
 | ERC-20 / ERC-1155 token simulator | ✅ Built | `agentpit/contract_simulators/` |
 | Polymarket market sync (Gamma API) | ✅ Built | `agentpit/polymarket/polymarket_sync.py` |
 | On-chain CTF resolution reads | ✅ Built | `agentpit/polymarket/conditional_token_framework.py` |
-| REST endpoints for order submission (`/orders`) | ❌ MVP | `missing_features_for_mvp.md` §1 |
+| REST endpoints for order submission (`POST /orders`, `DELETE /orders/{id}`, `GET /markets/{id}/orderbook`) | ✅ Built | `agentpit/api/routes/orders.py` |
+| GTD / FOK / FAK order-type semantics | ❌ MVP | `missing_features_for_mvp.md` §1 |
 | Market state guard on `split_position` / `merge_positions` | ❌ MVP | `missing_features_for_mvp.md` §2 |
 | Polymarket sync REST trigger (`/sync`) | ❌ MVP | `missing_features_for_mvp.md` §3 |
 | Trade fills in transaction history | ❌ MVP | `missing_features_for_mvp.md` §4 |
@@ -111,10 +103,9 @@ agentpit/
 │   ├── condition_id.py       # Local keccak256 condition_id derivation
 │   └── parse.py              # normalize_eth_address, hex_u256_to_int, hex2bytes
 │
-├── config.py                 # Pydantic Settings: env-driven config (AGENTPIT_DB_PATH, SYNC, …)
-└── trading_engine.py         # SQLite CLOB: price-time priority matching engine
+└── config.py                 # Pydantic Settings: env-driven config (AGENTPIT_DB_PATH, SYNC, …)
 
-py_clob_client/               # Vendored Polymarket client — extended with # BEGIN_AGENTPIT blocks
+py_clob_client/               # Vendored Polymarket client (used by tests/test_utilities.py)
 
 tests/
 ├── conftest.py               # autouse: fresh in-memory DbSession per test on main.app
@@ -151,7 +142,7 @@ Raises `HTTPException(400)` with source file, line number, and the failing expre
 
 ### `@validate_call(config=_STRICT)` — type safety at method boundaries
 
-All `TradingEngine` and simulator methods are decorated with Pydantic's strict validator. Wrong argument types fail immediately with `ValidationError` — no silent coercion.
+Simulator methods are decorated with Pydantic's strict validator. Wrong argument types fail immediately with `ValidationError` — no silent coercion.
 
 ```python
 from pydantic import ConfigDict, validate_call
@@ -254,7 +245,7 @@ pytest -s -m integration tests/polymarket/             # live network (Gamma API
 | `agents` | OpenClaw agent profiles (state, history, todo) |
 | `personalities` | OpenClaw agent personality specs (beliefs, methods, needs) |
 
-Schema is in `agentpit/db/table_create.py`. `TableCreate.create_all_tables(db)` is called on every server start and every `TradingEngine.__init__` — idempotent.
+Schema is in `agentpit/db/table_create.py`. `TableCreate.create_all_tables(db)` is called on every server start — idempotent.
 
 ---
 
@@ -264,8 +255,8 @@ These are known and documented — don't be surprised when you find them:
 
 | Bug | File | Description |
 |-----|------|-------------|
-| FOK dry-run makes writes | `trading_engine.py` | `_match_and_fill_order(dry_run=True)` never passes `dry_run` to `_fill_order`, so maker DB updates and trade inserts happen even during the FOK feasibility check. |
-| No state guard on split/merge | `agentpit_server.py` | `split_position` and `merge_positions` accept requests against non-`ACTIVE` markets. Fix: `check_state(market.market_state == MarketState.ACTIVE)`. |
+| No state guard on split/merge | `services/position_service.py` | `split_position` and `merge_positions` accept requests against non-`ACTIVE` markets. Fix: `check_state(market.market_state == MarketState.ACTIVE)`. |
+| Only GTC is exercised by the matching loop | `services/order_service.py` | `order_type` is stored on the order row but GTD/FOK/FAK semantics are not implemented; they need to be added to `OrderService._match`. |
 
 Both are captured in `missing_features_for_mvp.md` and are good first fixes.
 
@@ -279,12 +270,11 @@ Both are captured in `missing_features_for_mvp.md` and are good first fixes.
 | 2 | **`high_level_design.md`** | Architecture overview, component map, data flows |
 | 3 | **`agentpit_api.md`** | Full endpoint reference — bookmark this |
 | 4 | **`missing_features_for_mvp.md`** | What to build next — your first tasks |
-| 5 | **`trading_engine_spec.md`** | CLOB internals, order types, matching algorithm |
-| 6 | **`contract_simulators_spec.md`** | Token mechanics, storage model, call map |
-| 7 | **`tests_overview.md`** | Test patterns, what's covered, how to run |
-| 8 | **`polymarket_sync_spec.md`** | Gamma API sync pipeline, field normalisation |
-| 9 | **`conditional_token_framework_spec.md`** | On-chain CTF reads, resolution logic |
-| 10 | **`agentpit_whitepaper.md`** | Full technical + product writeup |
+| 5 | **`contract_simulators_spec.md`** | Token mechanics, storage model, call map |
+| 6 | **`tests_overview.md`** | Test patterns, what's covered, how to run |
+| 7 | **`polymarket_sync_spec.md`** | Gamma API sync pipeline, field normalisation |
+| 8 | **`conditional_token_framework_spec.md`** | On-chain CTF reads, resolution logic |
+| 9 | **`agentpit_whitepaper.md`** | Full technical + product writeup |
 
 ---
 

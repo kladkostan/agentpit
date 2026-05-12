@@ -17,7 +17,7 @@ ClobClient(host="https://api.agentpit.ai")   →  AgentPit sandbox   (simulated 
 ClobClient(host="https://clob.polymarket.com") →  Polymarket live  (real USDC, real exchange)
 ```
 
-**That is the only difference.** Same signed orders. Same order IDs. Same price encoding. Same `py_clob_client` interface. An [OpenClaw](https://openclaw.ai) agent developed on AgentPit runs on the live exchange with no code changes.
+**That is the goal.** AgentPit runs an off-chain CLOB plus an on-chain settlement contract (`CTFExchange.matchOrders`), so matched trades produce real ERC-1155 transfers against simulated USDC. The sandbox-to-live promotion path is the long-term direction — see [Sandbox → Live Promotion Path](#sandbox--live-promotion-path) for what's wired today vs. roadmap.
 
 ---
 
@@ -51,9 +51,9 @@ AgentPit removes that constraint entirely.
 
 It is a hosted prediction-market simulation platform at **[agentpit.ai](https://agentpit.ai)** that:
 
-- Mirrors the **full Polymarket CLOB API** — same EIP-712 order signatures, same order ID derivation, same order types (GTC, GTD, FOK, FAK)
-- Runs a **price-time priority CLOB engine** in SQLite — no external dependencies
-- Simulates **ERC-20 (USDC) and ERC-1155 (outcome tokens)** without any blockchain connection
+- Uses **EIP-712 signed orders** compatible with Polymarket's `CTFExchange` contract
+- Runs a **price-time priority CLOB engine** in SQLite (`OrderService`) — matched pairs are settled on-chain via `CTFExchange.matchOrders`
+- Simulates **ERC-20 (USDC)** via a locally-deployed token contract; outcome tokens are real ERC-1155 positions on the conditional-token framework
 - Syncs **real Polymarket markets** via the Gamma API so agents trade real questions at real odds
 - Persists **[OpenClaw](https://openclaw.ai) agent identities** — personality specs, execution state, history, and todo queues
 
@@ -70,13 +70,13 @@ It is a hosted prediction-market simulation platform at **[agentpit.ai](https://
 │   ├─ Market Lifecycle    ├─ ERC-20 USDC Simulator           │
 │   ├─ OpenClaw Agents     └─ ERC-1155 Outcome Token Sim      │
 │                                                             │
-│  TradingEngine (CLOB)  ←──  py_clob_client                  │
+│  OrderService (CLOB + CTFExchange.matchOrders settlement)   │
 │  SQLite Database                                            │
 └────────────────────┬───────────────────────────────────────-┘
                      │
        ┌─────────────▼──────────────┐
-       │     OpenClaw Agents         │  ClobClient(host="https://api.agentpit.ai")
-       │     (py_clob_client)        │  same interface as live Polymarket
+       │     OpenClaw Agents         │  POST /orders against https://api.agentpit.ai
+       │     (or human traders)      │
        └─────────────────────────────┘
 ```
 
@@ -93,7 +93,7 @@ An OpenClaw agent on AgentPit:
 ```
 1.  POST /create_personality   →  define beliefs, methods, needs (the strategy spec)
 2.  POST /create_agent         →  instantiate agent_id linked to that personality
-3.  ClobClient.post_order(...) →  place orders via py_clob_client → TradingEngine
+3.  POST /orders               →  place an order via OrderService (signs server-side, matches, settles)
 4.  GET  /portfolio/{api_key}  →  read USDC balance and token positions
 5.  GET  /markets/history/{api_key} →  review SPLIT / MERGE / REDEEM history
 ```
@@ -193,9 +193,9 @@ Three cleanly separated layers:
 │  ├─ ERC1155Simulator         ├─ table_read.py     (SELECT only)     │
 │  └─ PredictionMarket         ├─ table_write.py    (INSERT/UPDATE)   │
 │                              └─ table_utils.py    (JSON map helpers)│
-│  trading_engine.py           polymarket/                            │
-│  └─ TradingEngine (CLOB)     ├─ polymarket_sync.py                  │
-│                              └─ conditional_token_framework.py      │
+│  services/order_service.py   polymarket/                            │
+│  └─ OrderService (CLOB +     ├─ polymarket_sync.py                  │
+│     CTFExchange settlement)  └─ conditional_token_framework.py      │
 └──────────────────────────────┬───────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼───────────────────────────────────────┐
@@ -237,8 +237,7 @@ agentpit/
 ├── utils/
 │   ├── condition_id.py       # Local keccak256 condition_id derivation
 │   └── parse.py              # normalize_eth_address, hex_u256_to_int, hex2bytes
-├── config.py                 # Pydantic Settings (env-driven)
-└── trading_engine.py         # SQLite CLOB: price-time priority matching engine
+└── config.py                 # Pydantic Settings (env-driven)
 
 py_clob_client/               # Vendored Polymarket client — extended with # BEGIN_AGENTPIT blocks
 tests/
@@ -252,16 +251,11 @@ docs/                         # Detailed spec documents (see Documentation secti
 
 ## The CLOB Engine
 
-`agentpit/trading_engine.py` is a self-contained SQLite-backed Central Limit Order Book. It is the local replacement for the Polymarket CLOB API.
+`agentpit/services/order_service.py` is the order-handling service: it inserts the signed order into SQLite, matches against resting liquidity using price-time priority, and submits matched pairs to the deployed `CTFExchange.matchOrders` contract for on-chain settlement.
 
 ### Order types
 
-| Type | Behaviour |
-|------|-----------|
-| **GTC** | Good-Till-Cancelled. Rests in the book until fully filled or explicitly cancelled. |
-| **GTD** | Good-Till-Date. Same as GTC but auto-expires at a Unix timestamp. Expiry is lazy — evaluated on the next incoming order. |
-| **FOK** | Fill-Or-Kill. Must be fully filled immediately; otherwise cancelled entirely. Uses a dry-run pass to check feasibility before committing any taker-side writes. |
-| **FAK** | Fill-And-Kill. Fills as much as possible immediately; unfilled remainder is cancelled. |
+`PlaceOrderRequest.order_type` accepts `GTC`, `FOK`, `FAK`, and `GTD` and the value is stored on the order row. Today only the GTC behaviour (rest in the book until filled or cancelled) is exercised by the matching loop; GTD expiry, FOK feasibility, and FAK leftover-cancel semantics are roadmap items and live in `docs/missing_features_for_mvp.md`.
 
 ### Price-time priority
 
@@ -277,25 +271,23 @@ Taker BUY @ 0.65 for 150 units — resting SELL orders:
   0.65     80    10:02     not reached
 ```
 
-Prices are stored as **integer micro-USDC** (`price × 10⁶`), matching Polymarket's own encoding. `0.60` → `600000`. No float precision issues.
+Prices are stored as **integer micro-USDC** (`price × 10⁶`). `0.60` → `600000`. No float precision issues.
 
 ### Order IDs
 
-Order IDs are computed as `keccak256(EIP-712 struct hash)` — identical to Polymarket's computation. A sandbox-matched order ID is valid on the live exchange. No re-signing needed when promoting an agent to production.
+`OrderService._compute_order_id` derives an internal identifier from the signed order fields (`keccak256` over a sorted JSON serialisation). This is a stable internal ID — it is **not** the EIP-712 struct hash that Polymarket's exchange uses, so sandbox order IDs are not interchangeable with the live exchange today.
 
-### Routing
+### Entry point
 
-`py_clob_client` checks the `host` argument and routes accordingly:
+Orders enter through the REST API:
 
-```python
-# Calls TradingEngine in-process (sandbox)
-ClobClient(host="https://api.agentpit.ai")
-
-# Calls Polymarket CLOB API over HTTP (live)
-ClobClient(host="https://clob.polymarket.com")
+```
+POST /orders          place an order (signed server-side using the caller's stored key)
+DELETE /orders/{id}   cancel a live order
+GET /markets/{id}/orderbook?outcome=Yes
 ```
 
-The switch is invisible to the agent. Same method signatures, same response shapes.
+See [`agentpit/api/routes/orders.py`](agentpit/api/routes/orders.py) for the wiring.
 
 ---
 
@@ -653,12 +645,12 @@ All other constants (contract addresses, Gamma API URL, Polygon RPC) are module-
 ```
 ① Develop on AgentPit
 ──────────────────────────────────────────────────────
-  ClobClient(host="https://api.agentpit.ai")
-  post_order(signed_order)  ──►  TradingEngine (local SQLite CLOB)
+  POST /orders against https://api.agentpit.ai
+  ──►  OrderService (SQLite CLOB) ──► CTFExchange.matchOrders (local Anvil)
 
   No real money · Full order matching · Real Polymarket questions
 
-            same OpenClaw agent code — no changes
+            same client code — no changes
                           │
                           ▼
 ② Validate against real market data
@@ -667,15 +659,15 @@ All other constants (contract addresses, Gamma API URL, Polygon RPC) are module-
   ──►  real questions, real market-implied odds
   ──►  zero financial risk
 
-            change one argument
+            roadmap: promote to live
                           │
                           ▼
-③ Promote to live
+③ Promote to live  (roadmap — not yet automated)
 ──────────────────────────────────────────────────────
-  ClobClient(host="https://clob.polymarket.com")
-  post_order(signed_order)  ──►  Polymarket CLOB API
-
-  Real USDC · Live exchange · Identical EIP-712 signatures and order IDs
+  Use py_clob_client(host="https://clob.polymarket.com") with the
+  same signed-order payload shape. Polymarket's exchange uses an
+  EIP-712 struct-hash order ID, which AgentPit does not currently
+  match — see "What's Not Built Yet" for the gap list.
 ```
 
 ---
@@ -686,8 +678,8 @@ These are the immediate MVP items. All are tracked with full specs in [`docs/mis
 
 | # | Feature | Status |
 |---|---------|--------|
-| 1 | **Order REST endpoints** — `POST /orders`, `DELETE /orders/{id}`, `GET /markets/{id}/orderbook` | `TradingEngine` is complete; it needs HTTP routes wired to it |
-| 2 | **Market state guard on split/merge** — `split_position` and `merge_positions` should reject non-`ACTIVE` markets | One `check_state(...)` call per handler |
+| 1 | **GTD / FOK / FAK semantics** in `OrderService._match` | Order-type is stored but only GTC is exercised end-to-end |
+| 2 | **Polymarket-compatible EIP-712 order IDs** | Current IDs are an internal keccak-over-JSON, not the struct hash Polymarket uses |
 | 3 | **Polymarket sync REST trigger** — `POST /sync` and `GET /sync/status` | Sync works in Python; needs HTTP exposure |
 | 4 | **Trade fills in transaction history** — `GET /history` only shows SPLIT/MERGE/REDEEM; matched orders are invisible | Join `trades` table into the history response |
 | 5 | **Human trading UI** — Polymarket-parity React frontend at agentpit.ai | Full spec in `missing_features_for_mvp.md` §5 |
@@ -754,8 +746,7 @@ make fmt   # black .
 
 | Bug | Where | Fix |
 |-----|-------|-----|
-| FOK dry-run writes to DB | `trading_engine.py` `_fill_order` | Pass `dry_run` through to `_fill_order` from `_match_and_fill_order` |
-| No state guard on split/merge | `agentpit_server.py` | Add `check_state(market.market_state == MarketState.ACTIVE)` to both handlers |
+| No state guard on split/merge | `services/position_service.py` | Add `check_state(market.market_state == MarketState.ACTIVE)` to both handlers |
 
 ---
 
@@ -767,7 +758,6 @@ make fmt   # black .
 | **[docs/high_level_design.md](docs/high_level_design.md)** | Architecture overview, component map, all data flows |
 | **[docs/agentpit_api.md](docs/agentpit_api.md)** | Full endpoint reference with request/response schemas |
 | **[docs/missing_features_for_mvp.md](docs/missing_features_for_mvp.md)** | Specced tasks for new contributors |
-| **[docs/trading_engine_spec.md](docs/trading_engine_spec.md)** | CLOB internals, order types, matching algorithm, DB schema |
 | **[docs/contract_simulators_spec.md](docs/contract_simulators_spec.md)** | ERC-20 / ERC-1155 mechanics, storage model, call map |
 | **[docs/polymarket_sync_spec.md](docs/polymarket_sync_spec.md)** | Gamma API sync pipeline, field normalisation, state transitions |
 | **[docs/conditional_token_framework_spec.md](docs/conditional_token_framework_spec.md)** | On-chain CTF reads, resolution payout logic |

@@ -6,21 +6,27 @@ Five features stand between the current codebase and a shippable MVP. All five a
 
 ---
 
-## 1. Order & Orderbook REST Endpoints
+## 1. Order Endpoint Surface — gaps + matching-loop semantics
 
-`TradingEngine` is fully implemented but only reachable in-process via [`py_clob_client`](https://github.com/Polymarket/py-clob-client). Any agent — or human — that communicates over HTTP cannot place, cancel, or observe orders. This is the core trading surface of the platform; it must be HTTP-accessible.
+The core order endpoints exist today against `OrderService` (`POST /orders`, `DELETE /orders/{order_id}`, `GET /orderbook/{market_id}/{outcome}` — see `agentpit/api/routes/orders.py`). Three things are still missing for a complete trading surface:
 
-**Add to `AgentPitServer`:**
+**Endpoints to add:**
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/orders` | Submit a signed order |
-| `DELETE` | `/orders/{order_id}` | Cancel a single order |
-| `DELETE` | `/orders` | Cancel all live orders for an API key |
-| `GET` | `/markets/{market_id}/orderbook` | Aggregated bids and asks |
+| `DELETE` | `/orders` | Cancel all live orders for the current user |
 | `GET` | `/orders/{order_id}` | Order status and fill state |
+| `GET` | `/orders` | List the caller's open / recent orders |
 
-Each route delegates directly to `TradingEngine`.
+**Matching-loop semantics to implement in `OrderService._match`:**
+
+The `order_type` field is stored on every order but only **GTC** is exercised today. The other three need behaviour wired in:
+
+- **GTD (Good-Till-Date)** — sweep `STATUS='live'` orders with `EXPIRATION <= now` to `STATUS='expired'`. Either run lazily before each match (like the deleted `_process_expired_orders`) or as a periodic task.
+- **FOK (Fill-Or-Kill)** — run `_match(..., dry_run=True)` first; if the dry run can't fill the full size, mark the order `cancelled` and skip settlement.
+- **FAK (Fill-And-Kill)** — after matching, cancel any unfilled remainder instead of leaving it resting.
+
+**Order ID format:** the current internal ID is `keccak256` over a sorted JSON of the signed fields. If the long-term goal is interoperability with Polymarket's exchange (so a sandbox order ID is recognised by the live `CTFExchange`), this needs to be replaced with the EIP-712 struct hash.
 
 ---
 
@@ -95,9 +101,8 @@ No browser interface exists. Humans cannot trade alongside **[OpenClaw](https://
 | # | What's missing | Fix |
 |---|---|---|
 | 5a | **CORS** — browsers are blocked by default | Add `CORSMiddleware` for `http://localhost:5173` and any production origin |
-| 5b | **Simple order endpoint** — browsers can't produce EIP-712 signatures without exposing private keys | `POST /orders/simple` takes `{ api_key, token_id, side, price, amount, order_type }`, signs server-side using the user's stored key, submits to `TradingEngine` |
-| 5c | **Orderbook endpoint** — needed to render the order ladder | `GET /markets/{market_id}/orderbook` → `{ bids: [{price, size}], asks: [{price, size}] }` aggregated by price level (overlaps with gap #1) |
-| 5d | **Open orders endpoint** — needed to show and cancel resting orders | `GET /orders?api_key={key}` · `DELETE /orders/{order_id}` (overlaps with gap #1) |
+| 5b | **Orderbook endpoint** — needed to render the order ladder | Today's `GET /orderbook/{market_id}/{outcome}` returns raw resting orders; the UI needs price-level aggregation: `{ bids: [{price, size}], asks: [{price, size}] }` |
+| 5c | **Open orders endpoint** — needed to show resting orders the user owns | `GET /orders` for the caller (overlaps with gap #1) |
 
 ---
 
@@ -105,7 +110,6 @@ No browser interface exists. Humans cannot trade alongside **[OpenClaw](https://
 
 - [`ONBOARDING.md`](ONBOARDING.md) — adding a new endpoint step-by-step; known bugs table
 - [`agentpit_api.md`](agentpit_api.md) — existing endpoint reference (baseline to extend)
-- [`trading_engine_spec.md`](trading_engine_spec.md) — CLOB internals required for §1 (orders REST)
 - [`tests_overview.md`](tests_overview.md) — test coverage map; new features need new tests
 | 5e | **Recent trades endpoint** — needed for the activity feed | `GET /markets/{market_id}/trades?limit=50` from the `trades` table |
 | 5f | **Implied probability on market list** — one orderbook call per card is too expensive | `include_price=true` query param on `GET /markets` computes the YES-token midpoint in a single DB pass |
@@ -118,9 +122,9 @@ No browser interface exists. Humans cannot trade alongside **[OpenClaw](https://
 ```
 Dependency order — backend first, UI last:
 
-  ① Order & Orderbook REST endpoints   (Backend)
+  ① Order-type semantics + remaining order endpoints   (Backend)
           │
-          │  required by ③ and ⑤
+          │  required by ⑤
           ▼
   ② Market state guard on split/merge  (Backend — independent)
 
@@ -137,7 +141,7 @@ Dependency order — backend first, UI last:
 
 | # | Feature | Scope |
 |---|---|---|
-| 1 | Order & orderbook REST endpoints | Backend |
+| 1 | Order-type semantics (GTD/FOK/FAK) + missing order endpoints | Backend |
 | 2 | Market state guard on split / merge | Backend |
 | 3 | Polymarket sync REST trigger | Backend |
 | 4 | Trade fills in transaction history | Backend |

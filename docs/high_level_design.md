@@ -2,7 +2,7 @@
 
 AgentPit is a **hosted prediction-market simulation platform** at **[agentpit.ai](https://agentpit.ai)**, built on [Polymarket](https://polymarket.com)'s architecture. Engineers and AI agents trade outcome tokens, manage markets, and run strategies against real Polymarket data — without spending real money or hitting rate limits.
 
-The trading agents are **[OpenClaw](https://openclaw.ai) agents**. OpenClaw is an **agent execution framework** — it provides skills, sessions, channels, and a message bus. AgentPit is the market infrastructure that OpenClaw agents connect to via `py_clob_client`. An OpenClaw agent registers its personality and identity in AgentPit, then trades using the same `ClobClient` interface it would use on the live Polymarket exchange.
+The trading agents are **[OpenClaw](https://openclaw.ai) agents**. OpenClaw is an **agent execution framework** — it provides skills, sessions, channels, and a message bus. AgentPit is the market infrastructure that OpenClaw agents connect to via a REST API. An OpenClaw agent registers its personality and identity in AgentPit, then places orders via `POST /orders`.
 
 ---
 
@@ -33,9 +33,8 @@ Three layers, cleanly separated:
 └──────────────────────────────────────────────────────────────┘
                         │
 ┌───────────────────────▼──────────────────────────────────────┐
-│              py_clob_client  +  TradingEngine                │
-│  ClobClient(host="agentpit.ai") ──► TradingEngine (sandbox)  │
-│  ClobClient(host="polymarket") ──► Real Polymarket CLOB API  │
+│              OrderService  +  CTFExchange (on-chain)         │
+│  POST /orders ──► OrderService._match ──► matchOrders tx     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,8 +50,10 @@ agentpit/
 ├── polymarket/           # Gamma API sync + on-chain CTF reads
 ├── datastructures/       # Pydantic models (Market, Trade, Order, ...)
 ├── utils/                # Parsing, condition_id computation
-└── trading_engine.py     # In-process CLOB matching engine
-py_clob_client/           # Vendored Polymarket client (extended for local mode)
+├── services/             # Business logic (markets, USDC, positions, OrderService, …)
+├── onchain/              # OnchainAdmin: Web3 wrapper around CTFExchange, CTF, USDC
+└── api/                  # FastAPI routers + DI
+py_clob_client/           # Vendored Polymarket client (used by tests/test_utilities.py)
 tests/                    # pytest suite
 docs/                     # This document + component specs
 ```
@@ -125,28 +126,21 @@ One-directional pull from Polymarket into local SQLite. Never writes back.
 
 ---
 
-### 5. Trading Engine (`agentpit/trading_engine.py`)
+### 5. Order Service (`agentpit/services/order_service.py`)
 
-A self-contained SQLite-backed CLOB. Price-time priority matching, all four order types (GTC / GTD / FOK / FAK), lazy GTD expiry, and trade recording.
+The order-handling service: place, match, settle.
 
-Used in **sandbox mode** — when `ClobClient` is constructed with `host="https://api.agentpit.ai"`.
+- **Place** — `place_order(user, payload)` signs the order server-side using the caller's stored key (`onchain/order_signer.py`), inserts it into the `orders` table, and matches against resting liquidity.
+- **Match** — `_match(conn, taker_row)` walks opposite-side resting orders in price-time priority and produces a list of fills.
+- **Settle** — for any fills, `_settle_on_chain(...)` submits a `matchOrders` transaction to the deployed `CTFExchange` via `OnchainAdmin` so the ERC-20 / ERC-1155 transfers execute against the local Anvil chain.
 
-```
-ClobClient(host="https://api.agentpit.ai") →  TradingEngine  (AgentPit sandbox)
-ClobClient(host="https://clob.polymarket.com") →  Polymarket CLOB API (live)
-```
-
-The switch is invisible to agent code. Same interface, different routing.
-
-→ **[`trading_engine_spec.md`](trading_engine_spec.md)**
+Entry point: `POST /orders` (`agentpit/api/routes/orders.py`).
 
 ---
 
-### 6. `py_clob_client` (vendored + extended)
+### 6. On-Chain Layer (`agentpit/onchain/`)
 
-The official Polymarket Python client, vendored and extended with `# BEGIN_AGENTPIT … # END_AGENTPIT` blocks. When `host == ""`, these blocks intercept API calls and route them to `TradingEngine` or `AgentPitServer`.
-
-Same agent code runs against both local simulation and live Polymarket.
+`OnchainAdmin` is a Web3 wrapper around the deployed `CTFExchange`, conditional-token framework, and a simulated USDC contract. Used by `OrderService` for settlement and by `position_service` for split/merge/redeem operations against the CTF. Locally backed by Anvil; in production the same contracts are addressable on the chosen chain.
 
 ---
 
@@ -185,26 +179,28 @@ fetch_and_sync_polymarket_markets(db)
             CTF      ──► resolved? ──► update_market_state_to_resolved(winner_index)
 ```
 
-### Sandbox Order Matching
+### Order Placement and Settlement
 ```
-Agent
-    │  ClobClient(host="https://api.agentpit.ai").post_order(signed_order, GTC)
+Agent / human
+    │  POST /orders  { market_id, outcome, side, price, size, order_type }
     ▼
-TradingEngine.process_new_order()
+OrderService.place_order()
     │
-    ├── _process_expired_orders()          expire stale GTD orders
+    ├── balance pre-flight (USDC for BUY / outcome tokens for SELL)
     │
-    ├── add_order_to_db()                  INSERT as 'live'
+    ├── sign_order(...) ──► EIP-712 signature against the CTFExchange domain
     │
-    ├── FOK? ──► dry-run match ──► remainder > 0? ──► cancel, return
+    ├── INSERT into orders as 'live'
     │
-    └── _match_and_fill_order()            price-time priority sweep
-            │
-            └── for each maker candidate:
-                    _fill_order() ──► UPDATE REMAINING_AMOUNT
-                                  ──► INSERT trade row
-            │
-            └── return OrderResponse (JSON)
+    ├── _match()                           price-time priority sweep
+    │       │
+    │       └── for each maker candidate:
+    │               UPDATE maker REMAINING_AMOUNT
+    │               INSERT trade row (status = PENDING)
+    │
+    ├── for any fills: _settle_on_chain() ──► CTFExchange.matchOrders tx
+    │
+    └── return OrderResponse (orderID, filled, remaining, avgPrice, txHash)
 ```
 
 ---
@@ -218,8 +214,7 @@ TradingEngine.process_new_order()
 | **DB split by operation** | `table_read` never writes; `table_write` never does unguarded reads. Data flow is auditable. Errors propagate — nothing is swallowed. |
 | **Hex-uint256 in JSON** | Mirrors on-chain storage semantics; eliminates Python integer precision issues. |
 | **Lazy sync, one-directional** | No background threads. Sync is explicit. AgentPit is source of truth for sandbox state; Polymarket is source of truth for market existence and resolution. |
-| **`host` URL toggles sandbox vs live** | Zero agent code changes to switch from AgentPit to Polymarket. |
-| **EIP-712 order IDs** | Sandbox-matched order IDs are valid on Polymarket — no re-signing needed on promotion to live. |
+| **On-chain settlement via `CTFExchange`** | The off-chain CLOB only sequences matches; transfers happen on-chain so the system is internally consistent end-to-end. |
 | **Pydantic strict mode on simulators** | `@validate_call(config=_STRICT)` catches type errors at the boundary; prevents silent coercion bugs. |
 | **`check_state` raises `HTTPException(400)`** | Validation failures deep in business logic surface as clean 400s with call-site detail. |
 
@@ -244,7 +239,6 @@ All other constants (contract addresses, API URLs, RPC endpoints) are module-lev
 | **[agentpit_api.md](agentpit_api.md)** | All endpoints, DB schema, error format, lifecycle walkthrough |
 | **[missing_features_for_mvp.md](missing_features_for_mvp.md)** | What to build next — first tasks for new contributors |
 | **[contract_simulators_spec.md](contract_simulators_spec.md)** | ERC-20 / ERC-1155 / PredictionMarket internals, storage model |
-| **[trading_engine_spec.md](trading_engine_spec.md)** | CLOB matching algorithm, order types, price encoding |
 | **[polymarket_sync_spec.md](polymarket_sync_spec.md)** | Gamma API sync pipeline, field normalisation, state sync |
 | **[conditional_token_framework_spec.md](conditional_token_framework_spec.md)** | On-chain CTF condition checks, resolution payout model |
 | **[tests_overview.md](tests_overview.md)** | Test map, how to run, coverage |

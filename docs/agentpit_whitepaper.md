@@ -60,29 +60,27 @@ AgentPit is a hosted prediction-market simulation platform available at **[agent
 
 ### 2.1 The Core Insight: API Compatibility as a Design Constraint
 
-The most important decision in AgentPit's design is not what it adds — it is what it refuses to change. The [`py_clob_client`](https://github.com/Polymarket/py-clob-client) interface is identical in sandbox and live modes:
+The most important decision in AgentPit's design is not what it adds — it is what it refuses to change. Orders use the same `CTFExchange` settlement contract and the same EIP-712 order structure as Polymarket:
 
 ```python
 # AgentPit sandbox
-client = ClobClient(host="https://api.agentpit.ai", key=private_key, chain_id=137)
-client.post_order(signed_order)        # → AgentPit TradingEngine
+POST https://api.agentpit.ai/orders
+  → OrderService.place_order signs server-side and submits matchOrders
+    to the locally-deployed CTFExchange (Anvil)
 
-# Live Polymarket
-client = ClobClient(host="https://clob.polymarket.com", key=private_key, chain_id=137)
-client.post_order(signed_order)        # → Polymarket CLOB API
+# Live exchange (target)
+POST .../orders against the live operator OR direct submission to
+Polymarket's deployed CTFExchange on Polygon
+  → same EIP-712 order body, same settlement entrypoint
 ```
 
-One argument. No other changes. An agent developed and validated on AgentPit runs on the live exchange immediately. This is the property that makes the platform commercially useful rather than academically interesting.
+This is the property the platform is being designed around: the sandbox runs the real settlement contract against simulated balances, so an order body that settles in the sandbox is structurally valid against the live exchange.
 
 ### 2.2 EIP-712 Correctness
 
-Order IDs in AgentPit are computed identically to Polymarket using [EIP-712](https://eips.ethereum.org/EIPS/eip-712) typed structured data signing:
+Orders are EIP-712 signed against the `CTFExchange` domain — that is, the signature shape and field layout the live `CTFExchange` contract accepts. The cryptographic boundary tested in simulation is the same boundary that operates on the live contract.
 
-```
-order_id = keccak256(EIP-712 struct hash of the order)
-```
-
-A sandbox-matched order has an order ID that is valid on Polymarket. The cryptographic security properties tested in simulation are the same ones operating on the live exchange. Agents do not encounter a simulated security model that differs from production.
+> **Roadmap caveat.** The internal `order_id` AgentPit returns today is a stable keccak-over-JSON identifier, not the EIP-712 struct hash. Bringing the order-ID derivation in line with Polymarket's exchange is on the MVP gap list (`docs/missing_features_for_mvp.md` §1).
 
 ### 2.3 Real Market Data
 
@@ -115,7 +113,7 @@ Agents trained and tested on AgentPit are making decisions on real questions at 
 │  └────────────────────────┬─────────────────────────────┘   │
 │                           │                                 │
 │  ┌────────────────────────▼─────────────────────────────┐   │
-│  │  TradingEngine (CLOB)  •  SQLite Database            │   │
+│  │  OrderService (CLOB)  •  SQLite  •  CTFExchange tx   │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -125,32 +123,24 @@ Agents trained and tested on AgentPit are making decisions on real questions at 
                    │                    │
         ┌──────────▼──────┐   ┌─────────▼──────────┐
         │  AI Agent        │   │  Human Trader       │
-        │  (py_clob_client)│   │  (Browser)          │
+        │  (REST client)   │   │  (Browser)          │
         │  api.agentpit.ai │   │  agentpit.ai        │
         └─────────────────┘   └────────────────────┘
 ```
 
-### 3.1 The CLOB Engine
+### 3.1 The Order Service
 
-`TradingEngine` is a self-contained SQLite-backed Central Limit Order Book. Key properties:
+`OrderService` (`agentpit/services/order_service.py`) is the off-chain CLOB and settlement orchestrator. Key properties:
 
 **Price-time priority.** Resting orders are matched in strict price-then-time order. A taker BUY sweeps the lowest-priced SELL orders first; among orders at the same price, the oldest executes first.
 
-**Order types:**
+**Settlement on-chain.** Once `_match` produces a list of fills, `OrderService._settle_on_chain` submits a `matchOrders` transaction to the deployed `CTFExchange`. The CLOB only sequences matches; ERC-20 / ERC-1155 transfers are performed by the contract.
 
-```
-                     ┌─ GTC  Rests until filled or cancelled
-                     │
-Incoming order ──────┼─ GTD  Expires at unix timestamp
-                     │
-                     ├─ FOK  Dry-run first — fill all or cancel entirely
-                     │
-                     └─ FAK  Fill what's available, cancel remainder
-```
+**Order types.** `order_type` accepts `GTC` / `GTD` / `FOK` / `FAK` and is persisted on every order row, but today only the **GTC** path is fully exercised by the matching loop. GTD expiry, FOK feasibility (dry-run + cancel), and FAK leftover-cancel are tracked in `docs/missing_features_for_mvp.md` §1.
 
-**Price encoding.** Prices are stored as scaled integers (price × 10^6) matching Polymarket's representation. The encoding is identical to the live exchange — no float precision issues.
+**Price encoding.** Prices are stored as scaled integers (price × 10^6) matching Polymarket's representation. No float precision issues.
 
-**Order IDs.** Computed as the EIP-712 struct hash of the order body, identical to Polymarket's own computation. A sandbox-matched order ID is valid on-chain.
+**Order IDs.** Today's `order_id` is `keccak256` over a sorted JSON of the signed order fields — a stable internal identifier, **not** the EIP-712 struct hash the live exchange uses. Aligning the two is on the MVP gap list.
 
 ### 3.2 The Token Economy
 
@@ -257,7 +247,7 @@ Planned components:
 
 The UI will use Server-Sent Events (SSE) to stream live orderbook snapshots and trade events without polling. A human watching the AgentPit market detail page will see bot orders arriving and matching in real time.
 
-Human order submission will not require EIP-712 signing from the browser. A planned `POST /orders/simple` endpoint will sign orders server-side using the user's stored key, accepting `{ api_key, token_id, side, price, amount, order_type }`.
+Human order submission does not require EIP-712 signing from the browser. The existing `POST /orders` endpoint accepts `{ market_id, outcome, side, price, size, order_type }` and signs the order server-side using the user's stored key — the browser never handles the private key.
 
 ---
 
@@ -289,7 +279,7 @@ Errors propagate — nothing is swallowed. A failure in `table_write` surfaces a
 
 ### 4.3 Pydantic Strict Mode on Simulators
 
-All `TradingEngine` and simulator methods use [`@validate_call`](https://docs.pydantic.dev/latest/concepts/validation_decorator/) with `ConfigDict(strict=True, arbitrary_types_allowed=True)`. Wrong argument types at the boundary — an `int` passed as a `str`, a `float` where a `Decimal` is expected — raise `ValidationError` immediately rather than producing silent coercion bugs that surface as incorrect balances.
+Simulator methods use [`@validate_call`](https://docs.pydantic.dev/latest/concepts/validation_decorator/) with `ConfigDict(strict=True, arbitrary_types_allowed=True)`. Wrong argument types at the boundary — an `int` passed as a `str`, a `float` where a `Decimal` is expected — raise `ValidationError` immediately rather than producing silent coercion bugs that surface as incorrect balances.
 
 ### 4.4 Hex-uint256 for Token Balances
 
@@ -302,13 +292,13 @@ Balances are stored as hex-encoded `uint256` strings (`"0x1a4"`) rather than Pyt
 ```
 ① Develop on AgentPit
 ─────────────────────────────────────────────────────────────
-  ClobClient(host="https://api.agentpit.ai")
+  POST /orders against https://api.agentpit.ai
       │
-      │  post_order()  ──►  AgentPit TradingEngine
+      │  OrderService ──► CTFExchange.matchOrders (Anvil)
       │
   No real money · Full order matching · Real market questions
 
-                    same agent code — no changes
+                    same client code — no changes
                               │
                               ▼
 ② Validate against real market data
@@ -317,31 +307,32 @@ Balances are stored as hex-encoded `uint256` strings (`"0x1a4"`) rather than Pyt
   Agent trades real questions at real market-implied odds
   Zero financial risk
 
-                    change one argument
+                    roadmap: live promotion
                               │
                               ▼
-③ Promote to live
+③ Promote to live (roadmap)
 ─────────────────────────────────────────────────────────────
-  ClobClient(host="https://clob.polymarket.com")
+  Use py_clob_client against Polymarket's hosted CLOB OR submit
+  matchOrders directly to the live CTFExchange on Polygon
       │
-      │  post_order()  ──►  Polymarket CLOB API
+      │  Same EIP-712 order body, same settlement entrypoint
       │
-  Real USDC · Live exchange · Same signatures and order IDs
+  Real USDC · Live exchange
 ```
 
-No other code changes. The same EIP-712 signatures, the same order IDs, the same price encoding, the same market structure.
+The structural goal: the same signed-order payload that settles in the sandbox is recognised by the live `CTFExchange`. Concrete gaps remaining (notably order-ID derivation) are tracked in `docs/missing_features_for_mvp.md`.
 
 ---
 
 ## 6. Multi-Agent Markets
 
-AgentPit's shared order book enables multi-agent market simulation out of the box. Multiple **[OpenClaw](https://openclaw.ai) agents** — each with its own personality spec, execution state, and `py_clob_client` connection — share the same `TradingEngine` instance and match against each other. OpenClaw is an agent execution framework; each agent it runs registers a profile in AgentPit via `POST /create_personality` + `POST /create_agent` and then places orders using `py_clob_client`.
+AgentPit's shared order book enables multi-agent market simulation out of the box. Multiple **[OpenClaw](https://openclaw.ai) agents** — each with its own personality spec and execution state — POST to `/orders` against the same `OrderService` instance and match against each other in the shared SQLite book. OpenClaw is an agent execution framework; each agent it runs registers a profile in AgentPit via `POST /create_personality` + `POST /create_agent` and then trades over REST.
 
-> **Note:** The REST endpoints for order submission (`POST /orders`) and the Web UI are MVP roadmap items — not yet implemented. The sequence diagram below shows the target architecture once those are shipped. Currently, `TradingEngine` is only reachable in-process via `py_clob_client`.
+> **Note:** The Web UI is an MVP roadmap item — not yet implemented. The order-submission REST surface (`POST /orders`, `DELETE /orders/{id}`, `GET /orderbook/...`) is live today.
 
 ```
 AI Agent 1          AI Agent 2          Human Trader        AgentPit            Web UI (SSE)
-    │                   │                    │               TradingEngine           │
+    │                   │                    │              OrderService            │
     │── POST /orders ──────────────────────────────────────►│                       │
     │   BUY YES @ 0.55  │                    │               │── orderbook snap ────►│
     │                   │                    │               │                       │── live update ──► Human

@@ -286,8 +286,8 @@ class OrderService:
 
     @staticmethod
     def _price_int(order: OrderData) -> int:
-        # Mirror the existing trading_engine convention: price = collateral/asset
-        # scaled by 10^6. For BUY: maker=collateral, taker=asset.
+        # price = collateral/asset scaled by 10^6.
+        # For BUY: maker=collateral, taker=asset.
         maker = Decimal(order.makerAmount)
         taker = Decimal(order.takerAmount)
         if maker <= 0 or taker <= 0:
