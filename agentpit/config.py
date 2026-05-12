@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,4 +18,35 @@ class Settings(BaseSettings):
     )
     cors_origins: list[str] = Field(
         default=["http://localhost:5173"], validation_alias="AGENTPIT_CORS_ORIGINS"
+    )
+
+    # Auth
+    jwt_secret: str = Field(
+        default="dev-only-insecure-secret-change-me",
+        validation_alias="JWT_SECRET",
+    )
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_expires_seconds: int = Field(
+        default=60 * 60 * 24, validation_alias="JWT_EXPIRES_SECONDS"
+    )
+
+    # On-chain stack
+    deployment_path: Path = Field(
+        default=Path("deployments/local.json"),
+        validation_alias="AGENTPIT_DEPLOYMENT_PATH",
+    )
+    operator_private_key: str | None = Field(
+        default=None, validation_alias="PK"
+    )
+    rpc_url_override: str | None = Field(
+        default=None, validation_alias="RPC_URL"
+    )
+    onchain_disabled: bool = Field(
+        default=False, validation_alias="AGENTPIT_ONCHAIN_DISABLED"
+    )
+    signup_gas_grant_wei: int = Field(
+        default=10**18, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
+    )
+    tx_confirmations_timeout_s: int = Field(
+        default=30, validation_alias="AGENTPIT_TX_TIMEOUT_S"
     )

@@ -145,8 +145,41 @@ CTF_ABI = [{"constant": True, "inputs": [{"name": "owner", "type": "address"}, {
         {"indexed": False, "name": "value", "type": "string"}, {"indexed": True, "name": "id", "type": "uint256"}],
                                                          "name": "URI", "type": "event"}]
 
-CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-POLYGON_RPC = "https://tenderly.rpc.polygon.community"
+_FALLBACK_CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+
+
+def _ctf_contract():
+    """Build a CTF contract handle pointing at the local anvil deployment.
+
+    We read RPC URL + CTF address from agentpit/deployments/local.json so the
+    polymarket sync uses the same fork the rest of the backend uses. This
+    removes the dependency on a public Tenderly RPC that returns flaky
+    -32603 'Internal server error' responses under load.
+    """
+    from agentpit.config import Settings
+    from agentpit.onchain.deployment import Deployment
+
+    settings = Settings()
+    if settings.deployment_path.exists():
+        deployment = Deployment.load(settings.deployment_path)
+        rpc_url = settings.rpc_url_override or deployment.rpc_url
+        ctf_address = deployment.ctf
+    else:
+        # No local stack — fall back to the well-known Polygon mainnet
+        # address. Caller still needs RPC_URL set; fail fast with a clear
+        # message rather than silently hitting a public RPC.
+        rpc_url = settings.rpc_url_override
+        if not rpc_url:
+            raise RuntimeError(
+                "ConditionalTokenFramework needs deployments/local.json or "
+                "RPC_URL set; neither is available"
+            )
+        ctf_address = _FALLBACK_CTF_ADDRESS
+
+    web3 = Web3(Web3.HTTPProvider(rpc_url))
+    return web3.eth.contract(
+        address=Web3.to_checksum_address(ctf_address), abi=CTF_ABI
+    )
 
 
 class ConditionalTokenFramework:
@@ -157,12 +190,7 @@ class ConditionalTokenFramework:
 
     @staticmethod
     def get_outcome_slot_count(condition_id: ConditionId) -> int:
-
-        web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
-
-        contract_address = Web3.to_checksum_address(CTF_ADDRESS)
-        contract = web3.eth.contract(address=contract_address, abi=CTF_ABI)
-
+        contract = _ctf_contract()
         condition_id_bytes = hex2bytes(condition_id.value)
         return contract.functions.getOutcomeSlotCount(condition_id_bytes).call()
 
@@ -171,10 +199,7 @@ class ConditionalTokenFramework:
             condition_id: ConditionId
     ) -> OnchainResolutionStatus:
 
-        web3 = Web3(Web3.HTTPProvider(POLYGON_RPC))
-
-        contract_address = Web3.to_checksum_address(CTF_ADDRESS)
-        contract = web3.eth.contract(address=contract_address, abi=CTF_ABI)
+        contract = _ctf_contract()
 
         # Check if resolved
         # condition_id must be bytes32

@@ -268,7 +268,7 @@ def fetch_is_polymarket_market_closed(condition_id: ConditionId) -> bool:
 
     url = f"{CLOB_MARKET_URL}/{condition_id.value}"
     raw = get(url)
-    logger.info("CLOB single-market fetch raw result: %s", raw)
+    logger.debug("CLOB single-market fetch raw result: %s", raw)
 
     # Normalize shape.
     market_raw: dict | None
@@ -309,7 +309,7 @@ def fetch_polymarket_market(
     # Gamma expects the bare conditionId string
     url = f"{host}/markets?conditionId={condition_id.value}"
     result = get(url)
-    logger.info("Polymarket market fetch raw result: %s", result)
+    logger.debug("Polymarket market fetch raw result: %s", result)
 
     # Gamma returns a list; guard for unexpected shapes
     markets: list[dict]
@@ -378,16 +378,28 @@ def fetch_and_sync_polymarket_markets(
 
 def create_polymarket_markets_if_needed(db: Connection, pm_markets: list[dict]) -> list[Any]:
 
-    created_markets : list[Market] = []
+    created_markets: list[Market] = []
+    failed = 0
     for pm_market in pm_markets:
-        market = create_polygon_market_if_does_not_exist(db, pm_market)
+        question = pm_market.get("question") or "<no question>"
+        try:
+            market = create_polygon_market_if_does_not_exist(db, pm_market)
+        except Exception as exc:
+            # One bad market (e.g. RPC blip on getOutcomeSlotCount) shouldn't
+            # kill the whole sync batch. Keep the message single-line; the
+            # stack trace lives at debug level for when you actually want it.
+            failed += 1
+            logger.warning("Skip %r (%s)", question, exc.__class__.__name__)
+            logger.debug("Skip %r details", question, exc_info=True)
+            continue
         if market is not None:
             created_markets.append(market)
 
     logger.info(
-        "Synced %d/%d Polymarket markets locally",
+        "Synced %d/%d Polymarket markets locally (%d failed)",
         len(created_markets),
         len(pm_markets),
+        failed,
     )
     return created_markets
 
@@ -407,7 +419,7 @@ def create_polygon_market_if_does_not_exist(db: Connection, pm_market: dict) -> 
             request,
             True
         )
-        logger.info("Added market: %s", pm_market)
+        logger.info("Added market: %s", request.question)
         return market
 
 

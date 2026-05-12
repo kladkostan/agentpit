@@ -5,8 +5,7 @@ from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
-from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int, parse_32b_hex_private_key
-from .table_utils import TableUtils
+from agentpit.utils.parse import parse_32b_hex_private_key
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.user import User
@@ -76,79 +75,15 @@ class TableRead:
 
         return MarketState(row[0])
 
-    @staticmethod
-    def get_erc20_asset_ownership(
-        db: sqlite3.Connection, eth_address: str, asset_address: str
-    ) -> int:
-        norm_eth = normalize_eth_address(eth_address)
-        norm_asset = normalize_eth_address(asset_address)
-
-        # Use shared strict loader; raises on any JSON/type corruption.
-        ownership_map = TableUtils.load_erc20_ownership_map(db, norm_eth)
-
-        # Exact canonical key
-        if norm_asset in ownership_map:
-            return hex_u256_to_int(ownership_map[norm_asset])
-
-        # Fallback for older/non-canonical data, but still strict on value
-        for k, v in ownership_map.items():
-            nk = normalize_eth_address(k)
-            if nk == norm_asset:
-                return hex_u256_to_int(v)
-
-        return 0
-
-    @staticmethod
-    def get_erc1155_asset_ownership(
-        db: sqlite3.Connection, eth_address: str, token_id: str
-    ) -> int:
-        norm_eth = normalize_eth_address(eth_address)
-
-        # Use shared strict loader; raises on any JSON/type corruption.
-        ownership_map = TableUtils.load_erc1155_ownership_map(db, norm_eth)
-
-        # For ERC1155, keys in the map are token IDs (opaque strings), not ETH addresses.
-        if token_id in ownership_map:
-            return hex_u256_to_int(ownership_map[token_id])
-
-        return 0
 
     @staticmethod
     def get_private_key_for_api_key(
         db: sqlite3.Connection, api_key: str
-    ) -> LocalAccount:
-        row = db.execute(
-            "SELECT ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
-            (api_key,),
-        ).fetchone()
+    ) -> LocalAccount | None:
+        """Return the eth account for an API key, or None if no user matches.
 
-        if row is not None:
-            # Row exists: enforce "create once" => never rotate here.
-            # parse_32b_hex_private_key raises on any error.
-            existing_key = parse_32b_hex_private_key(row[0])
-            return Account.from_key(existing_key)
-
-        # No row: generate once and insert. Any DB / Web3 error propagates.
-        acct: LocalAccount = Account.create()
-        key_hex: str = Web3.to_hex(acct.key)
-        user_id: str = str(uuid.uuid4())
-
-        with db:
-            db.execute(
-                """
-                INSERT INTO users (USER_ID, API_KEY, ETH_PRIVATE_KEY)
-                VALUES (?, ?, ?)
-                """,
-                (user_id, api_key, key_hex),
-            )
-
-        return acct
-
-    @staticmethod
-    def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str | None:
-        """Return the eth address for an API key, or None if no user has been created yet.
-
-        Read-only — never writes to the database.
+        Read-only — never inserts. Anonymous user creation is gone now that auth
+        is required: a request with an unknown api_key resolves to None.
         """
         row = db.execute(
             "SELECT ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
@@ -157,12 +92,16 @@ class TableRead:
         if row is None:
             return None
         existing_key = parse_32b_hex_private_key(row[0])
-        return Account.from_key(existing_key).address
+        return Account.from_key(existing_key)
 
     @staticmethod
-    def get_eth_address_for_api_key_creating_if_needed(db: sqlite3.Connection, api_key: str) -> str:
-        acct = TableRead.get_private_key_for_api_key(db, api_key)
-        return acct.address
+    def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str | None:
+        """Return the eth address for an API key, or None if no user matches."""
+        row = db.execute(
+            "SELECT ETH_ADDRESS FROM users WHERE API_KEY = ? LIMIT 1",
+            (api_key,),
+        ).fetchone()
+        return row[0] if row else None
 
     @staticmethod
     def get_agent_by_id(db: sqlite3.Connection, agent_id: str) -> dict | None:
@@ -187,51 +126,60 @@ class TableRead:
             "todo": json.loads(todo_json),
         }
 
+    _USER_COLS = (
+        "USER_ID, EMAIL, HANDLE, ETH_ADDRESS, ETH_PRIVATE_KEY, "
+        "API_KEY, ONBOARDED_AT, CREATED_AT"
+    )
+
     @staticmethod
-    def get_user_by_userid(db: sqlite3.Connection, user_id: str) -> User | None:
-        """
-        Fetch a user by their user_id.
-        """
-        row = db.execute(
-            "SELECT API_KEY, ETH_PRIVATE_KEY FROM users WHERE USER_ID = ? LIMIT 1",
-            (user_id,),
-        ).fetchone()
-
-        if row is None:
-            return None
-
-        api_key_val, eth_private_key = row
+    def _row_to_user(row: tuple) -> User:
+        (user_id, email, handle, eth_address, eth_private_key,
+         api_key, onboarded_at, created_at) = row
         existing_key = parse_32b_hex_private_key(eth_private_key)
         acct = Account.from_key(existing_key)
-
         return User(
             user_id=user_id,
+            email=email,
             eth_key=acct,
-            api_key=api_key_val
+            eth_address=eth_address,
+            api_key=api_key,
+            handle=handle,
+            onboarded_at=onboarded_at,
+            created_at=created_at if created_at is not None else 0,
         )
+
+    @staticmethod
+    def get_user_by_userid(db: sqlite3.Connection, user_id: str) -> User | None:
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE USER_ID = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
 
     @staticmethod
     def get_user_by_api_key(db: sqlite3.Connection, api_key: str) -> User | None:
-        """
-        Fetch a user by their API key.
-        """
         row = db.execute(
-            "SELECT USER_ID, ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE API_KEY = ? LIMIT 1",
             (api_key,),
         ).fetchone()
+        return TableRead._row_to_user(row) if row else None
 
-        if row is None:
-            return None
+    @staticmethod
+    def get_user_by_email(db: sqlite3.Connection, email: str) -> User | None:
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE EMAIL = ? LIMIT 1",
+            (email,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
 
-        user_id_val, eth_private_key = row
-        existing_key = parse_32b_hex_private_key(eth_private_key)
-        acct = Account.from_key(existing_key)
-
-        return User(
-            user_id=user_id_val,
-            eth_key=acct,
-            api_key=api_key
-        )
+    @staticmethod
+    def get_password_hash_by_email(db: sqlite3.Connection, email: str) -> str | None:
+        """Used by login — returns the bcrypt hash so the service can verify."""
+        row = db.execute(
+            "SELECT PASSWORD_HASH FROM users WHERE EMAIL = ? LIMIT 1",
+            (email,),
+        ).fetchone()
+        return row[0] if row else None
 
     @staticmethod
     def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:

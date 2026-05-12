@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import time as _time
 import uuid
 from web3 import Web3
 from eth_account import Account
@@ -10,43 +11,55 @@ from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
-from agentpit.utils.condition_id import compute_condition_id
 
 
 class TableWrite:
     @staticmethod
-    def create_user(db: sqlite3.Connection, user_id: str) -> str:
-        acct: LocalAccount = Account.create()
-        key_hex: str = Web3.to_hex(acct.key)
-        api_key: str = str(uuid.uuid4())
+    def create_user(
+        db: sqlite3.Connection,
+        email: str,
+        password_hash: str,
+        handle: str | None = None,
+    ) -> tuple[str, LocalAccount, str]:
+        """Create a new user with an auto-generated eth keypair.
 
-        db.execute(
-            """
-            INSERT INTO users (USER_ID, API_KEY, ETH_PRIVATE_KEY)
-            VALUES (?, ?, ?)
-            """,
-            (user_id, api_key, key_hex),
-        )
-        return api_key
-
-    @staticmethod
-    def create_anonymous_user_for_api_key(db: sqlite3.Connection, api_key: str) -> str:
-        """Insert an anonymous user row for an API key and return its eth address.
-
-        Caller must have verified that no row exists for this api_key. The
-        USER_ID is generated as a uuid since this user came in without a handle.
+        Returns (user_id, eth_account, api_key). The caller is responsible for
+        running on-chain onboarding (faucet drip + approvals) and then calling
+        :func:`mark_user_onboarded` once those txns confirm.
         """
         acct: LocalAccount = Account.create()
         key_hex: str = Web3.to_hex(acct.key)
         user_id: str = str(uuid.uuid4())
+        api_key: str = str(uuid.uuid4())
+        created_at = int(_time.time())
+
         db.execute(
             """
-            INSERT INTO users (USER_ID, API_KEY, ETH_PRIVATE_KEY)
-            VALUES (?, ?, ?)
+            INSERT INTO users (
+                USER_ID, EMAIL, PASSWORD_HASH, HANDLE,
+                ETH_ADDRESS, ETH_PRIVATE_KEY, API_KEY,
+                ONBOARDED_AT, CREATED_AT
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
             """,
-            (user_id, api_key, key_hex),
+            (
+                user_id,
+                email,
+                password_hash,
+                handle,
+                acct.address,
+                key_hex,
+                api_key,
+                created_at,
+            ),
         )
-        return acct.address
+        return user_id, acct, api_key
+
+    @staticmethod
+    def mark_user_onboarded(db: sqlite3.Connection, user_id: str) -> None:
+        db.execute(
+            "UPDATE users SET ONBOARDED_AT = ? WHERE USER_ID = ?",
+            (int(_time.time()), user_id),
+        )
 
     @staticmethod
     def create_personality(
@@ -83,11 +96,12 @@ class TableWrite:
             request: CreateMarketRequest, is_polygon_market: bool
     ) -> Market:
 
-        if not is_polygon_market:
-            condition_id = compute_condition_id(request.question, len(request.erc1155_tokens))
-        else:
-            check_state(request.condition_id is not None)
-            condition_id = request.condition_id
+        # The local create-market path now sets `request.condition_id` upstream
+        # (in MarketService) using the on-chain `getConditionId` view, so by the
+        # time we get here the condition_id is always present.
+        check_state(request.condition_id is not None,
+                    "request.condition_id must be set before TableWrite.create_market")
+        condition_id = request.condition_id
 
 
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
@@ -349,94 +363,30 @@ class TableWrite:
 
     @staticmethod
     def cancel_market(db: sqlite3.Connection, market_id: int) -> tuple[Market, int]:
-        """
-        Cancel a market and refund all users who hold complete sets.
+        """Cancel a market.
 
-        Args:
-            db: Database connection
-            market_id: Market ID to cancel
-
-        Returns:
-            Tuple of (updated Market object, number of refunds processed)
-
-        Raises:
-            ValueError: If market not found or already resolved/cancelled
+        Refund logic is intentionally not implemented here: with on-chain CTF
+        positions, users recover their collateral via the standard merge /
+        redeem path on the CTF contract directly, not via the backend.
         """
         from agentpit.db.table_read import TableRead
-        from agentpit.contract_simulators.erc20_simulator import ERC20Simulator
-        from agentpit.contract_simulators.contract_addresses import EASYNET_USDC_TOKEN_ADDRESS
-        from agentpit.db.table_utils import TableUtils
-        from agentpit.utils.parse import normalize_eth_address, hex_u256_to_int
-        from web3 import Web3
 
-        # Get current market
         market = TableRead.read_market(db, market_id)
         if not market:
             raise ValueError(f"Market {market_id} not found")
 
-        # Check state - cannot cancel if already resolved or cancelled
         if market.market_state == MarketState.RESOLVED:
             raise ValueError(f"Cannot cancel market {market_id}: already resolved")
         if market.market_state == MarketState.CANCELLED:
             raise ValueError(f"Market {market_id} is already cancelled")
 
-        # Get all users with positions in this market
-        # We need to scan all ERC1155 ownership records
-        cursor = db.execute("SELECT ETH_ADDRESS, OWNERSHIP FROM erc1155_token_ownership")
-
-        refunds_processed = 0
-        token_ids = [token_id for token_id, _ in market.erc1155_tokens]
-
-        for row in cursor.fetchall():
-            eth_address, ownership_json = row
-            if not ownership_json:
-                continue
-
-            ownership_map = json.loads(ownership_json)
-
-            # Check if user has complete sets for this market
-            # A complete set means having at least 1 of each outcome token
-            min_complete_sets = None
-            for token_id in token_ids:
-                if token_id not in ownership_map:
-                    min_complete_sets = 0
-                    break
-                balance = hex_u256_to_int(ownership_map[token_id])
-                if min_complete_sets is None:
-                    min_complete_sets = balance
-                else:
-                    min_complete_sets = min(min_complete_sets, balance)
-
-            if min_complete_sets and min_complete_sets > 0:
-                # Refund complete sets
-                # Burn all the tokens
-                for token_id in token_ids:
-                    current_balance = hex_u256_to_int(ownership_map[token_id])
-                    new_balance = current_balance - min_complete_sets
-                    ownership_map[token_id] = Web3.to_hex(new_balance).lower()
-
-                # Update ownership map
-                TableUtils.store_erc1155_ownership_map(db, eth_address, ownership_map)
-
-                # Mint USDC refund
-                ERC20Simulator.mint(
-                    db,
-                    eth_address=eth_address,
-                    asset_address=EASYNET_USDC_TOKEN_ADDRESS,
-                    value=min_complete_sets,
-                )
-
-                refunds_processed += 1
-
-        # Update market state to CANCELLED
         db.execute(
             "UPDATE markets SET MARKET_STATE = ? WHERE MARKET_ID = ?",
-            (MarketState.CANCELLED.value, market_id)
+            (MarketState.CANCELLED.value, market_id),
         )
 
-        # Return updated market
         market.market_state = MarketState.CANCELLED
-        return market, refunds_processed
+        return market, 0
 
     @staticmethod
     def update_market_state_to_resolved_if_needed(

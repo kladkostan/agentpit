@@ -27,9 +27,22 @@ class PersonalityNotFoundError(NotFoundError):
 
 
 class UserAlreadyExistsError(AlreadyExistsError):
-    def __init__(self, user_id: str):
-        super().__init__(f"User '{user_id}' already exists")
-        self.user_id = user_id
+    def __init__(self, identifier: str):
+        super().__init__(f"User '{identifier}' already exists")
+        self.identifier = identifier
+
+
+class UserNotFoundError(NotFoundError):
+    def __init__(self, message: str = "User not found"):
+        super().__init__(message)
+
+
+class InvalidCredentialsError(BusinessRuleError):
+    pass
+
+
+class OnboardingError(BusinessRuleError):
+    """Raised when on-chain onboarding fails after the DB row is created."""
 
 
 class AgentAlreadyExistsError(AlreadyExistsError):

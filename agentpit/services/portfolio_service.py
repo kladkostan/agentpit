@@ -1,70 +1,51 @@
-import sqlite3
-
-from agentpit.contract_simulators.contract_addresses import EASYNET_USDC_TOKEN_ADDRESS
-from agentpit.contract_simulators.erc20_simulator import ERC20Simulator
 from agentpit.datastructures.portfolio_response import PortfolioResponse, Position
 from agentpit.datastructures.transaction_history_response import TransactionHistoryResponse
+from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
-from agentpit.db.table_utils import TableUtils
-from agentpit.services.accounts import get_or_create_eth_address
-from agentpit.utils.parse import hex_u256_to_int, normalize_eth_address
+from agentpit.onchain.admin import OnchainAdmin
 
 
 class PortfolioService:
-    def __init__(self, db: DbSession):
+    """Reads on-chain balances and joins them with the local markets table."""
+
+    def __init__(self, db: DbSession, onchain: OnchainAdmin | None):
         self._db = db
+        self._onchain = onchain
 
-    def get_portfolio(self, api_key: str) -> PortfolioResponse:
-        eth_address = get_or_create_eth_address(self._db, api_key)
-        norm_address = normalize_eth_address(eth_address)
-
+    def get_portfolio(self, user: User) -> PortfolioResponse:
+        usdc_balance = 0
+        positions: list[Position] = []
         with self._db.read() as conn:
-            usdc_balance = ERC20Simulator.get_balance(
-                conn,
-                eth_address=eth_address,
-                asset_address=EASYNET_USDC_TOKEN_ADDRESS,
-            )
+            all_markets, _ = TableRead.list_markets(conn, limit=10000)
 
-            try:
-                ownership_map = TableUtils.load_erc1155_ownership_map(conn, norm_address)
-            except sqlite3.OperationalError:
-                ownership_map = {}
-
-            positions: list[Position] = []
-            if ownership_map:
-                # No joinable token->market table exists, so scan markets and
-                # filter by token ids the user actually owns.
-                all_markets, _ = TableRead.list_markets(conn, limit=10000)
-                for market in all_markets:
-                    for idx, (token_id, label) in enumerate(market.erc1155_tokens):
-                        if token_id not in ownership_map:
-                            continue
-                        balance = hex_u256_to_int(ownership_map[token_id])
-                        if balance <= 0:
-                            continue
-                        positions.append(
-                            Position(
-                                market_id=market.market_id,
-                                question=market.question,
-                                token_id=token_id,
-                                outcome_label=label,
-                                outcome_index=idx,
-                                balance=balance,
-                            )
+        if self._onchain is not None:
+            usdc_balance = self._onchain.usd_balance(user.eth_address)
+            for market in all_markets:
+                for idx, (token_id, label) in enumerate(market.erc1155_tokens):
+                    bal = self._onchain.ctf_balance(user.eth_address, int(token_id))
+                    if bal <= 0:
+                        continue
+                    positions.append(
+                        Position(
+                            market_id=market.market_id,
+                            question=market.question,
+                            token_id=token_id,
+                            outcome_label=label,
+                            outcome_index=idx,
+                            balance=bal,
                         )
-
+                    )
         return PortfolioResponse(
-            eth_address=eth_address,
+            eth_address=user.eth_address,
             usdc_balance=usdc_balance,
             positions=positions,
         )
 
-    def get_transaction_history(self, api_key: str) -> TransactionHistoryResponse:
-        eth_address = get_or_create_eth_address(self._db, api_key)
+    def get_transaction_history(self, user: User) -> TransactionHistoryResponse:
         with self._db.read() as conn:
-            transactions = TableRead.get_transaction_history(conn, api_key)
+            transactions = TableRead.get_transaction_history(conn, user.api_key)
         return TransactionHistoryResponse(
-            eth_address=eth_address,
+            eth_address=user.eth_address,
             transactions=transactions,
         )

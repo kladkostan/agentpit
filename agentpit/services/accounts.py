@@ -1,20 +1,16 @@
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
-from agentpit.db.table_write import TableWrite
+from agentpit.domain.exceptions import UserNotFoundError
 
 
-def get_or_create_eth_address(db: DbSession, api_key: str) -> str:
-    """Resolve the eth address for an api_key, creating an anonymous user if needed.
+def get_eth_address_for_api_key(db: DbSession, api_key: str) -> str:
+    """Look up the eth address for an API key. Raises if no user matches.
 
-    Uses double-checked locking: the read lock fast path covers the common
-    case (user already exists) without ever acquiring the write lock.
+    Anonymous user creation has been removed — every request must come from a
+    registered, JWT-authenticated user.
     """
     with db.read() as conn:
-        existing = TableRead.get_eth_address_for_api_key(conn, api_key)
-        if existing is not None:
-            return existing
-    with db.write() as conn:
-        existing = TableRead.get_eth_address_for_api_key(conn, api_key)
-        if existing is not None:
-            return existing
-        return TableWrite.create_anonymous_user_for_api_key(conn, api_key)
+        addr = TableRead.get_eth_address_for_api_key(conn, api_key)
+    if addr is None:
+        raise UserNotFoundError(f"no user for api_key {api_key!r}")
+    return addr

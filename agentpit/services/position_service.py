@@ -1,178 +1,108 @@
-from web3 import Web3
-
-from agentpit.contract_simulators.contract_addresses import EASYNET_USDC_TOKEN_ADDRESS
-from agentpit.contract_simulators.erc20_simulator import ERC20Simulator
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.position_response import PositionResponse
-from agentpit.datastructures.redeem_position_request import RedeemPositionRequest
 from agentpit.datastructures.redeem_position_response import RedeemPositionResponse
-from agentpit.datastructures.split_position_request import SplitPositionRequest
+from agentpit.datastructures.split_position_request import (
+    MergePositionRequest,
+    SplitPositionRequest,
+)
+from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
-from agentpit.db.table_utils import TableUtils
-from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
     InsufficientBalanceError,
     MarketNotFoundError,
     MarketStateError,
 )
-from agentpit.services.accounts import get_or_create_eth_address
-from agentpit.utils.parse import hex_u256_to_int, normalize_eth_address
+from agentpit.onchain.admin import OnchainAdmin
+from agentpit.onchain.user_wallet import send_user_tx
+from agentpit.utils.parse import hex2bytes
+
+_ZERO_BYTES32 = b"\x00" * 32
 
 
 class PositionService:
-    """Burns USDC for outcome tokens (split), the inverse (merge), and post-resolution payout (redeem)."""
+    """User-signed split / merge / redeem against the on-chain CTF contract."""
 
-    def __init__(self, db: DbSession):
+    def __init__(self, db: DbSession, onchain: OnchainAdmin | None):
         self._db = db
+        self._onchain = onchain
 
-    def split(self, market_id: int, payload: SplitPositionRequest) -> PositionResponse:
-        eth_address = get_or_create_eth_address(self._db, payload.api_key)
-        collateral_amount = payload.amount
+    def split(
+        self, user: User, market_id: int, payload: SplitPositionRequest
+    ) -> PositionResponse:
+        market = self._require_market(market_id)
+        if self._onchain is None:
+            raise MarketStateError("on-chain integration disabled")
+        condition_id = hex2bytes(market.condition_id.value)
+        bal = self._onchain.usd_balance(user.eth_address)
+        if bal < payload.amount:
+            raise InsufficientBalanceError(f"need {payload.amount}, have {bal}")
+        self._onchain.user_split_position(user.eth_key, condition_id, payload.amount)
+        return self._snapshot(user, market, locked=payload.amount)
 
-        with self._db.write() as conn:
-            market = TableRead.read_market(conn, market_id)
-            if market is None:
-                raise MarketNotFoundError(market_id)
-
-            try:
-                ERC20Simulator.burn(
-                    conn,
-                    eth_address=eth_address,
-                    asset_address=EASYNET_USDC_TOKEN_ADDRESS,
-                    value=collateral_amount,
+    def merge(
+        self, user: User, market_id: int, payload: MergePositionRequest
+    ) -> PositionResponse:
+        market = self._require_market(market_id)
+        if self._onchain is None:
+            raise MarketStateError("on-chain integration disabled")
+        condition_id = hex2bytes(market.condition_id.value)
+        for token_id, _label in market.erc1155_tokens:
+            bal = self._onchain.ctf_balance(user.eth_address, int(token_id))
+            if bal < payload.amount:
+                raise InsufficientBalanceError(
+                    f"need {payload.amount} of token {token_id}, have {bal}"
                 )
-            except ValueError as e:
-                if "Insufficient balance" in str(e):
-                    raise InsufficientBalanceError(f"Insufficient USDC balance: {e}") from e
-                raise
-
-            norm_address = normalize_eth_address(eth_address)
-            TableUtils.ensure_erc1155_ownership_row(conn, norm_address)
-            ownership_map = TableUtils.load_erc1155_ownership_map(conn, norm_address)
-
-            token_balances: dict[str, int] = {}
-            for token_id, _label in market.erc1155_tokens:
-                current = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
-                new_balance = current + payload.amount
-                ownership_map[token_id] = Web3.to_hex(new_balance).lower()
-                token_balances[token_id] = new_balance
-
-            TableUtils.store_erc1155_ownership_map(conn, norm_address, ownership_map)
-            TableWrite.log_transaction(
-                conn,
-                api_key=payload.api_key,
-                transaction_type="SPLIT",
-                market_id=market_id,
-                details={"amount": payload.amount, "collateral_burned": collateral_amount},
-            )
-
-        return PositionResponse(
-            market_id=market_id,
-            amount=payload.amount,
-            collateral_amount=collateral_amount,
-            token_balances=token_balances,
+        usd_address = self._onchain._contracts.usd.address  # noqa: SLF001
+        partition = [1 << i for i in range(len(market.erc1155_tokens))]
+        fn = self._onchain._contracts.ctf.functions.mergePositions(
+            usd_address, _ZERO_BYTES32, condition_id, partition, payload.amount
         )
+        send_user_tx(self._onchain._client, user.eth_key, fn)  # noqa: SLF001
+        return self._snapshot(user, market, unlocked=payload.amount)
 
-    def merge(self, market_id: int, payload: SplitPositionRequest) -> PositionResponse:
-        eth_address = get_or_create_eth_address(self._db, payload.api_key)
-        collateral_amount = payload.amount
-
-        with self._db.write() as conn:
-            market = TableRead.read_market(conn, market_id)
-            if market is None:
-                raise MarketNotFoundError(market_id)
-
-            norm_address = normalize_eth_address(eth_address)
-            TableUtils.ensure_erc1155_ownership_row(conn, norm_address)
-            ownership_map = TableUtils.load_erc1155_ownership_map(conn, norm_address)
-
-            for token_id, _label in market.erc1155_tokens:
-                balance = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
-                if balance < payload.amount:
-                    raise InsufficientBalanceError(
-                        f"Insufficient balance of token {token_id}: have {balance}, need {payload.amount}"
-                    )
-
-            token_balances: dict[str, int] = {}
-            for token_id, _label in market.erc1155_tokens:
-                current = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
-                new_balance = current - payload.amount
-                ownership_map[token_id] = Web3.to_hex(new_balance).lower()
-                token_balances[token_id] = new_balance
-
-            TableUtils.store_erc1155_ownership_map(conn, norm_address, ownership_map)
-
-            ERC20Simulator.mint(
-                conn,
-                eth_address=eth_address,
-                asset_address=EASYNET_USDC_TOKEN_ADDRESS,
-                value=collateral_amount,
-            )
-
-            TableWrite.log_transaction(
-                conn,
-                api_key=payload.api_key,
-                transaction_type="MERGE",
-                market_id=market_id,
-                details={"amount": payload.amount, "collateral_minted": collateral_amount},
-            )
-
-        return PositionResponse(
-            market_id=market_id,
-            amount=payload.amount,
-            collateral_amount=collateral_amount,
-            token_balances=token_balances,
+    def redeem(self, user: User, market_id: int) -> RedeemPositionResponse:
+        market = self._require_market(market_id)
+        if market.market_state != MarketState.RESOLVED:
+            raise MarketStateError("market not resolved yet")
+        if self._onchain is None:
+            raise MarketStateError("on-chain integration disabled")
+        condition_id = hex2bytes(market.condition_id.value)
+        usd_address = self._onchain._contracts.usd.address  # noqa: SLF001
+        partition = [1 << i for i in range(len(market.erc1155_tokens))]
+        fn = self._onchain._contracts.ctf.functions.redeemPositions(
+            usd_address, _ZERO_BYTES32, condition_id, partition
         )
-
-    def redeem(self, market_id: int, payload: RedeemPositionRequest) -> RedeemPositionResponse:
-        eth_address = get_or_create_eth_address(self._db, payload.api_key)
-
-        with self._db.write() as conn:
-            market = TableRead.read_market(conn, market_id)
-            if market is None:
-                raise MarketNotFoundError(market_id)
-            if market.market_state != MarketState.RESOLVED:
-                raise MarketStateError("Market is not resolved yet")
-            if market.resolved_outcome is None:
-                raise MarketStateError("Market has no resolved outcome")
-
-            norm_address = normalize_eth_address(eth_address)
-            TableUtils.ensure_erc1155_ownership_row(conn, norm_address)
-            ownership_map = TableUtils.load_erc1155_ownership_map(conn, norm_address)
-
-            payout_usdc = 0
-            tokens_redeemed: dict[str, int] = {}
-            winning_token_id = market.erc1155_tokens[market.resolved_outcome][0]
-
-            for token_id, _label in market.erc1155_tokens:
-                balance = hex_u256_to_int(ownership_map.get(token_id, "0x0"))
-                if balance > 0:
-                    tokens_redeemed[token_id] = balance
-                    if token_id == winning_token_id:
-                        payout_usdc += balance
-                    ownership_map[token_id] = "0x0"
-
-            TableUtils.store_erc1155_ownership_map(conn, norm_address, ownership_map)
-
-            if payout_usdc > 0:
-                ERC20Simulator.mint(
-                    conn,
-                    eth_address=eth_address,
-                    asset_address=EASYNET_USDC_TOKEN_ADDRESS,
-                    value=payout_usdc,
-                )
-
-            TableWrite.log_transaction(
-                conn,
-                api_key=payload.api_key,
-                transaction_type="REDEEM",
-                market_id=market_id,
-                details={"payout_usdc": payout_usdc, "tokens_redeemed": tokens_redeemed},
-            )
-
+        pre_balance = self._onchain.usd_balance(user.eth_address)
+        send_user_tx(self._onchain._client, user.eth_key, fn)  # noqa: SLF001
+        new_balance = self._onchain.usd_balance(user.eth_address)
         return RedeemPositionResponse(
-            market_id=market_id,
-            payout_usdc=payout_usdc,
-            tokens_redeemed=tokens_redeemed,
+            market_id=market.market_id,
+            collateral_amount=new_balance - pre_balance,
+            new_usdc_balance=new_balance,
+        )
+
+    # --- helpers --------------------------------------------------------
+
+    def _require_market(self, market_id: int):
+        with self._db.read() as conn:
+            market = TableRead.read_market(conn, market_id)
+        if market is None:
+            raise MarketNotFoundError(market_id)
+        if market.condition_id is None:
+            raise MarketStateError("market has no on-chain condition_id")
+        return market
+
+    def _snapshot(self, user: User, market, *, locked: int = 0, unlocked: int = 0):
+        assert self._onchain is not None
+        balances = {}
+        for token_id, _label in market.erc1155_tokens:
+            balances[token_id] = self._onchain.ctf_balance(
+                user.eth_address, int(token_id)
+            )
+        return PositionResponse(
+            market_id=market.market_id,
+            amount=locked or unlocked,
+            collateral_amount=locked,
+            token_balances=balances,
         )

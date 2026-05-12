@@ -49,6 +49,7 @@ class TableCreate:
                 FEE_RATE_BPS INTEGER,
                 SIDE TEXT,
                 SIGNATURE_TYPE TEXT,
+                SIGNATURE TEXT,
                 ORDER_JSON TEXT,
                 STATUS TEXT DEFAULT 'live',
                 REMAINING_AMOUNT INTEGER,
@@ -57,6 +58,10 @@ class TableCreate:
             )
             """
         )
+        # additive: pre-existing dev DBs may not have SIGNATURE
+        cols = {row[1] for row in db.execute("PRAGMA table_info(orders)").fetchall()}
+        if "SIGNATURE" not in cols:
+            db.execute("ALTER TABLE orders ADD COLUMN SIGNATURE TEXT")
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(PRICE, SIDE)"
         )
@@ -75,38 +80,46 @@ class TableCreate:
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
 
     @staticmethod
-    def create_erc20_token_ownership_table(db: sqlite3.Connection) -> None:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS erc20_token_ownership (
-                ETH_ADDRESS TEXT PRIMARY KEY,
-                OWNERSHIP TEXT NOT NULL
-            )
-            """
-        )
-
-    @staticmethod
-    def create_erc1155_token_ownership_table(db: sqlite3.Connection) -> None:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS erc1155_token_ownership (
-                ETH_ADDRESS TEXT PRIMARY KEY,
-                OWNERSHIP TEXT NOT NULL
-            )
-            """
-        )
-
-    @staticmethod
     def create_users_table(db: sqlite3.Connection) -> None:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
-                USER_ID TEXT PRIMARY KEY,
-                API_KEY TEXT NOT NULL UNIQUE,
-                ETH_PRIVATE_KEY TEXT NOT NULL UNIQUE
+                USER_ID         TEXT PRIMARY KEY,
+                EMAIL           TEXT NOT NULL UNIQUE,
+                PASSWORD_HASH   TEXT NOT NULL,
+                HANDLE          TEXT UNIQUE,
+                ETH_ADDRESS     TEXT NOT NULL UNIQUE,
+                ETH_PRIVATE_KEY TEXT NOT NULL UNIQUE,
+                API_KEY         TEXT NOT NULL UNIQUE,
+                ONBOARDED_AT    INTEGER,
+                CREATED_AT      INTEGER NOT NULL
             )
             """
         )
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(EMAIL)")
+        TableCreate._migrate_users_table(db)
+
+    @staticmethod
+    def _migrate_users_table(db: sqlite3.Connection) -> None:
+        """Idempotent additive migration for the users table.
+
+        Pre-auth versions of the schema only had USER_ID, API_KEY, ETH_PRIVATE_KEY.
+        Add the new columns if they're missing so existing dev DBs keep working.
+        New columns marked NOT NULL in the canonical schema are added as nullable
+        here because SQLite cannot add NOT NULL columns without a default.
+        """
+        existing = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+        additions = [
+            ("EMAIL", "TEXT"),
+            ("PASSWORD_HASH", "TEXT"),
+            ("HANDLE", "TEXT"),
+            ("ETH_ADDRESS", "TEXT"),
+            ("ONBOARDED_AT", "INTEGER"),
+            ("CREATED_AT", "INTEGER"),
+        ]
+        for col, col_type in additions:
+            if col not in existing:
+                db.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
 
 
     @staticmethod
@@ -180,8 +193,6 @@ class TableCreate:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(db)
         TableCreate.create_trades_table(db)
-        TableCreate.create_erc20_token_ownership_table(db)
-        TableCreate.create_erc1155_token_ownership_table(db)
         TableCreate.create_users_table(db)
         TableCreate.create_agents_table(db)
         TableCreate.create_personalities_table(db)
