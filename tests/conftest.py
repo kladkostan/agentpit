@@ -1,9 +1,12 @@
 import os
 
-# Force tests to use an in-memory DB and disable the Polymarket background sync.
-# Set BEFORE any agentpit module is imported so Settings() picks these up.
+# Force tests to use an in-memory DB, disable Polymarket sync, and skip the
+# on-chain bring-up so the test suite can run without anvil. Set BEFORE any
+# agentpit module is imported so Settings() picks these up.
 os.environ.setdefault("AGENTPIT_DB_PATH", ":memory:")
 os.environ.setdefault("SYNC", "false")
+os.environ.setdefault("AGENTPIT_ONCHAIN_DISABLED", "true")
+os.environ.setdefault("JWT_SECRET", "test-only-secret")
 
 import pytest
 
