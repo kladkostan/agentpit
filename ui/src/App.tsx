@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
 import { TopNav } from "@/components/TopNav";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { MarketDetailPage } from "@/pages/MarketDetailPage";
@@ -14,6 +15,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <Toaster position="bottom-right" richColors closeButton />
     </div>
   );
 }
