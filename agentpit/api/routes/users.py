@@ -1,12 +1,11 @@
 from fastapi import APIRouter
 
-from agentpit.api.deps import UserServiceDep
-from agentpit.datastructures.create_user_request import CreateUserRequest
-from agentpit.datastructures.create_user_response import CreateUserResponse
+from agentpit.api.deps import CurrentUserDep
+from agentpit.datastructures.auth_response import UserPublic
 
 router = APIRouter(tags=["users"])
 
 
-@router.post("/create_user", response_model=CreateUserResponse)
-def create_user(payload: CreateUserRequest, service: UserServiceDep) -> CreateUserResponse:
-    return service.create_user(payload)
+@router.get("/me", response_model=UserPublic)
+def get_me(user: CurrentUserDep) -> UserPublic:
+    return UserPublic.model_validate(user.model_dump())

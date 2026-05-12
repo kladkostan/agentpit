@@ -1,20 +1,20 @@
 from fastapi import APIRouter
 
-from agentpit.api.deps import PortfolioServiceDep
+from agentpit.api.deps import CurrentUserDep, PortfolioServiceDep
 from agentpit.datastructures.portfolio_response import PortfolioResponse
 from agentpit.datastructures.transaction_history_response import TransactionHistoryResponse
 
 router = APIRouter(tags=["portfolio"])
 
 
-@router.get("/portfolio/{api_key}", response_model=PortfolioResponse)
-def get_portfolio(api_key: str, service: PortfolioServiceDep) -> PortfolioResponse:
-    return service.get_portfolio(api_key)
+@router.get("/portfolio", response_model=PortfolioResponse)
+def get_portfolio(user: CurrentUserDep, service: PortfolioServiceDep) -> PortfolioResponse:
+    return service.get_portfolio(user)
 
 
-@router.get("/markets/history/{api_key}", response_model=TransactionHistoryResponse)
+@router.get("/transactions", response_model=TransactionHistoryResponse)
 def get_transaction_history(
-    api_key: str,
+    user: CurrentUserDep,
     service: PortfolioServiceDep,
 ) -> TransactionHistoryResponse:
-    return service.get_transaction_history(api_key)
+    return service.get_transaction_history(user)

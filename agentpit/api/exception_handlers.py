@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from agentpit.domain.exceptions import (
     AlreadyExistsError,
     BusinessRuleError,
+    InvalidCredentialsError,
     NotFoundError,
 )
 
@@ -16,6 +17,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AlreadyExistsError)
     async def _already_exists(_: Request, exc: AlreadyExistsError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(InvalidCredentialsError)
+    async def _invalid_creds(_: Request, exc: InvalidCredentialsError) -> JSONResponse:
+        return JSONResponse(status_code=401, content={"detail": str(exc)})
 
     @app.exception_handler(BusinessRuleError)
     async def _business_rule(_: Request, exc: BusinessRuleError) -> JSONResponse:

@@ -5,11 +5,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from agentpit.api.deps import get_db_session
+from agentpit.api.deps import (
+    get_current_user,
+    get_db_session,
+    get_jwt_coder,
+    get_onchain_admin,
+    get_settings,
+)
 from agentpit.api.exception_handlers import register_exception_handlers
 from agentpit.api.routes import (
     agents,
+    auth,
     markets,
+    orders,
     personalities,
     portfolio,
     positions,
@@ -17,8 +25,14 @@ from agentpit.api.routes import (
     usdc,
     users,
 )
+from agentpit.auth.dependencies import make_current_user_dep
+from agentpit.auth.jwt import JwtCoder
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
+from agentpit.onchain.admin import OnchainAdmin
+from agentpit.onchain.contracts import Contracts
+from agentpit.onchain.deployment import Deployment
+from agentpit.onchain.web3_client import Web3Client
 from agentpit.polymarket.polymarket_sync import fetch_and_sync_polymarket_markets
 
 log = logging.getLogger(__name__)
@@ -53,11 +67,35 @@ async def _polymarket_sync_loop(db: DbSession, interval_seconds: int) -> None:
         await asyncio.sleep(interval_seconds)
 
 
+def _build_onchain_admin(settings: Settings) -> OnchainAdmin | None:
+    if settings.onchain_disabled:
+        log.warning("AGENTPIT_ONCHAIN_DISABLED=true — register/login will skip on-chain steps")
+        return None
+    if not settings.deployment_path.exists():
+        log.warning(
+            "deployment file %s missing — running without on-chain integration",
+            settings.deployment_path,
+        )
+        return None
+    deployment = Deployment.load(settings.deployment_path)
+    client = Web3Client(settings, deployment)
+    client.verify_chain()
+    contracts = Contracts(client.web3, deployment)
+    log.info(
+        "on-chain stack ready: usd=%s faucet=%s exchange=%s",
+        deployment.usd, deployment.faucet, deployment.exchange,
+    )
+    return OnchainAdmin(client, contracts)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     _configure_root_logging()
 
     db_session = DbSession(settings.db_path)
+    coder = JwtCoder(settings)
+    onchain_admin = _build_onchain_admin(settings)
+    current_user_fn = make_current_user_dep(coder)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -84,6 +122,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="AgentPit", lifespan=lifespan)
     app.dependency_overrides[get_db_session] = lambda: db_session
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_jwt_coder] = lambda: coder
+    app.dependency_overrides[get_onchain_admin] = lambda: onchain_admin
+    app.dependency_overrides[get_current_user] = current_user_fn
 
     app.add_middleware(
         CORSMiddleware,
@@ -95,10 +137,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(system.router)
+    app.include_router(auth.router)
+    app.include_router(users.router)
     app.include_router(markets.router)
+    app.include_router(orders.router)
     app.include_router(positions.router)
     app.include_router(usdc.router)
-    app.include_router(users.router)
     app.include_router(personalities.router)
     app.include_router(agents.router)
     app.include_router(portfolio.router)
