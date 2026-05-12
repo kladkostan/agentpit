@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { placeOrder, useOrderbook } from "@/api/orders";
+import { placeMarketOrder, placeOrder, useOrderbook } from "@/api/orders";
 import { useRequireAuth } from "@/auth/useRequireAuth";
 import {
   MAX_PROB,
@@ -96,6 +96,45 @@ export function OrderTicket({
     },
   });
 
+  const marketMutation = useMutation({
+    mutationFn: async () => {
+      if (!book) throw new Error("Orderbook not loaded yet");
+      const amount = Number(side === "BUY" ? marketAmount : limitShares);
+      return placeMarketOrder({
+        marketId,
+        outcome,
+        side,
+        amount,
+        book,
+      });
+    },
+    onSuccess: (res) => {
+      const tail = res.cancelledRemainder
+        ? ` (${res.remainingShares.toFixed(2)} unfilled, cancelled)`
+        : "";
+      const avg = res.avgPrice !== null ? ` @ avg $${res.avgPrice.toFixed(2)}` : "";
+      if (res.filledShares <= 0) {
+        toast.error(`No fills${tail || ""}`);
+      } else {
+        toast.success(
+          `${side === "BUY" ? "Bought" : "Sold"} ${res.filledShares.toFixed(2)}${avg}${tail}`,
+        );
+      }
+      if (res.cancelError) {
+        toast.warning(`Auto-cancel failed: ${res.cancelError}`);
+      }
+      if (side === "BUY") {
+        setMarketAmount("");
+      } else {
+        setLimitShares("");
+      }
+      invalidate();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : String(err));
+    },
+  });
+
   const preview = useMemo(() => {
     /* unchanged from Task 12 — preserved exactly */
     if (mode === "Limit") {
@@ -145,6 +184,7 @@ export function OrderTicket({
     !isTradingDisabled &&
     preview !== null &&
     !limitMutation.isPending &&
+    !marketMutation.isPending &&
     (mode === "Limit" ||
       (side === "BUY" ? bestAsk !== null : bestBid !== null));
 
@@ -152,8 +192,7 @@ export function OrderTicket({
     if (mode === "Limit") {
       limitMutation.mutate();
     } else {
-      // Wired in Task 14.
-      toast.message("Market orders coming next");
+      marketMutation.mutate();
     }
   });
 
@@ -288,7 +327,7 @@ export function OrderTicket({
       >
         {isTradingDisabled
           ? (disabledReason ?? "Trading disabled")
-          : limitMutation.isPending
+          : limitMutation.isPending || marketMutation.isPending
             ? "Placing…"
             : `${side === "BUY" ? "Buy" : "Sell"} ${outcome}`}
       </Button>
