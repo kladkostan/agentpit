@@ -1,7 +1,7 @@
 black==24.4.2
-eth-account>=0.12,<0.14
-eth-utils>=4,<5
-eth-typing>=3,<5
+eth-account>=0.13,<0.14
+eth-utils>=4,<6
+eth-typing>=3,<6
 poly_eip712_structs==0.0.1
 py_order_utils==0.3.2
 py-clob-client
@@ -14,8 +14,8 @@ pydantic>=2.0
 fastapi
 uvicorn
 pydantic-settings>=2.0
-web3>=6,<7
-setuptools>=68,<81
+web3>=7.0,<8
+setuptools>=68
 fasteners
 typer>=0.20.0,<1.0.0
 tiktoken>=0.12.0,<1.0.0
