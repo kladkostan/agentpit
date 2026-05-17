@@ -14,7 +14,9 @@ from agentpit.common import check_state
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
+from agentpit.onchain.admin import OnchainAdmin
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
+from agentpit.services.market_service import prepare_market_on_chain
 from agentpit.utils.parse import _iso_to_unix
 from py_clob_client.http_helpers.helpers import get
 
@@ -364,26 +366,33 @@ def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
 
 def fetch_and_sync_polymarket_markets(
     db: sqlite3.Connection,
+    admin: OnchainAdmin,
     host: str = POLYMARKET_GAMMA_URL,
 ) -> list[Market]:
     pm_markets = fetch_all_polymarket_markets(host)
-    created_markets = create_polymarket_markets_if_needed(db, pm_markets)
+    created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
 
-    all_markets = TableRead.list_all_markets(db)
-    for market in all_markets:
-        if market.polymarket_id is not None:
-            sync_market_state(db, market.condition_id)
+    try:
+        resolved = mirror_polymarket_resolutions(db, admin)
+        if resolved:
+            logger.info("Mirrored %d upstream resolutions to local CTF", resolved)
+    except Exception:
+        logger.exception("resolution mirror pass failed")
     return created_markets
 
 
-def create_polymarket_markets_if_needed(db: Connection, pm_markets: list[dict]) -> list[Any]:
+def create_polymarket_markets_if_needed(
+    db: Connection,
+    pm_markets: list[dict],
+    admin: OnchainAdmin,
+) -> list[Any]:
 
     created_markets: list[Market] = []
     failed = 0
     for pm_market in pm_markets:
         question = pm_market.get("question") or "<no question>"
         try:
-            market = create_polygon_market_if_does_not_exist(db, pm_market)
+            market = create_polygon_market_if_does_not_exist(db, pm_market, admin)
         except Exception as exc:
             # One bad market (e.g. RPC blip on getOutcomeSlotCount) shouldn't
             # kill the whole sync batch. Keep the message single-line; the
@@ -404,11 +413,24 @@ def create_polymarket_markets_if_needed(db: Connection, pm_markets: list[dict]) 
     return created_markets
 
 
-def create_polygon_market_if_does_not_exist(db: Connection, pm_market: dict) -> Market | None:
+def create_polygon_market_if_does_not_exist(
+    db: Connection,
+    pm_market: dict,
+    admin: OnchainAdmin,
+) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
 
-    check_state(ConditionalTokenFramework.condition_exists(request.condition_id))
+    # Mirror onto the local CTF + Exchange so the market is tradeable.
+    # This overrides the upstream conditionId/tokenIds with locally-derived
+    # ones; polymarket_id stays as the cross-reference.
+    outcome_labels = [label for _, label in request.erc1155_tokens]
+    local_condition_id, local_tokens = prepare_market_on_chain(
+        admin, request.question, outcome_labels
+    )
+    request.condition_id = local_condition_id
+    request.erc1155_tokens = local_tokens
+
     existing_market_id = TableRead.read_condition_id_by_polymarket_id(
         db, request.polymarket_id
     )
@@ -423,17 +445,119 @@ def create_polygon_market_if_does_not_exist(db: Connection, pm_market: dict) -> 
         return market
 
 
+def _default_resolution_fetcher(polymarket_condition_id: str) -> dict | None:
+    """Look up upstream Polymarket market by conditionId via the CLOB API.
+
+    CLOB is the canonical single-document endpoint and uses Polymarket's
+    immutable Polygon-mainnet conditionId — not Gamma's mutable integer id.
+    """
+    url = f"{CLOB_MARKET_URL}/{polymarket_condition_id}"
+    raw = get(url)
+    if isinstance(raw, list):
+        return raw[0] if raw else None
+    if isinstance(raw, dict):
+        return raw
+    return None
+
+
+def _winner_index_if_resolved(pm_response: dict) -> int | None:
+    """Return the resolved outcome index, or None if upstream isn't settled."""
+    if not pm_response.get("closed"):
+        return None
+    # umaResolutionStatus is the canonical "UMA has settled" flag, but some
+    # markets close via CLOB-only resolution. We require closed + a winner
+    # marker on a token; we don't insist on UMA settlement specifically.
+    tokens = pm_response.get("tokens") or []
+    for idx, t in enumerate(tokens):
+        if isinstance(t, dict) and t.get("winner") is True:
+            return idx
+    return None
+
+
+def mirror_polymarket_resolutions(
+    db: Connection,
+    admin: OnchainAdmin,
+    *,
+    fetcher=_default_resolution_fetcher,
+) -> int:
+    """Walk synced markets and mirror upstream resolutions onto the local CTF.
+
+    For each ACTIVE/CLOSED market with a `polymarket_id`, fetches upstream
+    state. When upstream is settled with a clear winner, calls
+    `admin.report_payouts` against the local CTF, then flips the local row
+    to RESOLVED. Idempotent on subsequent runs.
+
+    Returns the count of markets newly resolved this pass.
+    """
+    from eth_utils.crypto import keccak  # local import: avoid circulars at module load
+
+    resolved_count = 0
+    for market in TableRead.list_all_markets(db):
+        if market.polymarket_condition_id is None:
+            # Synced before the upstream-conditionId column existed, or a
+            # locally-authored market with no Polymarket linkage. Either way,
+            # nothing for the upstream mirror to do.
+            continue
+        if market.market_state in {MarketState.RESOLVED, MarketState.CANCELLED}:
+            continue
+        try:
+            pm_response = fetcher(market.polymarket_condition_id)
+        except Exception as exc:
+            logger.warning(
+                "resolution fetch failed for %s (%s)",
+                market.market_id, exc.__class__.__name__,
+            )
+            continue
+        if pm_response is None:
+            continue
+        winner_idx = _winner_index_if_resolved(pm_response)
+        if winner_idx is None:
+            continue
+
+        # Binary YES/NO payout vector. partition is [1<<i for i in range(2)],
+        # so payouts align: index 0 = YES, index 1 = NO.
+        payouts = [1 if i == winner_idx else 0 for i in range(len(market.erc1155_tokens))]
+        question_id = keccak(text=market.question)
+        cond_bytes = bytes.fromhex(market.condition_id.value[2:])
+
+        # Check on-chain idempotency: if the CTF already has payouts, skip
+        # the tx but still flip the DB row so local state catches up.
+        denom = admin._contracts.ctf.functions.payoutDenominator(cond_bytes).call()  # noqa: SLF001
+        if denom == 0:
+            try:
+                admin.report_payouts(question_id, payouts)
+            except Exception as exc:
+                logger.warning(
+                    "reportPayouts failed for market %s: %s",
+                    market.market_id, exc,
+                )
+                continue
+
+        try:
+            TableWrite.resolve_market(
+                db,
+                market_id=market.market_id,
+                winning_outcome_index=winner_idx,
+            )
+            resolved_count += 1
+        except ValueError as exc:
+            # Race: another caller flipped the row between our read and write.
+            logger.info("resolve_market noop for %s: %s", market.market_id, exc)
+    return resolved_count
+
+
 def sync_market_state(db: Connection, condition_id: ConditionId) -> None:
-    state = TableRead.get_market_state(db, condition_id)
-    if state == MarketState.DRAFT or state == MarketState.ACTIVE:
-        closed = fetch_is_polymarket_market_closed(condition_id)
-        if (closed):
-            TableWrite.update_market_state_to_closed_if_needed(db)
-    if state == MarketState.DRAFT or state == MarketState.ACTIVE or state == MarketState.CLOSED:
-        check_state(ConditionalTokenFramework.condition_exists(condition_id))
-        status = ConditionalTokenFramework.get_onchain_resolution_status(condition_id)
-        if status.resolved:
-                TableWrite.update_market_state_to_resolved_if_needed(db, status.get_winner_index())
+    """Placeholder until upstream→local resolution mirroring is built.
+
+    The original implementation queried Polymarket's CLOB for "is closed"
+    and the CTF for resolution payouts. After the local-mirror change,
+    `condition_id` here is the *local* one — Polymarket has never seen it,
+    so the CLOB call 404s. Resolution propagation needs its own design:
+    fetch upstream state by `polymarket_id`, then have the local admin
+    `reportPayouts` against the local CTF before flipping the row to
+    RESOLVED.
+    """
+    return None
 
 def build_create_market_request_from_json(pm_market: dict) -> CreateMarketRequest:
     question = pm_market.get("question", "").strip()
@@ -456,6 +580,7 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
         question=question,
         description=description,
         polymarket_id=polymarket_id,
+        polymarket_condition_id=condition_id,
         erc1155_tokens=erc1155_tokens,
         slug=slug,
         start_date=_iso_to_unix(start_date),

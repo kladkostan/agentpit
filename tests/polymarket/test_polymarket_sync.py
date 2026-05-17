@@ -29,20 +29,31 @@ def db():
 
 
 def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
-    """Test syncing live Polymarket markets into a local DB."""
-    # This will hit the actual Polymarket API
-    created_markets = fetch_and_sync_polymarket_markets(db)
+    """Test syncing live Polymarket markets into a local DB.
+
+    Hits the real Polymarket API and mirrors each market onto the local
+    CTF + Exchange — so anvil and the deployed exchange must be up.
+    """
+    from agentpit.config import Settings
+    from agentpit.onchain.admin import OnchainAdmin
+    from agentpit.onchain.contracts import Contracts
+    from agentpit.onchain.deployment import Deployment
+    from agentpit.onchain.web3_client import Web3Client
+
+    settings = Settings()
+    deployment = Deployment.load(settings.deployment_path)
+    client = Web3Client(settings, deployment)
+    admin = OnchainAdmin(client, Contracts(client.web3, deployment))
+
+    created_markets = fetch_and_sync_polymarket_markets(db, admin)
 
     # We expect many markets to be created, but the exact number varies.
-    # Let's check that a reasonable number were created.
     assert len(created_markets) > 5
 
-    # Verify they exist in the database
     db_markets, total = TableRead.list_markets(db, limit=len(created_markets) + 1)
     assert total == len(created_markets)
     assert len(db_markets) == len(created_markets)
 
-    # Check a sample market that was created
     first_synced = created_markets[0]
     first_db = db_markets[0]
 
@@ -51,7 +62,7 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     assert first_db.description == first_synced.description
     assert len(first_db.erc1155_tokens) > 0
 
-    # now do it again as an update
-    created_markets = fetch_and_sync_polymarket_markets(db)
+    # Idempotent: a second sync against the same upstream set adds nothing.
+    created_markets = fetch_and_sync_polymarket_markets(db, admin)
 
-    assert created_markets == []  # No new markets should be created on second sync
+    assert created_markets == []
