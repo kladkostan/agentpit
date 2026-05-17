@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { placeMarketOrder, placeOrder, useOrderbook } from "@/api/orders";
+import { usePortfolio } from "@/api/portfolio";
+import { useAuth } from "@/auth/useAuth";
 import { useRequireAuth } from "@/auth/useRequireAuth";
 import {
   MAX_PROB,
@@ -15,6 +17,7 @@ import {
   computeMarketBuy,
   computeMarketSell,
   dollarsFromShares,
+  pickSellOutcome,
   sharesFromDollars,
 } from "@/components/orders/orderMath";
 import type { OrderSide } from "@/types/order";
@@ -27,6 +30,7 @@ interface OrderTicketProps {
   outcome: string;
   isTradingDisabled: boolean;
   disabledReason?: string;
+  onOutcomeChange?: (outcome: string) => void;
 }
 
 export function OrderTicket({
@@ -34,6 +38,7 @@ export function OrderTicket({
   outcome,
   isTradingDisabled,
   disabledReason,
+  onOutcomeChange,
 }: OrderTicketProps) {
   const [side, setSide] = useState<OrderSide>("BUY");
   const [mode, setMode] = useState<Mode>("Limit");
@@ -44,6 +49,29 @@ export function OrderTicket({
   const requireAuth = useRequireAuth();
   const queryClient = useQueryClient();
   const { data: book } = useOrderbook(marketId, outcome);
+  const { user } = useAuth();
+  const { data: portfolio } = usePortfolio(Boolean(user));
+
+  // Display shares the user holds for each outcome of THIS market (label → shares).
+  const heldByOutcome = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!portfolio) return map;
+    for (const p of portfolio.positions) {
+      if (p.market_id !== marketId) continue;
+      map.set(p.outcome_label, p.balance / SHARES_SCALE);
+    }
+    return map;
+  }, [portfolio, marketId]);
+
+  const heldOfCurrent = heldByOutcome.get(outcome) ?? 0;
+
+  function selectSide(next: OrderSide) {
+    setSide(next);
+    if (next === "SELL" && onOutcomeChange) {
+      const target = pickSellOutcome(outcome, heldByOutcome);
+      if (target !== outcome) onOutcomeChange(target);
+    }
+  }
 
   const bestAsk =
     book && book.asks.length > 0
@@ -208,7 +236,7 @@ export function OrderTicket({
           <button
             key={s}
             type="button"
-            onClick={() => setSide(s)}
+            onClick={() => selectSide(s)}
             className={cn(
               "rounded-sm py-1.5 text-sm font-medium transition",
               side === s
@@ -269,6 +297,11 @@ export function OrderTicket({
               onChange={(e) => setLimitShares(e.target.value)}
               disabled={isTradingDisabled}
             />
+            {side === "SELL" ? (
+              <p className="text-xs text-muted-foreground">
+                You hold {heldOfCurrent.toFixed(2)} {outcome} shares
+              </p>
+            ) : null}
           </div>
         </div>
       ) : side === "BUY" ? (
@@ -302,6 +335,9 @@ export function OrderTicket({
             onChange={(e) => setLimitShares(e.target.value)}
             disabled={isTradingDisabled}
           />
+          <p className="text-xs text-muted-foreground">
+            You hold {heldOfCurrent.toFixed(2)} {outcome} shares
+          </p>
           <p className="text-xs text-muted-foreground">
             Max slippage: {SLIPPAGE_CAP.toFixed(2)} below best bid
             {bestBid !== null ? ` ($${bestBid.toFixed(2)})` : ""}

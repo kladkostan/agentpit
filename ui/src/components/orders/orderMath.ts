@@ -57,3 +57,20 @@ export function computeMarketSell(
   if (sizeWire <= 0) return null;
   return { priceCap, sizeWire, bestBid: best };
 }
+
+/** Pick the outcome a SELL action should target.
+ *
+ *  Default: keep what the user already selected. If they hold zero of it
+ *  but more than zero of another outcome, switch to the held outcome so a
+ *  click on SELL doesn't try to sell something they don't own.
+ */
+export function pickSellOutcome(
+  currentOutcome: string,
+  holdings: ReadonlyMap<string, number>,
+): string {
+  if ((holdings.get(currentOutcome) ?? 0) > 0) return currentOutcome;
+  for (const [outcome, balance] of holdings) {
+    if (balance > 0) return outcome;
+  }
+  return currentOutcome;
+}

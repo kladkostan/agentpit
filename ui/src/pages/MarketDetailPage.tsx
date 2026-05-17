@@ -105,6 +105,7 @@ export function MarketDetailPage() {
         <OrderTicket
           marketId={market.market_id}
           outcome={outcome}
+          onOutcomeChange={setSelectedOutcome}
           isTradingDisabled={isTradingDisabled}
           {...(disabledReason !== undefined ? { disabledReason } : {})}
         />

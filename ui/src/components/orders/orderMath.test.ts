@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { computeMarketBuy, computeMarketSell, dollarsFromShares, sharesFromDollars } from "./orderMath";
+import {
+  computeMarketBuy,
+  computeMarketSell,
+  dollarsFromShares,
+  pickSellOutcome,
+  sharesFromDollars,
+} from "./orderMath";
 import type { OrderbookEntry } from "@/types/order";
 
 describe("sharesFromDollars", () => {
@@ -95,5 +101,31 @@ describe("computeMarketSell", () => {
 
   it("returns null for non-positive shares", () => {
     expect(computeMarketSell([bid(0.65, 100)], 0)).toBeNull();
+  });
+});
+
+describe("pickSellOutcome", () => {
+  it("keeps the current outcome when the user holds it", () => {
+    const holdings = new Map([["YES", 100], ["NO", 0]]);
+    expect(pickSellOutcome("YES", holdings)).toBe("YES");
+  });
+
+  it("flips to the other outcome when current has zero balance", () => {
+    const holdings = new Map([["YES", 0], ["NO", 50]]);
+    expect(pickSellOutcome("YES", holdings)).toBe("NO");
+  });
+
+  it("returns the current outcome when nothing is held (caller surfaces error)", () => {
+    const holdings = new Map([["YES", 0], ["NO", 0]]);
+    expect(pickSellOutcome("YES", holdings)).toBe("YES");
+  });
+
+  it("returns the current outcome when no holdings map is supplied yet", () => {
+    expect(pickSellOutcome("YES", new Map())).toBe("YES");
+  });
+
+  it("never picks an outcome with a non-positive balance", () => {
+    const holdings = new Map([["YES", 0], ["NO", -5]]);
+    expect(pickSellOutcome("YES", holdings)).toBe("YES");
   });
 });
