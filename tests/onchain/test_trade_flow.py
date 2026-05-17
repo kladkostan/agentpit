@@ -116,3 +116,91 @@ def test_match_settles_on_chain():
     assert admin.usd_balance(ea) == a_pre_usd - 60_000_000
     assert admin.ctf_balance(ea, yes_id) == 100_000_000
     assert admin.ctf_balance(eb, yes_id) == b_pre_yes - 100_000_000
+
+
+def test_complementary_buys_mint_via_split():
+    """Two BUYs on opposite outcomes whose prices sum to >= 1.00 should match.
+
+    The off-chain matcher must detect the complement and the on-chain
+    CTFExchange must MINT a fresh pair via splitPosition, delivering YES
+    to the YES-buyer and NO to the NO-buyer.
+    """
+    from agentpit.api.app import create_app
+    from agentpit.config import Settings
+    from agentpit.onchain.admin import OnchainAdmin
+    from agentpit.onchain.contracts import Contracts
+    from agentpit.onchain.deployment import Deployment
+    from agentpit.onchain.web3_client import Web3Client
+
+    app = create_app()
+    client = TestClient(app)
+
+    a_email = _email()
+    b_email = _email()
+    ra = client.post(
+        "/register", json={"email": a_email, "password": "hunter22hunter22"}
+    ).json()
+    rb = client.post(
+        "/register", json={"email": b_email, "password": "hunter22hunter22"}
+    ).json()
+    ta, tb = ra["access_token"], rb["access_token"]
+    ea, eb = ra["user"]["eth_address"], rb["user"]["eth_address"]
+
+    market = client.post(
+        "/markets",
+        json={
+            "question": f"Complement test {secrets.token_hex(4)}?",
+            "description": "MINT match path",
+            "outcome_labels": ["YES", "NO"],
+        },
+    ).json()
+    yes_id = int(market["erc1155_tokens"][0][0])
+    no_id = int(market["erc1155_tokens"][1][0])
+
+    settings = Settings()
+    d = Deployment.load(settings.deployment_path)
+    w = Web3Client(settings, d)
+    c = Contracts(w.web3, d)
+    admin = OnchainAdmin(w, c)
+
+    a_pre_usd = admin.usd_balance(ea)
+    b_pre_usd = admin.usd_balance(eb)
+
+    # A: resting BUY YES @ 0.30, size 100M outcome-token units.
+    pa = client.post(
+        "/orders",
+        headers=_hdr(ta),
+        json={
+            "market_id": market["market_id"], "outcome": "YES",
+            "side": "BUY", "price": "0.3", "size": 100_000_000,
+        },
+    ).json()
+    assert pa["success"] and pa["status"] == "live", pa
+
+    # B: incoming BUY NO @ 0.70, size 50M. Sum is 1.00 → should mint 50M.
+    pb = client.post(
+        "/orders",
+        headers=_hdr(tb),
+        json={
+            "market_id": market["market_id"], "outcome": "NO",
+            "side": "BUY", "price": "0.7", "size": 50_000_000,
+        },
+    ).json()
+    assert pb["success"], pb
+    assert pb["status"] == "matched", pb
+    assert pb["filledSize"] == "50000000", pb
+    assert pb["txHash"], pb
+
+    # A paid 50M * 0.30 = 15M apUSD; B paid 50M * 0.70 = 35M apUSD.
+    assert admin.usd_balance(ea) == a_pre_usd - 15_000_000
+    assert admin.usd_balance(eb) == b_pre_usd - 35_000_000
+    # MINT delivered 50M of each token to the respective buyer.
+    assert admin.ctf_balance(ea, yes_id) == 50_000_000
+    assert admin.ctf_balance(eb, no_id) == 50_000_000
+    # A's order remains live with 50M outstanding.
+    book = client.get(
+        f"/orderbook/{market['market_id']}/YES"
+    ).json()
+    assert any(
+        int(b["REMAINING_AMOUNT"]) == 50_000_000 for b in book["bids"]
+    ), book

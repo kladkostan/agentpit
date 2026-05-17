@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 _USDC_DECIMALS = 6
 _USDC_SCALE = Decimal(10**_USDC_DECIMALS)
+_PRICE_ONE = 10**_USDC_DECIMALS  # stored PRICE units that equal $1.00
 _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 
 
@@ -39,16 +40,13 @@ class OrderService:
     happens on-chain via the deployed CTFExchange.
     """
 
-    def __init__(self, db: DbSession, onchain: OnchainAdmin | None):
+    def __init__(self, db: DbSession, onchain: OnchainAdmin):
         self._db = db
         self._onchain = onchain
 
     # --- public API -----------------------------------------------------
 
     def place_order(self, user: User, payload: PlaceOrderRequest) -> OrderResponse:
-        if self._onchain is None:
-            raise MarketStateError("on-chain integration disabled")
-
         _, token_id_int, _ = self._resolve_market(payload)
         maker_amount, taker_amount = self._amounts_from_price_size(
             payload.side, payload.price, payload.size
@@ -94,7 +92,8 @@ class OrderService:
         tx_hash: str | None = None
         if matches:
             try:
-                tx_hash = self._settle_on_chain(order, signature, matches).hex()
+                hashes = self._settle_on_chain(order, signature, matches)
+                tx_hash = ",".join(h.hex() for h in hashes)
             except Exception as exc:
                 log.exception("on-chain settlement failed for order %s", order_id)
                 # Mark trades + orders as failed so the off-chain book reflects it
@@ -196,7 +195,6 @@ class OrderService:
     def _check_balance(
         self, eth_address: str, side: str, maker_amount: int, token_id_int: int
     ) -> None:
-        assert self._onchain is not None
         if side == "BUY":
             bal = self._onchain.usd_balance(eth_address)
             if bal < maker_amount:
@@ -305,6 +303,32 @@ class OrderService:
         return str(Decimal(total_collateral) / Decimal(filled))
 
     @staticmethod
+    def _complement_token_id(
+        conn: sqlite3.Connection, token_id: str
+    ) -> str | None:
+        """Look up the binary-market complement of `token_id`, if one exists.
+
+        Returns None when no two-outcome market contains this token (so the
+        MINT/MERGE paths simply don't apply).
+        """
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ERC1155_TOKENS FROM markets WHERE ERC1155_TOKENS LIKE ? LIMIT 1",
+            (f'%"{token_id}"%',),
+        ).fetchone()
+        if row is None:
+            return None
+        pairs = json.loads(row["ERC1155_TOKENS"])
+        if len(pairs) != 2:
+            return None
+        a, b = pairs[0][0], pairs[1][0]
+        if a == token_id:
+            return b
+        if b == token_id:
+            return a
+        return None
+
+    @staticmethod
     def _get_order_row(conn: sqlite3.Connection, order_id: str) -> sqlite3.Row:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -317,11 +341,17 @@ class OrderService:
     def _match(
         self, conn: sqlite3.Connection, taker_row: sqlite3.Row, *, dry_run: bool
     ) -> list[dict]:
-        """Match the taker order against opposite-side resting orders.
+        """Match the taker order against resting orders.
+
+        Considers two cross types:
+        - NORMAL: same token, opposite side (existing book sweep).
+        - MINT/MERGE: complementary token, same side, when prices satisfy
+          the split/merge invariant ``p_taker + p_maker >= 1`` for MINT or
+          ``<= 1`` for MERGE.
 
         Returns a list of match dicts with keys: maker_order_id, price,
-        trade_size, maker_row (for settlement). Updates DB rows for both
-        sides and inserts trade rows when not in dry_run.
+        trade_size, maker_row, match_kind. Updates DB rows for both sides
+        and inserts trade rows when not in dry_run.
         """
         taker_side = taker_row["SIDE"]
         taker_price = int(taker_row["PRICE"])
@@ -340,20 +370,45 @@ class OrderService:
                 "AND PRICE >= ? AND TOKEN_ID=? AND ORDER_ID != ?"
             )
         conn.row_factory = sqlite3.Row
-        candidates = conn.execute(
+        same_token = conn.execute(
             sql, (opposite, taker_price, token_id, taker_row["ORDER_ID"])
         ).fetchall()
-        candidates = sorted(
-            candidates,
+        same_token = sorted(
+            same_token,
             key=lambda r: (
                 (int(r["PRICE"]), int(r["CREATED_AT"]))
                 if taker_side == "BUY"
                 else (-int(r["PRICE"]), int(r["CREATED_AT"]))
             ),
         )
+        tagged: list[tuple[str, sqlite3.Row]] = [("NORMAL", c) for c in same_token]
+
+        complement_id = self._complement_token_id(conn, token_id)
+        if complement_id is not None:
+            threshold = _PRICE_ONE - taker_price
+            if taker_side == "BUY":
+                comp_sql = (
+                    "SELECT * FROM orders WHERE SIDE='BUY' AND STATUS='live' "
+                    "AND PRICE >= ? AND TOKEN_ID=? AND ORDER_ID != ?"
+                )
+                kind = "MINT"
+                # best maker = highest price (covers more of the mint cost).
+                comp_key = lambda r: (-int(r["PRICE"]), int(r["CREATED_AT"]))
+            else:
+                comp_sql = (
+                    "SELECT * FROM orders WHERE SIDE='SELL' AND STATUS='live' "
+                    "AND PRICE <= ? AND TOKEN_ID=? AND ORDER_ID != ?"
+                )
+                kind = "MERGE"
+                # best maker = lowest ask (smallest cut of the merge proceeds).
+                comp_key = lambda r: (int(r["PRICE"]), int(r["CREATED_AT"]))
+            comp_rows = conn.execute(
+                comp_sql, (threshold, complement_id, taker_row["ORDER_ID"])
+            ).fetchall()
+            tagged.extend((kind, r) for r in sorted(comp_rows, key=comp_key))
 
         matches: list[dict] = []
-        for maker in candidates:
+        for kind, maker in tagged:
             if taker_remaining <= 0:
                 break
             maker_remaining = int(maker["REMAINING_AMOUNT"])
@@ -368,6 +423,7 @@ class OrderService:
                 "price": int(maker["PRICE"]),
                 "trade_size": trade_size,
                 "new_maker_remaining": new_maker_remaining,
+                "match_kind": kind,
             })
 
         if dry_run:
@@ -432,51 +488,64 @@ class OrderService:
 
     def _settle_on_chain(
         self, taker_order: OrderData, taker_signature: bytes, matches: list[dict]
-    ) -> bytes:
-        """Submit `matchOrders` as the operator and return the tx hash."""
-        assert self._onchain is not None
+    ) -> list[bytes]:
+        """Submit `matchOrders` as the operator, one tx per match-kind group.
+
+        Each call to CTFExchange.matchOrders resolves to a single MatchType
+        derived from the taker/maker token pairing, so NORMAL fills cannot
+        share a tx with MINT/MERGE fills. Returns one tx hash per group.
+        """
         client = self._onchain._client                    # noqa: SLF001
         exchange = self._onchain._contracts.exchange      # noqa: SLF001
 
-        taker_solidity = self._to_solidity_order(taker_order, taker_signature)
-        maker_solidity_orders = []
-        maker_fill_amounts = []
-        taker_fill_amount = 0
+        groups: dict[str, list[dict]] = {}
         for m in matches:
-            maker_row = m["maker_row"]
-            maker_signed = json.loads(maker_row["ORDER_JSON"])
-            maker_order = OrderData(
-                salt=int(maker_signed["salt"]),
-                maker=maker_signed["maker"],
-                signer=maker_signed["signer"],
-                taker=maker_signed["taker"],
-                tokenId=int(maker_signed["tokenId"]),
-                makerAmount=int(maker_signed["makerAmount"]),
-                takerAmount=int(maker_signed["takerAmount"]),
-                expiration=int(maker_signed["expiration"]),
-                nonce=int(maker_signed["nonce"]),
-                feeRateBps=int(maker_signed["feeRateBps"]),
-                side=int(maker_signed["side"]),
-                signatureType=int(maker_signed["signatureType"]),
-            )
-            maker_sig = bytes.fromhex(maker_signed["signature"][2:])
-            maker_solidity_orders.append(self._to_solidity_order(maker_order, maker_sig))
-            # CTFExchange.matchOrders expects fill amounts in maker-asset units.
-            # For maker (resting), that's `trade_size` of their makerAsset side.
-            maker_fill_amount = self._maker_fill_amount(maker_order, m["trade_size"])
-            maker_fill_amounts.append(maker_fill_amount)
-            taker_fill_amount += self._taker_fill_amount(
-                taker_order, m["trade_size"]
-            )
+            groups.setdefault(m.get("match_kind", "NORMAL"), []).append(m)
 
-        fn = exchange.functions.matchOrders(
-            taker_solidity,
-            maker_solidity_orders,
-            taker_fill_amount,
-            maker_fill_amounts,
-        )
-        receipt = send_admin_tx(client, fn, timeout=60)
-        return receipt["transactionHash"]
+        taker_solidity = self._to_solidity_order(taker_order, taker_signature)
+        tx_hashes: list[bytes] = []
+        for group in groups.values():
+            maker_solidity_orders = []
+            maker_fill_amounts = []
+            taker_fill_amount = 0
+            for m in group:
+                maker_row = m["maker_row"]
+                maker_signed = json.loads(maker_row["ORDER_JSON"])
+                maker_order = OrderData(
+                    salt=int(maker_signed["salt"]),
+                    maker=maker_signed["maker"],
+                    signer=maker_signed["signer"],
+                    taker=maker_signed["taker"],
+                    tokenId=int(maker_signed["tokenId"]),
+                    makerAmount=int(maker_signed["makerAmount"]),
+                    takerAmount=int(maker_signed["takerAmount"]),
+                    expiration=int(maker_signed["expiration"]),
+                    nonce=int(maker_signed["nonce"]),
+                    feeRateBps=int(maker_signed["feeRateBps"]),
+                    side=int(maker_signed["side"]),
+                    signatureType=int(maker_signed["signatureType"]),
+                )
+                maker_sig = bytes.fromhex(maker_signed["signature"][2:])
+                maker_solidity_orders.append(
+                    self._to_solidity_order(maker_order, maker_sig)
+                )
+                # matchOrders expects fill amounts in each side's makerAsset units.
+                maker_fill_amounts.append(
+                    self._maker_fill_amount(maker_order, m["trade_size"])
+                )
+                taker_fill_amount += self._taker_fill_amount(
+                    taker_order, m["trade_size"]
+                )
+
+            fn = exchange.functions.matchOrders(
+                taker_solidity,
+                maker_solidity_orders,
+                taker_fill_amount,
+                maker_fill_amounts,
+            )
+            receipt = send_admin_tx(client, fn, timeout=60)
+            tx_hashes.append(receipt["transactionHash"])
+        return tx_hashes
 
     @staticmethod
     def _to_solidity_order(order: OrderData, signature: bytes) -> tuple:
