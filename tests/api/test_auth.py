@@ -1,9 +1,7 @@
 """Auth + onboarding flow tests.
 
-Run with on-chain integration disabled (see conftest), so register skips the
-faucet drip and approvals — we're verifying the auth layer end-to-end here.
-A separate `tests/onchain/` suite (gated on a live anvil) covers the on-chain
-parts.
+Anvil + the deployed exchange must be running — register hits the faucet
+and grants approvals as part of every signup.
 """
 from fastapi.testclient import TestClient
 
@@ -27,8 +25,8 @@ def test_register_returns_jwt_and_user():
         assert body["user"]["email"] == "alice@example.com"
         assert body["user"]["handle"] == "alice"
         assert body["user"]["eth_address"].startswith("0x")
-        # On-chain disabled in tests, so onboarded_at should remain null.
-        assert body["user"]["onboarded_at"] is None
+        # On-chain onboarding ran during register — faucet + approvals confirmed.
+        assert body["user"]["onboarded_at"] is not None
 
 
 def test_register_rejects_duplicate_email():

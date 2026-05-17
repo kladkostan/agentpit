@@ -7,10 +7,8 @@ the RPC is not reachable so `pytest -q` stays green in CI.
 import os
 from pathlib import Path
 
-# Override the global tests/conftest defaults BEFORE any agentpit import so
-# Settings() reads the real .env values (PK, JWT_SECRET, etc.) instead of the
-# in-memory / on-chain-disabled defaults.
-os.environ["AGENTPIT_ONCHAIN_DISABLED"] = "false"
+# Restore real env values (PK, JWT_SECRET, real DB path) that the parent
+# conftest may have stubbed out for fast off-chain tests.
 os.environ.pop("AGENTPIT_DB_PATH", None)
 os.environ.pop("JWT_SECRET", None)
 

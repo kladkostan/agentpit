@@ -49,16 +49,18 @@ def _configure_root_logging() -> None:
     root.addHandler(handler)
 
 
-def _run_polymarket_sync(db: DbSession) -> int:
+def _run_polymarket_sync(db: DbSession, admin: OnchainAdmin) -> int:
     with db.write() as conn:
-        created = fetch_and_sync_polymarket_markets(conn)
+        created = fetch_and_sync_polymarket_markets(conn, admin)
     return len(created)
 
 
-async def _polymarket_sync_loop(db: DbSession, interval_seconds: int) -> None:
+async def _polymarket_sync_loop(
+    db: DbSession, admin: OnchainAdmin, interval_seconds: int
+) -> None:
     while True:
         try:
-            count = await asyncio.to_thread(_run_polymarket_sync, db)
+            count = await asyncio.to_thread(_run_polymarket_sync, db, admin)
             log.info("Polymarket sync added %d new markets", count)
         except asyncio.CancelledError:
             raise
@@ -67,16 +69,12 @@ async def _polymarket_sync_loop(db: DbSession, interval_seconds: int) -> None:
         await asyncio.sleep(interval_seconds)
 
 
-def _build_onchain_admin(settings: Settings) -> OnchainAdmin | None:
-    if settings.onchain_disabled:
-        log.warning("AGENTPIT_ONCHAIN_DISABLED=true — register/login will skip on-chain steps")
-        return None
+def _build_onchain_admin(settings: Settings) -> OnchainAdmin:
     if not settings.deployment_path.exists():
-        log.warning(
-            "deployment file %s missing — running without on-chain integration",
-            settings.deployment_path,
+        raise RuntimeError(
+            f"on-chain deployment file {settings.deployment_path} not found — "
+            "run scripts/run_node.sh && scripts/deploy_exchange.sh first"
         )
-        return None
     deployment = Deployment.load(settings.deployment_path)
     client = Web3Client(settings, deployment)
     client.verify_chain()
@@ -105,7 +103,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Polymarket sync enabled (interval=%ds)", settings.sync_interval_seconds
             )
             sync_task = asyncio.create_task(
-                _polymarket_sync_loop(db_session, settings.sync_interval_seconds)
+                _polymarket_sync_loop(
+                    db_session, onchain_admin, settings.sync_interval_seconds
+                )
             )
         else:
             log.info("Polymarket sync disabled (set SYNC=true to enable)")

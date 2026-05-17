@@ -23,7 +23,7 @@ _ZERO_BYTES32 = b"\x00" * 32
 class PositionService:
     """User-signed split / merge / redeem against the on-chain CTF contract."""
 
-    def __init__(self, db: DbSession, onchain: OnchainAdmin | None):
+    def __init__(self, db: DbSession, onchain: OnchainAdmin):
         self._db = db
         self._onchain = onchain
 
@@ -31,8 +31,6 @@ class PositionService:
         self, user: User, market_id: int, payload: SplitPositionRequest
     ) -> PositionResponse:
         market = self._require_market(market_id)
-        if self._onchain is None:
-            raise MarketStateError("on-chain integration disabled")
         condition_id = hex2bytes(market.condition_id.value)
         bal = self._onchain.usd_balance(user.eth_address)
         if bal < payload.amount:
@@ -44,8 +42,6 @@ class PositionService:
         self, user: User, market_id: int, payload: MergePositionRequest
     ) -> PositionResponse:
         market = self._require_market(market_id)
-        if self._onchain is None:
-            raise MarketStateError("on-chain integration disabled")
         condition_id = hex2bytes(market.condition_id.value)
         for token_id, _label in market.erc1155_tokens:
             bal = self._onchain.ctf_balance(user.eth_address, int(token_id))
@@ -65,8 +61,6 @@ class PositionService:
         market = self._require_market(market_id)
         if market.market_state != MarketState.RESOLVED:
             raise MarketStateError("market not resolved yet")
-        if self._onchain is None:
-            raise MarketStateError("on-chain integration disabled")
         condition_id = hex2bytes(market.condition_id.value)
         usd_address = self._onchain._contracts.usd.address  # noqa: SLF001
         partition = [1 << i for i in range(len(market.erc1155_tokens))]
@@ -94,7 +88,6 @@ class PositionService:
         return market
 
     def _snapshot(self, user: User, market, *, locked: int = 0, unlocked: int = 0):
-        assert self._onchain is not None
         balances = {}
         for token_id, _label in market.erc1155_tokens:
             balances[token_id] = self._onchain.ctf_balance(

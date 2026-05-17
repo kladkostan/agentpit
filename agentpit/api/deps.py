@@ -32,7 +32,7 @@ def get_jwt_coder() -> JwtCoder:
     raise RuntimeError("get_jwt_coder has not been overridden by the app factory")
 
 
-def get_onchain_admin() -> OnchainAdmin | None:
+def get_onchain_admin() -> OnchainAdmin:
     raise RuntimeError("get_onchain_admin has not been overridden by the app factory")
 
 
@@ -45,7 +45,7 @@ def get_current_user() -> User:
 SessionDep = Annotated[DbSession, Depends(get_db_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 JwtCoderDep = Annotated[JwtCoder, Depends(get_jwt_coder)]
-OnchainAdminDep = Annotated[OnchainAdmin | None, Depends(get_onchain_admin)]
+OnchainAdminDep = Annotated[OnchainAdmin, Depends(get_onchain_admin)]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 

@@ -41,9 +41,6 @@ class Settings(BaseSettings):
     rpc_url_override: str | None = Field(
         default=None, validation_alias="RPC_URL"
     )
-    onchain_disabled: bool = Field(
-        default=False, validation_alias="AGENTPIT_ONCHAIN_DISABLED"
-    )
     signup_gas_grant_wei: int = Field(
         default=10**18, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
     )
