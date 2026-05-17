@@ -86,6 +86,18 @@ class OnchainAdmin:
         )
         return send_admin_tx(self._client, fn, timeout=timeout)
 
+    def report_payouts(
+        self, question_id: bytes, payouts: list[int], *, timeout: int = 30
+    ) -> TxReceipt:
+        """Admin (= local oracle) reports the resolved payout vector.
+
+        For binary YES/NO markets `payouts` is `[1, 0]` if YES won, `[0, 1]`
+        if NO won. The CTF rejects re-reporting (custom error) — callers
+        wanting idempotency should pre-check `payoutDenominator` or catch.
+        """
+        fn = self._contracts.ctf.functions.reportPayouts(question_id, payouts)
+        return send_admin_tx(self._client, fn, timeout=timeout)
+
     def user_split_position(
         self,
         user_account: LocalAccount,
@@ -110,6 +122,9 @@ class OnchainAdmin:
         return self._contracts.usd.functions.balanceOf(
             Web3.to_checksum_address(address)
         ).call()
+
+    def native_balance(self, address: str) -> int:
+        return self._client.web3.eth.get_balance(Web3.to_checksum_address(address))
 
     def ctf_balance(self, address: str, token_id: int) -> int:
         return self._contracts.ctf.functions.balanceOf(
