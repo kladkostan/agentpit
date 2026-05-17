@@ -13,6 +13,7 @@ class Market(BaseModel):
     slug: str
     market_id: int
     polymarket_id: Optional[int] = None
+    polymarket_condition_id: Optional[str] = None
     condition_id: ConditionId = None
     description: str
     erc1155_tokens: list[tuple[str, str]]

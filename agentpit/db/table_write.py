@@ -116,6 +116,7 @@ class TableWrite:
             INSERT INTO markets (MARKET_ID,
                                  CONDITION_ID,
                                  POLYMARKET_ID,
+                                 POLYMARKET_CONDITION_ID,
                                  QUESTION,
                                  DESCRIPTION,
                                  SLUG,
@@ -123,12 +124,13 @@ class TableWrite:
                                  END_DATE,
                                  ERC1155_TOKENS,
                                  MARKET_STATE)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 next_market_id,
                 condition_id.value,
                 request.polymarket_id,
+                request.polymarket_condition_id,
                 request.question,
                 request.description,
                 request.slug,
@@ -143,6 +145,7 @@ class TableWrite:
             question=request.question,
             market_id=next_market_id,
             polymarket_id=request.polymarket_id,
+            polymarket_condition_id=request.polymarket_condition_id,
             condition_id=condition_id,
             description=request.description,
             slug=request.slug,

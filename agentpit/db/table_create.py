@@ -131,6 +131,7 @@ class TableCreate:
                 MARKET_ID INTEGER PRIMARY KEY,
                 CONDITION_ID TEXT NOT NULL UNIQUE, -- u256 hex string
                 POLYMARKET_ID INTEGER,      -- optional source market id from Polymarket
+                POLYMARKET_CONDITION_ID TEXT, -- upstream conditionId for resolution mirror
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
@@ -143,8 +144,16 @@ class TableCreate:
             )
             """
         )
+        # Additive: dev DBs created before POLYMARKET_CONDITION_ID landed.
+        cols = {row[1] for row in db.execute("PRAGMA table_info(markets)").fetchall()}
+        if "POLYMARKET_CONDITION_ID" not in cols:
+            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_CONDITION_ID TEXT")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(CONDITION_ID)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_markets_polymarket_condition_id "
+            "ON markets(POLYMARKET_CONDITION_ID)"
         )
 
     @staticmethod
