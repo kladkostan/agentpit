@@ -79,14 +79,16 @@ def fund_user_with_native(
     web3 = client.web3
     with client.send_lock:
         nonce = web3.eth.get_transaction_count(client.admin.address, "pending")
+        base_fee = web3.eth.get_block("latest").get("baseFeePerGas") or 0
+        priority_fee = web3.to_wei("2", "gwei")
         tx = {
             "to": Web3.to_checksum_address(user_address),
             "value": value_wei,
             "nonce": nonce,
             "chainId": client.deployment.chain_id,
             "gas": 21_000,
-            "maxFeePerGas": web3.to_wei("100", "gwei"),
-            "maxPriorityFeePerGas": web3.to_wei("2", "gwei"),
+            "maxFeePerGas": base_fee * 2 + priority_fee,
+            "maxPriorityFeePerGas": priority_fee,
             "type": 2,
         }
         signed = client.admin.sign_transaction(tx)
