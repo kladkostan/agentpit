@@ -21,18 +21,13 @@ log = logging.getLogger(__name__)
 
 
 class AuthService:
-    """Coordinates registration, login, and on-chain onboarding.
-
-    `onchain_admin` may be None for tests / dev modes where the chain isn't
-    reachable (`AGENTPIT_ONCHAIN_DISABLED=true`); in that case onboarding is
-    skipped and `ONBOARDED_AT` stays NULL.
-    """
+    """Coordinates registration, login, and on-chain onboarding."""
 
     def __init__(
         self,
         db: DbSession,
         coder: JwtCoder,
-        onchain_admin: OnchainAdmin | None,
+        onchain_admin: OnchainAdmin,
         settings: Settings,
     ):
         self._db = db
@@ -54,18 +49,13 @@ class AuthService:
 
         # On-chain onboarding happens *outside* the DB transaction so we don't
         # hold the write lock for ~1s of network round-trips.
-        if self._onchain is not None:
-            try:
-                self._run_onboarding(acct)
-            except Exception as exc:
-                log.exception("on-chain onboarding failed for user %s", user_id)
-                raise OnboardingError(str(exc)) from exc
-            with self._db.write() as conn:
-                TableWrite.mark_user_onboarded(conn, user_id)
-        else:
-            log.warning(
-                "AGENTPIT_ONCHAIN_DISABLED is set — skipping faucet drip + approvals"
-            )
+        try:
+            self._run_onboarding(acct)
+        except Exception as exc:
+            log.exception("on-chain onboarding failed for user %s", user_id)
+            raise OnboardingError(str(exc)) from exc
+        with self._db.write() as conn:
+            TableWrite.mark_user_onboarded(conn, user_id)
 
         with self._db.read() as conn:
             user = TableRead.get_user_by_userid(conn, user_id)
@@ -85,12 +75,12 @@ class AuthService:
             raise InvalidCredentialsError("invalid email or password")
         if not verify_password(payload.password, password_hash):
             raise InvalidCredentialsError("invalid email or password")
+        self._maybe_reonboard(user)
         return self._issue(user)
 
     # --- helpers --------------------------------------------------------
 
     def _run_onboarding(self, user_account) -> None:
-        assert self._onchain is not None
         timeout = self._settings.tx_confirmations_timeout_s
         self._onchain.fund_gas(
             user_account.address,
@@ -99,6 +89,34 @@ class AuthService:
         )
         self._onchain.faucet_drip(user_account.address, timeout=timeout)
         self._onchain.grant_user_approvals(user_account, timeout=timeout)
+
+    def _maybe_reonboard(self, user: User) -> None:
+        """Re-run onboarding for an already-onboarded user with zero native balance.
+
+        Anvil's chain state is wiped on every restart while the SQLite DB persists,
+        so a user can end up logged in but unfunded. Native balance is the chain-wipe
+        signal: it never drops to zero through normal use (gas spent per tx is tiny
+        relative to signup_gas_grant_wei). Failures here are logged but never block
+        login — the user can still authenticate and see balance errors at trade time.
+        """
+        if self._onchain is None or user.onboarded_at is None:
+            return
+        try:
+            native = self._onchain.native_balance(user.eth_address)
+        except Exception as exc:
+            log.warning("chain balance check failed for %s: %s", user.user_id, exc)
+            return
+        if native > 0:
+            return
+        log.info(
+            "user %s has zero native balance — re-running onboarding "
+            "(chain likely reset)",
+            user.user_id,
+        )
+        try:
+            self._run_onboarding(user.eth_key)
+        except Exception:
+            log.exception("re-onboarding failed for %s", user.user_id)
 
     def _issue(self, user: User) -> AuthResponse:
         token = self._coder.encode(user_id=user.user_id, email=user.email)
