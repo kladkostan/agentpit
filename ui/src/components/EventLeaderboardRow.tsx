@@ -7,7 +7,10 @@ interface EventLeaderboardRowProps {
   rank: number;
   isSelected: boolean;
   selectedOutcome: string | null;
-  onSelectMarket: (marketId: number, outcome: string) => void;
+  /** Row body click — toggles expand/collapse for this market. */
+  onToggleMarket: (marketId: number, outcome: string) => void;
+  /** Yes/No chip click — always selects, never collapses. */
+  onPickOutcome: (marketId: number, outcome: string) => void;
 }
 
 function OutcomeIcon({ market }: { market: Market }) {
@@ -43,7 +46,8 @@ export function EventLeaderboardRow({
   rank,
   isSelected,
   selectedOutcome,
-  onSelectMarket,
+  onToggleMarket,
+  onPickOutcome,
 }: EventLeaderboardRowProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const noLabel = market.erc1155_tokens[1]?.[1];
@@ -64,7 +68,8 @@ export function EventLeaderboardRow({
     >
       <button
         type="button"
-        onClick={() => onSelectMarket(market.market_id, yesLabel ?? "")}
+        onClick={() => onToggleMarket(market.market_id, yesLabel ?? "")}
+        aria-expanded={isSelected}
         className="flex flex-1 items-center gap-4 py-3 pl-3 pr-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="w-10 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70 tabular-nums">
@@ -93,14 +98,14 @@ export function EventLeaderboardRow({
           label="Yes"
           price={formatCents(yesCents)}
           isActive={isSelected && selectedOutcome === yesLabel}
-          onClick={() => onSelectMarket(market.market_id, yesLabel ?? "")}
+          onClick={() => onPickOutcome(market.market_id, yesLabel ?? "")}
         />
         <PriceChip
           tone="no"
           label="No"
           price={formatCents(noCents)}
           isActive={isSelected && selectedOutcome === noLabel}
-          onClick={() => onSelectMarket(market.market_id, noLabel ?? "")}
+          onClick={() => onPickOutcome(market.market_id, noLabel ?? "")}
         />
       </div>
     </div>

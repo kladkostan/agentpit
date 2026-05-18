@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useEvent } from "@/api/events";
 import { EventLeaderboardRow } from "@/components/EventLeaderboardRow";
+import { Orderbook } from "@/components/orders/Orderbook";
 import { OrderTicket } from "@/components/orders/OrderTicket";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,9 +42,14 @@ export function EventDetailPage() {
     marketId: number;
     outcome: string;
   } | null>(null);
+  // Track whether we've already auto-selected for the current slug. Without
+  // this, toggling the auto-selected row to `null` would trigger an immediate
+  // re-selection on the next render — the row would never visually collapse.
+  const autoSelectedSlugRef = useRef<string | null>(null);
 
   useEffect(() => {
     setSelection(null);
+    autoSelectedSlugRef.current = null;
   }, [slug]);
 
   const midByMarket = useYesMidMap(data?.markets ?? []);
@@ -52,17 +58,17 @@ export function EventDetailPage() {
     [data, midByMarket],
   );
 
-  // Default-select the top-ranked outcome's YES once data is loaded.
+  // Default-select the top-ranked outcome's YES once data is loaded — but
+  // ONLY the first time per slug, so user toggles can actually deselect.
   useEffect(() => {
-    if (selection !== null) return;
+    if (!slug || autoSelectedSlugRef.current === slug) return;
     const first = ordered[0];
-    if (first) {
-      const yesLabel = first.erc1155_tokens[0]?.[1];
-      if (yesLabel) {
-        setSelection({ marketId: first.market_id, outcome: yesLabel });
-      }
-    }
-  }, [ordered, selection]);
+    if (!first) return;
+    const yesLabel = first.erc1155_tokens[0]?.[1];
+    if (!yesLabel) return;
+    autoSelectedSlugRef.current = slug;
+    setSelection({ marketId: first.market_id, outcome: yesLabel });
+  }, [ordered, slug]);
 
   if (isLoading) return <EventDetailSkeleton />;
 
@@ -160,22 +166,38 @@ export function EventDetailPage() {
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="rounded-2xl border bg-card/40">
-          {ordered.map((market, idx) => (
-            <EventLeaderboardRow
-              key={market.market_id}
-              market={market}
-              rank={idx + 1}
-              isSelected={selection?.marketId === market.market_id}
-              selectedOutcome={
-                selection?.marketId === market.market_id
-                  ? selection.outcome
-                  : null
-              }
-              onSelectMarket={(marketId, outcome) =>
-                setSelection({ marketId, outcome })
-              }
-            />
-          ))}
+          {ordered.map((market, idx) => {
+            const isExpanded = selection?.marketId === market.market_id;
+            const yesLabel = market.erc1155_tokens[0]?.[1] ?? "";
+            return (
+              <Fragment key={market.market_id}>
+                <EventLeaderboardRow
+                  market={market}
+                  rank={idx + 1}
+                  isSelected={isExpanded}
+                  selectedOutcome={isExpanded ? selection.outcome : null}
+                  onToggleMarket={(marketId, outcome) =>
+                    setSelection((prev) =>
+                      prev?.marketId === marketId
+                        ? null
+                        : { marketId, outcome },
+                    )
+                  }
+                  onPickOutcome={(marketId, outcome) =>
+                    setSelection({ marketId, outcome })
+                  }
+                />
+                {isExpanded ? (
+                  <div className="border-b border-border/60 bg-foreground/[0.02] px-5 py-4 animate-fade-up">
+                    <Orderbook
+                      marketId={market.market_id}
+                      outcome={selection.outcome || yesLabel}
+                    />
+                  </div>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </div>
 
         <aside className="lg:sticky lg:top-20 lg:self-start">
