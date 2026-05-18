@@ -1,7 +1,5 @@
 """Admin endpoints — guarded by an X-Admin-Token header."""
 
-import os
-
 from fastapi.testclient import TestClient
 
 from agentpit.api.main import app
