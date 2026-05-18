@@ -1,9 +1,7 @@
 """PriceOracle: batched + cached + tolerant of upstream failure."""
-import time
-
 import pytest
 
-from agentpit_bots.price_oracle import PriceOracle, OracleSnapshot
+from agentpit_bots.price_oracle import PriceOracle
 
 
 class FakeClob:

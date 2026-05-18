@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class _ClobLike(Protocol):
-    def get_midpoints(self, params): ...   # noqa: D401, ANN001
+    def get_midpoints(self, params: list) -> dict[str, float | None]: ...
 
 
 @dataclass
