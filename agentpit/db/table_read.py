@@ -6,10 +6,46 @@ from eth_account.signers.local import LocalAccount
 from web3 import Web3
 
 from agentpit.utils.parse import parse_32b_hex_private_key
+from agentpit.datastructures.event import Event
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.user import User
 from ..datastructures.condition_id import ConditionId
+
+
+_MARKET_COLS = (
+    "MARKET_ID, POLYMARKET_ID, POLYMARKET_CONDITION_ID, CONDITION_ID, "
+    "QUESTION, DESCRIPTION, SLUG, "
+    "START_DATE, END_DATE, ERC1155_TOKENS, "
+    "COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE, "
+    "RESOLVED_OUTCOME, "
+    "EVENT_ID, OUTCOME_LABEL, ICON_URL"
+)
+
+
+def _row_to_market(row: tuple) -> Market:
+    (market_id, polymarket_id, polymarket_condition_id, condition_id_str,
+     question, description, slug, start_date, end_date,
+     erc1155_tokens_json, market_state, resolved_outcome,
+     event_id, outcome_label, icon_url) = row
+    erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
+    return Market(
+        question=question,
+        market_id=market_id,
+        polymarket_id=polymarket_id,
+        polymarket_condition_id=polymarket_condition_id,
+        condition_id=ConditionId(condition_id_str),
+        description=description,
+        slug=slug,
+        start_date=start_date,
+        end_date=end_date,
+        erc1155_tokens=erc1155_tokens,
+        market_state=MarketState(market_state),
+        resolved_outcome=resolved_outcome,
+        event_id=event_id,
+        outcome_label=outcome_label,
+        icon_url=icon_url,
+    )
 
 
 class TableRead:
@@ -183,234 +219,143 @@ class TableRead:
 
     @staticmethod
     def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:
-        """
-        Fetch a single market by MARKET_ID.
-
-        Returns:
-            Market instance if found, otherwise None.
-        """
-        cur = db.execute(
-            """
-             SELECT MARKET_ID, POLYMARKET_ID, POLYMARKET_CONDITION_ID, CONDITION_ID,
-                   QUESTION, DESCRIPTION, SLUG,
-                   START_DATE, END_DATE, ERC1155_TOKENS,
-                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
-                   RESOLVED_OUTCOME
-            FROM markets
-            WHERE MARKET_ID = ?
-            """,
+        row = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = ?",
             (market_id,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-
-        (market_id_val, polymarket_id, polymarket_condition_id, condition_id_str,
-         question, description, slug, start_date, end_date,
-         erc1155_tokens_json, market_state, resolved_outcome) = row
-
-        erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
-
-        return Market(
-            question=question,
-            market_id=market_id_val,
-            polymarket_id=polymarket_id,
-            polymarket_condition_id=polymarket_condition_id,
-            condition_id=ConditionId(condition_id_str),
-            description=description,
-            slug=slug,
-            start_date=start_date,
-            end_date=end_date,
-            erc1155_tokens=erc1155_tokens,
-            market_state=MarketState(market_state),
-            resolved_outcome=resolved_outcome,
-        )
+        ).fetchone()
+        return _row_to_market(row) if row else None
 
     @staticmethod
-    def read_market_by_condition_id(db: sqlite3.Connection, condition_id: ConditionId) -> Market | None:
-        """
-        Fetch a single market by CONDITION_ID.
-
-        Returns:
-            Market instance if found, otherwise None.
-        """
-        cur = db.execute(
-            """
-             SELECT MARKET_ID, POLYMARKET_ID, POLYMARKET_CONDITION_ID, CONDITION_ID,
-                   QUESTION, DESCRIPTION, SLUG,
-                   START_DATE, END_DATE, ERC1155_TOKENS,
-                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
-                   RESOLVED_OUTCOME
-            FROM markets
-            WHERE CONDITION_ID = ?
-            """,
+    def read_market_by_condition_id(
+        db: sqlite3.Connection, condition_id: ConditionId
+    ) -> Market | None:
+        row = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets WHERE CONDITION_ID = ?",
             (condition_id.value,),
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-
-        (market_id_val, polymarket_id, polymarket_condition_id,
-         cond_id, question, description, slug, start_date, end_date,
-         erc1155_tokens_json, market_state, resolved_outcome) = row
-
-        erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
-
-        return Market(
-            question=question,
-            market_id=market_id_val,
-            polymarket_id=polymarket_id,
-            polymarket_condition_id=polymarket_condition_id,
-            condition_id=ConditionId(cond_id),
-            description=description,
-            slug=slug,
-            start_date=start_date,
-            end_date=end_date,
-            erc1155_tokens=erc1155_tokens,
-            market_state=MarketState(market_state),
-            resolved_outcome=resolved_outcome,
-        )
+        ).fetchone()
+        return _row_to_market(row) if row else None
 
     @staticmethod
     def list_all_markets(db: sqlite3.Connection) -> list[Market]:
-        """
-        Fetch all markets from the database without pagination.
-
-        Args:
-            db: Database connection
-
-        Returns:
-            List of all Market instances
-        """
         cur = db.execute(
-            """
-            SELECT MARKET_ID,
-                   POLYMARKET_ID,
-                   POLYMARKET_CONDITION_ID,
-                   CONDITION_ID,
-                   QUESTION,
-                   DESCRIPTION,
-                   SLUG,
-                   ERC1155_TOKENS,
-                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
-                   RESOLVED_OUTCOME,
-                   START_DATE,
-                   END_DATE
-            FROM markets
-            ORDER BY MARKET_ID
-            """
+            f"SELECT {_MARKET_COLS} FROM markets ORDER BY MARKET_ID"
         )
-
-        markets: list[Market] = []
-        for row in cur.fetchall():
-            (
-                market_id_val,
-                polymarket_id,
-                polymarket_condition_id,
-                condition_id_str,
-                question,
-                description,
-                slug,
-                erc1155_tokens_json,
-                market_state,
-                resolved_outcome,
-                start_date,
-                end_date,
-            ) = row
-            erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
-            markets.append(
-                Market(
-                    question=question,
-                    market_id=market_id_val,
-                    polymarket_id=polymarket_id,
-                    polymarket_condition_id=polymarket_condition_id,
-                    condition_id=ConditionId(condition_id_str),
-                    description=description,
-                    slug=slug,
-                    erc1155_tokens=erc1155_tokens,
-                    market_state=MarketState(market_state),
-                    resolved_outcome=resolved_outcome,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-            )
-
-        return markets
+        return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def list_markets(db: sqlite3.Connection, limit: int = 100, offset: int = 0) -> tuple[list[Market], int]:
-        """
-        Fetch a paginated list of markets.
-
-        Args:
-            db: Database connection
-            limit: Maximum number of markets to return
-            offset: Number of markets to skip
-
-        Returns:
-            Tuple of (list of Market instances, total count)
-        """
-        # Get total count
-        count_cur = db.execute("SELECT COUNT(*) FROM markets")
-        total = count_cur.fetchone()[0]
-
-        # Get paginated markets including start/end dates
+    def list_markets(
+        db: sqlite3.Connection, limit: int = 100, offset: int = 0
+    ) -> tuple[list[Market], int]:
+        total = db.execute("SELECT COUNT(*) FROM markets").fetchone()[0]
         cur = db.execute(
-            """
-            SELECT MARKET_ID,
-                   POLYMARKET_ID,
-                   POLYMARKET_CONDITION_ID,
-                   CONDITION_ID,
-                   QUESTION,
-                   DESCRIPTION,
-                   SLUG,
-                   ERC1155_TOKENS,
-                   COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE,
-                   RESOLVED_OUTCOME,
-                   START_DATE,
-                   END_DATE
-            FROM markets
-            ORDER BY MARKET_ID DESC LIMIT ?
-            OFFSET ?
-            """,
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "ORDER BY MARKET_ID DESC LIMIT ? OFFSET ?",
             (limit, offset),
         )
-
-        markets: list[Market] = []
-        for row in cur.fetchall():
-            (
-                market_id_val,
-                polymarket_id,
-                polymarket_condition_id,
-                condition_id_str,
-                question,
-                description,
-                slug,
-                erc1155_tokens_json,
-                market_state,
-                resolved_outcome,
-                start_date,
-                end_date,
-            ) = row
-            erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
-            markets.append(
-                Market(
-                    question=question,
-                    market_id=market_id_val,
-                    polymarket_id=polymarket_id,
-                    polymarket_condition_id=polymarket_condition_id,
-                    condition_id=ConditionId(condition_id_str),
-                    description=description,
-                    slug=slug,
-                    erc1155_tokens=erc1155_tokens,
-                    market_state=MarketState(market_state),
-                    resolved_outcome=resolved_outcome,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-            )
-
+        markets = [_row_to_market(row) for row in cur.fetchall()]
         return markets, total
+
+    _EVENT_COLS = (
+        "EVENT_ID, SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY, "
+        "START_DATE, END_DATE, POLYMARKET_EVENT_ID"
+    )
+
+    @staticmethod
+    def _row_to_event(row: tuple) -> Event:
+        (event_id, slug, title, description, icon_url, category,
+         start_date, end_date, polymarket_event_id) = row
+        return Event(
+            event_id=event_id,
+            slug=slug,
+            title=title,
+            description=description or "",
+            icon_url=icon_url,
+            category=category,
+            start_date=start_date,
+            end_date=end_date,
+            polymarket_event_id=polymarket_event_id,
+        )
+
+    @staticmethod
+    def get_event_by_id(db: sqlite3.Connection, event_id: int) -> Event | None:
+        row = db.execute(
+            f"SELECT {TableRead._EVENT_COLS} FROM events WHERE EVENT_ID = ? LIMIT 1",
+            (event_id,),
+        ).fetchone()
+        return TableRead._row_to_event(row) if row else None
+
+    @staticmethod
+    def get_event_by_slug(db: sqlite3.Connection, slug: str) -> Event | None:
+        row = db.execute(
+            f"SELECT {TableRead._EVENT_COLS} FROM events WHERE SLUG = ? LIMIT 1",
+            (slug,),
+        ).fetchone()
+        return TableRead._row_to_event(row) if row else None
+
+    @staticmethod
+    def get_event_by_polymarket_event_id(
+        db: sqlite3.Connection, polymarket_event_id: str
+    ) -> Event | None:
+        row = db.execute(
+            f"SELECT {TableRead._EVENT_COLS} FROM events "
+            "WHERE POLYMARKET_EVENT_ID = ? LIMIT 1",
+            (polymarket_event_id,),
+        ).fetchone()
+        return TableRead._row_to_event(row) if row else None
+
+    @staticmethod
+    def list_markets_by_event_id(
+        db: sqlite3.Connection, event_id: int
+    ) -> list[Market]:
+        cur = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "WHERE EVENT_ID = ? ORDER BY MARKET_ID",
+            (event_id,),
+        )
+        return [_row_to_market(row) for row in cur.fetchall()]
+
+    @staticmethod
+    def list_events_with_markets(
+        db: sqlite3.Connection, limit: int = 100, offset: int = 0
+    ) -> tuple[list[tuple[Event, list[Market]]], int]:
+        """Return events ordered by newest, each paired with its child markets.
+
+        Used by the home page: every market belongs to an event, so this is
+        the primary listing query. One query for the event page + one for
+        all member markets (bucketed in Python) — no N+1.
+        """
+        total = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        events_cur = db.execute(
+            f"SELECT {TableRead._EVENT_COLS} FROM events "
+            "ORDER BY EVENT_ID DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
+        events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]
+        if not events:
+            return [], total
+
+        ids = [ev.event_id for ev in events]
+        placeholders = ",".join("?" * len(ids))
+        markets_cur = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            f"WHERE EVENT_ID IN ({placeholders}) ORDER BY EVENT_ID, MARKET_ID",
+            ids,
+        )
+        by_event: dict[int, list[Market]] = {eid: [] for eid in ids}
+        for row in markets_cur.fetchall():
+            market = _row_to_market(row)
+            assert market.event_id is not None  # guaranteed by WHERE clause
+            by_event[market.event_id].append(market)
+        return [(ev, by_event[ev.event_id]) for ev in events], total
+
+    @staticmethod
+    def list_orphan_markets(db: sqlite3.Connection) -> list[Market]:
+        """Markets with no EVENT_ID — used by the auto-wrap singleton helper."""
+        cur = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "WHERE EVENT_ID IS NULL ORDER BY MARKET_ID"
+        )
+        return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
     def get_transaction_history(db: sqlite3.Connection, api_key: str) -> list:

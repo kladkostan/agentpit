@@ -132,6 +132,9 @@ class TableCreate:
                 CONDITION_ID TEXT NOT NULL UNIQUE, -- u256 hex string
                 POLYMARKET_ID INTEGER,      -- optional source market id from Polymarket
                 POLYMARKET_CONDITION_ID TEXT, -- upstream conditionId for resolution mirror
+                EVENT_ID INTEGER,           -- optional parent event grouping markets
+                OUTCOME_LABEL TEXT,         -- short label shown inside an event (e.g. "France")
+                ICON_URL TEXT,              -- optional icon for the outcome row (flag, logo, etc.)
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
@@ -144,16 +147,49 @@ class TableCreate:
             )
             """
         )
-        # Additive: dev DBs created before POLYMARKET_CONDITION_ID landed.
         cols = {row[1] for row in db.execute("PRAGMA table_info(markets)").fetchall()}
         if "POLYMARKET_CONDITION_ID" not in cols:
             db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_CONDITION_ID TEXT")
+        if "EVENT_ID" not in cols:
+            db.execute("ALTER TABLE markets ADD COLUMN EVENT_ID INTEGER")
+        if "OUTCOME_LABEL" not in cols:
+            db.execute("ALTER TABLE markets ADD COLUMN OUTCOME_LABEL TEXT")
+        if "ICON_URL" not in cols:
+            db.execute("ALTER TABLE markets ADD COLUMN ICON_URL TEXT")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(CONDITION_ID)"
         )
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_markets_polymarket_condition_id "
             "ON markets(POLYMARKET_CONDITION_ID)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_markets_event_id ON markets(EVENT_ID)"
+        )
+
+    @staticmethod
+    def create_events_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS events (
+                EVENT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                SLUG TEXT NOT NULL UNIQUE,
+                TITLE TEXT NOT NULL,
+                DESCRIPTION TEXT NOT NULL DEFAULT '',
+                ICON_URL TEXT,
+                CATEGORY TEXT,
+                START_DATE INTEGER,
+                END_DATE INTEGER,
+                POLYMARKET_EVENT_ID TEXT
+            )
+            """
+        )
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_polymarket_event_id "
+            "ON events(POLYMARKET_EVENT_ID)"
         )
 
     @staticmethod
@@ -205,5 +241,6 @@ class TableCreate:
         TableCreate.create_users_table(db)
         TableCreate.create_agents_table(db)
         TableCreate.create_personalities_table(db)
+        TableCreate.create_events_table(db)
         TableCreate.create_markets_table(db)
         TableCreate.create_transactions_table(db)

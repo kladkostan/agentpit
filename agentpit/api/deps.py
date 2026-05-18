@@ -9,6 +9,7 @@ from agentpit.db.session import DbSession
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.agent_service import AgentService
 from agentpit.services.auth_service import AuthService
+from agentpit.services.event_service import EventService
 from agentpit.services.market_service import MarketService
 from agentpit.services.order_service import OrderService
 from agentpit.services.personality_service import PersonalityService
@@ -56,6 +57,10 @@ def get_market_service(db: SessionDep, onchain: OnchainAdminDep) -> MarketServic
     return MarketService(db, onchain)
 
 
+def get_event_service(db: SessionDep) -> EventService:
+    return EventService(db)
+
+
 def get_usdc_service(db: SessionDep, onchain: OnchainAdminDep) -> UsdcService:
     return UsdcService(db, onchain)
 
@@ -90,6 +95,7 @@ def get_order_service(db: SessionDep, onchain: OnchainAdminDep) -> OrderService:
 
 
 MarketServiceDep = Annotated[MarketService, Depends(get_market_service)]
+EventServiceDep = Annotated[EventService, Depends(get_event_service)]
 UsdcServiceDep = Annotated[UsdcService, Depends(get_usdc_service)]
 PositionServiceDep = Annotated[PositionService, Depends(get_position_service)]
 PersonalityServiceDep = Annotated[PersonalityService, Depends(get_personality_service)]

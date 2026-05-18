@@ -21,6 +21,9 @@ class Market(BaseModel):
     end_date: Optional[int | None]
     resolved_outcome: Optional[int] = None
     market_state: MarketState
+    event_id: Optional[int] = None
+    outcome_label: Optional[str] = None
+    icon_url: Optional[str] = None
 
     def model_post_init(self, __context):
         check_state(self.market_state != MarketState.RESOLVED or self.resolved_outcome is not None,

@@ -16,6 +16,7 @@ from agentpit.api.exception_handlers import register_exception_handlers
 from agentpit.api.routes import (
     agents,
     auth,
+    events,
     markets,
     orders,
     personalities,
@@ -34,6 +35,7 @@ from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 from agentpit.polymarket.polymarket_sync import fetch_and_sync_polymarket_markets
+from agentpit.services.event_service import EventService
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +99,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        try:
+            wrapped = EventService(db_session).ensure_singleton_events_for_orphans()
+            if wrapped:
+                log.info("Wrapped %d orphan market(s) in singleton events", wrapped)
+        except Exception:
+            log.exception("orphan-market auto-wrap failed at startup")
+
         sync_task: asyncio.Task | None = None
         if settings.sync_enabled:
             log.info(
@@ -140,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(users.router)
     app.include_router(markets.router)
+    app.include_router(events.router)
     app.include_router(orders.router)
     app.include_router(positions.router)
     app.include_router(usdc.router)

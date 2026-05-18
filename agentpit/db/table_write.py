@@ -9,6 +9,7 @@ from eth_account.signers.local import LocalAccount
 from agentpit.common import check_state
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
+from agentpit.datastructures.event import Event
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 
@@ -91,6 +92,82 @@ class TableWrite:
         )
 
     @staticmethod
+    def upsert_event(
+        db: sqlite3.Connection,
+        *,
+        slug: str,
+        title: str,
+        description: str = "",
+        icon_url: str | None = None,
+        category: str | None = None,
+        start_date: int | None = None,
+        end_date: int | None = None,
+        polymarket_event_id: str | None = None,
+    ) -> Event:
+        """Insert an event or update it if SLUG already exists.
+
+        Used by both the seeder and the Polymarket sync to be idempotent.
+        """
+        existing = db.execute(
+            "SELECT EVENT_ID FROM events WHERE SLUG = ? LIMIT 1", (slug,)
+        ).fetchone()
+        if existing is not None:
+            event_id = int(existing[0])
+            db.execute(
+                """
+                UPDATE events
+                SET TITLE = ?, DESCRIPTION = ?, ICON_URL = ?, CATEGORY = ?,
+                    START_DATE = ?, END_DATE = ?, POLYMARKET_EVENT_ID = ?
+                WHERE EVENT_ID = ?
+                """,
+                (title, description, icon_url, category, start_date, end_date,
+                 polymarket_event_id, event_id),
+            )
+        else:
+            cur = db.execute(
+                """
+                INSERT INTO events (SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY,
+                                    START_DATE, END_DATE, POLYMARKET_EVENT_ID)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (slug, title, description, icon_url, category,
+                 start_date, end_date, polymarket_event_id),
+            )
+            event_id = int(cur.lastrowid or 0)
+        return Event(
+            event_id=event_id,
+            slug=slug,
+            title=title,
+            description=description,
+            icon_url=icon_url,
+            category=category,
+            start_date=start_date,
+            end_date=end_date,
+            polymarket_event_id=polymarket_event_id,
+        )
+
+    @staticmethod
+    def attach_market_to_event(
+        db: sqlite3.Connection,
+        *,
+        market_id: int,
+        event_id: int,
+        outcome_label: str | None = None,
+        icon_url: str | None = None,
+    ) -> None:
+        """Bind an existing market to an event, optionally setting display metadata."""
+        db.execute(
+            """
+            UPDATE markets
+            SET EVENT_ID = ?,
+                OUTCOME_LABEL = COALESCE(?, OUTCOME_LABEL),
+                ICON_URL      = COALESCE(?, ICON_URL)
+            WHERE MARKET_ID = ?
+            """,
+            (event_id, outcome_label, icon_url, market_id),
+        )
+
+    @staticmethod
     def create_market(
             db : sqlite3.Connection,
             request: CreateMarketRequest, is_polygon_market: bool
@@ -123,8 +200,11 @@ class TableWrite:
                                  START_DATE,
                                  END_DATE,
                                  ERC1155_TOKENS,
-                                 MARKET_STATE)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 MARKET_STATE,
+                                 EVENT_ID,
+                                 OUTCOME_LABEL,
+                                 ICON_URL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 next_market_id,
@@ -137,7 +217,10 @@ class TableWrite:
                 request.start_date,
                 request.end_date,
                 erc1155_tokens_json,
-                request.state
+                request.state,
+                request.event_id,
+                request.outcome_label,
+                request.icon_url,
             ),
         )
 
@@ -153,7 +236,10 @@ class TableWrite:
             market_state=MarketState(request.state),
             start_date=request.start_date,
             end_date=request.end_date,
-            resolved_outcome=None
+            resolved_outcome=None,
+            event_id=request.event_id,
+            outcome_label=request.outcome_label,
+            icon_url=request.icon_url,
         )
 
     @staticmethod

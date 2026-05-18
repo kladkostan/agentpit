@@ -20,6 +20,12 @@ class MarketNotFoundError(NotFoundError):
         self.market_id = market_id
 
 
+class EventNotFoundError(NotFoundError):
+    def __init__(self, slug: str):
+        super().__init__("Event not found")
+        self.slug = slug
+
+
 class PersonalityNotFoundError(NotFoundError):
     def __init__(self, personality_id: str):
         super().__init__(f"Personality '{personality_id}' not found")

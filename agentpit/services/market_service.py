@@ -18,6 +18,7 @@ from agentpit.domain.exceptions import (
     MarketStateError,
 )
 from agentpit.onchain.admin import OnchainAdmin
+from agentpit.services.event_service import EventService
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +54,22 @@ class MarketService:
             self._prepare_market_on_chain(payload)
 
         with self._db.write() as conn:
-            return TableWrite.create_market(
+            market = TableWrite.create_market(
                 conn, payload, is_polygon_market=payload.condition_id is not None
             )
+        # Enforce the "every market belongs to an event" invariant immediately —
+        # without this, locally-created orphan markets would be invisible on
+        # the home page until the next process restart (which runs the
+        # startup auto-wrap).
+        if market.event_id is None:
+            EventService(self._db).wrap_market_in_singleton_event_if_needed(
+                market.market_id
+            )
+            with self._db.read() as conn:
+                refreshed = TableRead.read_market(conn, market.market_id)
+                if refreshed is not None:
+                    return refreshed
+        return market
 
     def _prepare_market_on_chain(self, payload: CreateMarketRequest) -> None:
         """Run prepareCondition + registerToken and back-fill payload fields."""
