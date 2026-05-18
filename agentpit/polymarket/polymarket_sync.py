@@ -345,6 +345,105 @@ def fetch_polymarket_market(
     return None
 
 
+def _extract_event_metadata(pm_market: dict) -> dict | None:
+    """Pull event fields from the upstream `events` array.
+
+    Polymarket's Gamma response has ``events: [{id, slug, title, image, ...}]``.
+    We take the first entry — markets that belong to more than one event are
+    rare and we treat the first as canonical.
+    """
+    events = pm_market.get("events")
+    if not isinstance(events, list) or len(events) == 0:
+        return None
+    raw = events[0]
+    if not isinstance(raw, dict):
+        return None
+    pm_event_id = raw.get("id")
+    slug = raw.get("slug")
+    title = raw.get("title") or raw.get("name")
+    if not slug or not title:
+        return None
+    start_iso = raw.get("startDate") or raw.get("startDateIso")
+    end_iso = raw.get("endDate") or raw.get("endDateIso")
+    return {
+        "polymarket_event_id": str(pm_event_id) if pm_event_id is not None else None,
+        "slug": str(slug),
+        "title": str(title),
+        "description": str(raw.get("description") or ""),
+        "icon_url": raw.get("image") or raw.get("icon"),
+        "category": raw.get("category"),
+        "start_date": _iso_to_unix(start_iso) if start_iso else None,
+        "end_date": _iso_to_unix(end_iso) if end_iso else None,
+    }
+
+
+def _extract_outcome_metadata(pm_market: dict) -> tuple[str | None, str | None]:
+    """Return ``(outcome_label, icon_url)`` for a single sub-market.
+
+    Polymarket uses ``groupItemTitle`` for the short name shown inside an
+    event (e.g. "France") and ``image`` for the per-outcome icon.
+    """
+    label = pm_market.get("groupItemTitle")
+    icon = pm_market.get("image")
+    return (str(label) if label else None, str(icon) if icon else None)
+
+
+def bind_existing_market_to_upstream_event(
+    db: Connection, *, polymarket_id: int, pm_market: dict
+) -> bool:
+    """Rebind an already-synced market to its upstream event.
+
+    Used on every sync pass so markets created before this feature shipped
+    (or markets whose upstream event was renamed/recategorized) get their
+    event grouping refreshed. Returns True if a rebind happened.
+    """
+    cid = TableRead.read_condition_id_by_polymarket_id(db, polymarket_id)
+    if cid is None:
+        return False
+    market = TableRead.read_market_by_condition_id(db, cid)
+    if market is None:
+        return False
+    bind_market_to_upstream_event(db, market, pm_market)
+    return True
+
+
+def bind_market_to_upstream_event(
+    db: Connection, market: "Market", pm_market: dict
+) -> None:
+    """Idempotently upsert the upstream event and attach this market to it.
+
+    No-op when the upstream market has no event metadata.
+    """
+    meta = _extract_event_metadata(pm_market)
+    if meta is None:
+        return
+    # Prefer matching by polymarket_event_id (immutable) over slug (mutable).
+    existing = None
+    if meta["polymarket_event_id"]:
+        existing = TableRead.get_event_by_polymarket_event_id(
+            db, meta["polymarket_event_id"]
+        )
+    event = existing or TableWrite.upsert_event(
+        db,
+        slug=meta["slug"],
+        title=meta["title"],
+        description=meta["description"],
+        icon_url=meta["icon_url"],
+        category=meta["category"],
+        start_date=meta["start_date"],
+        end_date=meta["end_date"],
+        polymarket_event_id=meta["polymarket_event_id"],
+    )
+    outcome_label, icon_url = _extract_outcome_metadata(pm_market)
+    TableWrite.attach_market_to_event(
+        db,
+        market_id=market.market_id,
+        event_id=event.event_id,
+        outcome_label=outcome_label,
+        icon_url=icon_url,
+    )
+
+
 def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
     """
     Convert a Polymarket market's token list into erc1155_tokens format:
@@ -441,8 +540,17 @@ def create_polygon_market_if_does_not_exist(
             request,
             True
         )
+        bind_market_to_upstream_event(db, market, pm_market)
         logger.info("Added market: %s", request.question)
         return market
+
+    # Already synced. Keep the event grouping current — upstream may have
+    # added the market to a new event, renamed an existing one, or shipped
+    # this market before this feature landed and it's still in a singleton.
+    bind_existing_market_to_upstream_event(
+        db, polymarket_id=request.polymarket_id, pm_market=pm_market
+    )
+    return None
 
 
 def _default_resolution_fetcher(polymarket_condition_id: str) -> dict | None:
@@ -570,6 +678,7 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
     active = pm_market.get("active")
     closed = pm_market.get("closed")
     condition_id = pm_market.get("conditionId")
+    outcome_label, icon_url = _extract_outcome_metadata(pm_market)
 
     if active and not closed:
         state = MarketState.ACTIVE
@@ -586,7 +695,9 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
         start_date=_iso_to_unix(start_date),
         end_date=_iso_to_unix(end_date) if end_date is not None else None,
         state=state,
-        condition_id=ConditionId(condition_id)
+        condition_id=ConditionId(condition_id),
+        outcome_label=outcome_label,
+        icon_url=icon_url,
     )
     return request
 
