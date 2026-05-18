@@ -2,9 +2,7 @@
 import json
 from pathlib import Path
 
-import pytest
-
-from agentpit_bots.bot_pool import Bot, BotPool, BotRole
+from agentpit_bots.bot_pool import BotPool, BotRole
 from agentpit_bots.client import BotCredentials
 
 
