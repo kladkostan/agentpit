@@ -85,7 +85,8 @@ class AgentpitClient:
     # --- markets --------------------------------------------------------
 
     def get_markets(self) -> list[dict[str, Any]]:
-        return self._get("/markets")
+        # /markets returns ListMarketsResponse: {"markets": [...]}
+        return self._get("/markets")["markets"]
 
     def get_portfolio(self, *, token: str) -> dict[str, Any]:
         return self._get("/portfolio", token=token)

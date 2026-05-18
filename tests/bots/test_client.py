@@ -123,7 +123,7 @@ def test_merge_positions(session):
 
 
 def test_get_markets(session):
-    session.next_response = FakeResponse(200, [{"market_id": 1}])
+    session.next_response = FakeResponse(200, {"markets": [{"market_id": 1}]})
     c = AgentpitClient(base_url="http://x", session=session)
     out = c.get_markets()
     assert out == [{"market_id": 1}]
