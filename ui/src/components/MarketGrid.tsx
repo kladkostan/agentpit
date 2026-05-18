@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MarketCard } from "@/components/MarketCard";
 import type { Market } from "@/types/market";
@@ -58,18 +57,24 @@ export function MarketGridSkeleton({ count = 8 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {Array.from({ length: count }, (_, idx) => (
-        <Card key={idx} className="flex h-full flex-col">
-          <CardHeader className="space-y-3 pb-3">
-            <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-          </CardHeader>
-          <CardContent className="flex-1 pb-3" />
-          <CardFooter className="gap-2">
-            <Skeleton className="h-9 flex-1" />
-            <Skeleton className="h-9 flex-1" />
-          </CardFooter>
-        </Card>
+        <div
+          key={idx}
+          className="flex h-full flex-col gap-5 rounded-2xl border bg-card p-5"
+        >
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-5 w-full" />
+            <Skeleton className="h-5 w-5/6" />
+            <Skeleton className="h-5 w-2/3" />
+          </div>
+          <div className="flex items-end justify-between border-t pt-4">
+            <Skeleton className="h-9 w-20" />
+            <Skeleton className="h-3 w-14" />
+          </div>
+        </div>
       ))}
     </div>
   );
