@@ -12,11 +12,11 @@ from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _is_market_expired,
     _polymarket_to_erc1155_tokens,
+    build_create_market_request_from_json,
     fetch_all_polymarket_markets,
     fetch_polymarket_market,
     fetch_and_sync_polymarket_markets,
 )
-
 
 
 @pytest.fixture()
@@ -66,3 +66,24 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     created_markets = fetch_and_sync_polymarket_markets(db, admin)
 
     assert created_markets == []
+
+
+def test_build_request_extracts_upstream_token_ids():
+    pm_market = {
+        "question": "Q",
+        "description": "D",
+        "id": 99,
+        "conditionId": "0xcond",
+        "slug": "q",
+        "startDate": "2026-01-01T00:00:00Z",
+        "endDate": "2026-12-31T00:00:00Z",
+        "active": True,
+        "closed": False,
+        "tokens": [
+            {"token_id": "777", "outcome": "Yes"},
+            {"token_id": "888", "outcome": "No"},
+        ],
+    }
+    req = build_create_market_request_from_json(pm_market)
+    assert req.polymarket_yes_token_id == "777"
+    assert req.polymarket_no_token_id == "888"
