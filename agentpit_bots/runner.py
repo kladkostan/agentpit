@@ -139,7 +139,7 @@ class Runner:
                     yes_local = str(tok_id); yes_label = str(label)
                 elif str(label).lower() == "no":
                     no_local = str(tok_id); no_label = str(label)
-            if not (yes_local and no_local):
+            if not (yes_local and no_local and yes_label and no_label):
                 continue
             poly_yes = m.get("polymarket_yes_token_id")
             poly_no = m.get("polymarket_no_token_id")
