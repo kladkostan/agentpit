@@ -191,3 +191,28 @@ def test_split_when_one_side_depleted():
     runner.run_rebalance_tick()
     # min(yes, no) = 5 < quote_size 100 → re-split a complete set of quote_size.
     assert client.split == [(1, 100)]
+
+
+def test_runner_emits_drift_log_per_market(caplog):
+    """log_drift logs (market_id, local_mid, poly_mid, drift) for each enabled market."""
+    import logging as _logging
+
+    markets = [{
+        "market_id": 1, "market_state": "ACTIVE",
+        "polymarket_yes_token_id": "poly-yes",
+        "polymarket_no_token_id": "poly-no",
+        "erc1155_tokens": [["local-yes", "Yes"], ["local-no", "No"]],
+    }]
+    oracle = FakeOracle({"poly-yes": 0.42})
+    client = FakeClient(markets=markets, my_orders={})
+
+    class FakeBookClient(FakeClient):
+        def get_orderbook(self, *, market_id, outcome):
+            return {"bids": [{"PRICE": 400_000}], "asks": [{"PRICE": 440_000}]}
+
+    book_client = FakeBookClient(markets=markets, my_orders={})
+    cfg = BotConfig()
+    runner = Runner(client=book_client, oracle=oracle, cfg=cfg, bots=[])
+    with caplog.at_level(_logging.INFO, logger="agentpit_bots.runner"):
+        runner.log_drift()
+    assert any("drift" in rec.message for rec in caplog.records)

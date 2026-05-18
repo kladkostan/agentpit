@@ -127,6 +127,40 @@ class Runner:
                             bot.name, mid, exc,
                         )
 
+    def log_drift(self) -> None:
+        """Log local vs polymarket mid for every enabled market.
+
+        Local mid = average of best bid + best ask from /orderbook. Skipped
+        when one side is empty.
+        """
+        markets = self._discover_markets(require_upstream_tokens=True)
+        if not markets:
+            return
+        self._refresh_oracle(markets)
+        for m in markets:
+            poly_mid = self._oracle.midpoint(m.poly_yes_token_id) if m.poly_yes_token_id else None
+            if poly_mid is None:
+                continue
+            try:
+                book = self._client.get_orderbook(
+                    market_id=m.market_id, outcome=m.yes_outcome_label,
+                )
+            except Exception:
+                continue
+            bids = book.get("bids") or []
+            asks = book.get("asks") or []
+            if not bids or not asks:
+                log.info(
+                    "drift market_id=%s local_mid=none poly_mid=%.4f",
+                    m.market_id, poly_mid,
+                )
+                continue
+            local_mid = (int(bids[0]["PRICE"]) + int(asks[0]["PRICE"])) / 2 / _PRICE_SCALE
+            log.info(
+                "drift market_id=%s local_mid=%.4f poly_mid=%.4f drift_cents=%+.2f",
+                m.market_id, local_mid, poly_mid, (local_mid - poly_mid) * 100,
+            )
+
     # --- per-bot loops -------------------------------------------------
 
     def _anchor_tick_for_bot(self, bot: Bot, markets: list[_MarketView]) -> None:
@@ -303,6 +337,8 @@ def main() -> int:
     while True:
         try:
             runner.run_anchor_tick()
+            if tick_index % max(1, 60 // cfg.tick_interval_sec) == 0:
+                runner.log_drift()
             now = time.time()
             if now - last_noise >= cfg.noise_tick_base_sec:
                 runner.run_noise_tick()
