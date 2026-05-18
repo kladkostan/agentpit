@@ -22,20 +22,39 @@ export function computeMid(book: OrderbookResponse | undefined): number | null {
   return ask ?? bid;
 }
 
-export function useYesMid(marketId: number, yesLabel: string | undefined) {
+export function useOutcomeMid(
+  marketId: number,
+  outcomeLabel: string | undefined,
+) {
   const query = useQuery({
-    queryKey: ["orderbook", marketId, yesLabel],
+    queryKey: ["orderbook", marketId, outcomeLabel],
     queryFn: () => {
-      if (!yesLabel) throw new Error("missing outcome label");
-      return getOrderbook(marketId, yesLabel);
+      if (!outcomeLabel) throw new Error("missing outcome label");
+      return getOrderbook(marketId, outcomeLabel);
     },
-    enabled: Boolean(yesLabel),
+    enabled: Boolean(outcomeLabel),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     staleTime: 15_000,
   });
-  return { ...query, yesMid: computeMid(query.data) };
+  return { ...query, mid: computeMid(query.data) };
+}
+
+/** Resolve a NO display price in cents.
+ *
+ *  When the NO book has resting orders, use its own mid — the YES and NO
+ *  books trade independently off-chain, and surfacing the actual NO mid is
+ *  what lets a trader spot a `p_YES + p_NO ≠ 1` arb. Only fall back to
+ *  `100 − YES` when NO has no book yet.
+ */
+export function deriveNoCents(
+  yesMid: number | null,
+  noMid: number | null,
+): number | null {
+  if (noMid !== null) return noMid * 100;
+  if (yesMid !== null) return 100 - yesMid * 100;
+  return null;
 }
 
 /**
@@ -43,9 +62,9 @@ export function useYesMid(marketId: number, yesLabel: string | undefined) {
  * (event detail, multi-market event cards). Returns a Map keyed by
  * `market_id` containing only the markets that have a known mid.
  *
- * Uses the same query key shape as `useYesMid` so TanStack Query dedupes
- * requests across both hooks — a row using `useYesMid` and a parent using
- * this hook share the cache for free.
+ * Uses the same query key shape as `useOutcomeMid` so TanStack Query
+ * dedupes requests across both hooks — a row using `useOutcomeMid` and a
+ * parent using this hook share the cache for free.
  */
 export function useYesMidMap(
   markets: readonly Market[],

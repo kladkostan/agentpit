@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useYesMid } from "@/lib/useYesMid";
+import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
 
@@ -33,7 +33,7 @@ function endLabel(seconds: number | null): string | null {
 
 export function MarketCard({ market, eventSlug }: MarketCardProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
-  const { yesMid } = useYesMid(market.market_id, yesLabel);
+  const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
   const yesCents = yesMid !== null ? Math.round(yesMid * 100) : null;
   const tone = STATE_TONE[market.market_state];
   const closes = endLabel(market.end_date);

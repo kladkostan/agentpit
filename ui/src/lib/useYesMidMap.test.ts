@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OrderbookEntry, OrderbookResponse } from "@/types/order";
-import { computeMid } from "./useYesMid";
+import { computeMid, deriveNoCents } from "./useYesMid";
 
 function entry(price: number): OrderbookEntry {
   return {
@@ -39,5 +39,25 @@ describe("computeMid", () => {
   it("returns null when the book is empty or missing", () => {
     expect(computeMid(book([], []))).toBeNull();
     expect(computeMid(undefined)).toBeNull();
+  });
+});
+
+describe("deriveNoCents", () => {
+  it("uses the NO book's own mid when it exists", () => {
+    // YES 0.30, NO 0.68 — books disagree by 2¢; surface NO's own mid so
+    // the arb is visible rather than masking it as 70¢.
+    expect(deriveNoCents(0.3, 0.68)).toBeCloseTo(68, 5);
+  });
+
+  it("falls back to 100 − YES when the NO book is empty", () => {
+    expect(deriveNoCents(0.3, null)).toBeCloseTo(70, 5);
+  });
+
+  it("returns null when neither side has a mid", () => {
+    expect(deriveNoCents(null, null)).toBeNull();
+  });
+
+  it("uses NO mid even when YES mid is unknown", () => {
+    expect(deriveNoCents(null, 0.62)).toBeCloseTo(62, 5);
   });
 });

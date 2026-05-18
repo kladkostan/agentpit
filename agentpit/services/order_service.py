@@ -142,6 +142,7 @@ class OrderService:
     def get_orderbook(self, market_id: int, outcome: str) -> dict[str, Any]:
         _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
         with self._db.read() as conn:
+            conn.row_factory = sqlite3.Row
             cur = conn.execute(
                 "SELECT ORDER_ID, SIDE, PRICE, REMAINING_AMOUNT, MAKER, CREATED_AT "
                 "FROM orders WHERE TOKEN_ID = ? AND STATUS = 'live'",

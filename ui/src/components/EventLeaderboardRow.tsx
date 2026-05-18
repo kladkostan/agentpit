@@ -1,4 +1,4 @@
-import { useYesMid } from "@/lib/useYesMid";
+import { deriveNoCents, useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
 
@@ -51,9 +51,10 @@ export function EventLeaderboardRow({
 }: EventLeaderboardRowProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const noLabel = market.erc1155_tokens[1]?.[1];
-  const { yesMid } = useYesMid(market.market_id, yesLabel);
+  const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
+  const { mid: noMid } = useOutcomeMid(market.market_id, noLabel);
   const yesCents = yesMid !== null ? yesMid * 100 : null;
-  const noCents = yesCents !== null ? 100 - yesCents : null;
+  const noCents = deriveNoCents(yesMid, noMid);
   const yesPct = yesCents !== null ? Math.round(yesCents) : null;
   const label = market.outcome_label ?? market.question;
 
