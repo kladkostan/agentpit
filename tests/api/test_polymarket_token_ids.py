@@ -99,3 +99,27 @@ def test_create_market_round_trips_upstream_token_ids():
     assert fetched is not None
     assert fetched.polymarket_yes_token_id == "111"
     assert fetched.polymarket_no_token_id == "222"
+
+
+from agentpit.polymarket.polymarket_sync import build_create_market_request_from_json
+
+
+def test_build_request_extracts_upstream_token_ids():
+    pm_market = {
+        "question": "Q",
+        "description": "D",
+        "id": 99,
+        "conditionId": "0xcond",
+        "slug": "q",
+        "startDate": "2026-01-01T00:00:00Z",
+        "endDate": "2026-12-31T00:00:00Z",
+        "active": True,
+        "closed": False,
+        "tokens": [
+            {"token_id": "777", "outcome": "Yes"},
+            {"token_id": "888", "outcome": "No"},
+        ],
+    }
+    req = build_create_market_request_from_json(pm_market)
+    assert req.polymarket_yes_token_id == "777"
+    assert req.polymarket_no_token_id == "888"

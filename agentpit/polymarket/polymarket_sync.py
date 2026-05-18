@@ -37,10 +37,6 @@ POLYMARKET_GAMMA_URL = "https://gamma-api.polymarket.com"
 CLOB_MARKET_URL = "https://clob.polymarket.com/markets"
 
 
-
-
-
-
 def _coalesce_key(market: dict, target: str, source_keys: list[str]) -> None:
     """Set market[target] from the first non-None source key if target is missing/None."""
     if market.get(target) is not None:
@@ -78,7 +74,9 @@ def _ensure_tokens(market: dict) -> None:
         return
 
     token_ids = _parse_list_field(
-        market.get("clobTokenIds") if market.get("clobTokenIds") is not None else market.get("clobTokenids")
+        market.get("clobTokenIds")
+        if market.get("clobTokenIds") is not None
+        else market.get("clobTokenids")
     )
     outcomes = _parse_list_field(market.get("outcomes"))
 
@@ -167,14 +165,12 @@ def _is_market_expired(market: dict) -> bool:
         return False
 
 
-
-
 def fetch_all_polymarket_markets(
     host: str = POLYMARKET_GAMMA_URL,
     closed: bool = False,
     active: bool = True,
     archived: bool = False,
-    liquidity_threshold: float = 1000000
+    liquidity_threshold: float = 1000000,
 ) -> list[dict]:
     """
     Fetch all markets from Polymarket's Gamma API, paginating through all pages.
@@ -535,11 +531,7 @@ def create_polygon_market_if_does_not_exist(
     )
 
     if existing_market_id is None:
-        market = TableWrite.create_market(
-            db,
-            request,
-            True
-        )
+        market = TableWrite.create_market(db, request, True)
         bind_market_to_upstream_event(db, market, pm_market)
         logger.info("Added market: %s", request.question)
         return market
@@ -613,7 +605,8 @@ def mirror_polymarket_resolutions(
         except Exception as exc:
             logger.warning(
                 "resolution fetch failed for %s (%s)",
-                market.market_id, exc.__class__.__name__,
+                market.market_id,
+                exc.__class__.__name__,
             )
             continue
         if pm_response is None:
@@ -624,20 +617,25 @@ def mirror_polymarket_resolutions(
 
         # Binary YES/NO payout vector. partition is [1<<i for i in range(2)],
         # so payouts align: index 0 = YES, index 1 = NO.
-        payouts = [1 if i == winner_idx else 0 for i in range(len(market.erc1155_tokens))]
+        payouts = [
+            1 if i == winner_idx else 0 for i in range(len(market.erc1155_tokens))
+        ]
         question_id = keccak(text=market.question)
         cond_bytes = bytes.fromhex(market.condition_id.value[2:])
 
         # Check on-chain idempotency: if the CTF already has payouts, skip
         # the tx but still flip the DB row so local state catches up.
-        denom = admin._contracts.ctf.functions.payoutDenominator(cond_bytes).call()  # noqa: SLF001
+        denom = admin._contracts.ctf.functions.payoutDenominator(
+            cond_bytes
+        ).call()  # noqa: SLF001
         if denom == 0:
             try:
                 admin.report_payouts(question_id, payouts)
             except Exception as exc:
                 logger.warning(
                     "reportPayouts failed for market %s: %s",
-                    market.market_id, exc,
+                    market.market_id,
+                    exc,
                 )
                 continue
 
@@ -667,11 +665,37 @@ def sync_market_state(db: Connection, condition_id: ConditionId) -> None:
     """
     return None
 
+
+def _extract_yes_no_token_ids(pm_market: dict) -> tuple[str | None, str | None]:
+    """Return (yes_token_id, no_token_id) from a Polymarket market's tokens list.
+
+    Polymarket binary markets list two tokens — one with outcome "Yes" and one
+    with outcome "No". We match case-insensitively. Returns (None, None) if
+    either side is missing or the market isn't binary.
+    """
+    tokens = pm_market.get("tokens") or []
+    yes_id: str | None = None
+    no_id: str | None = None
+    for t in tokens:
+        if not isinstance(t, dict):
+            continue
+        tid = t.get("token_id") or t.get("tokenId")
+        outcome = (t.get("outcome") or t.get("label") or "").strip().lower()
+        if tid is None:
+            continue
+        if outcome == "yes":
+            yes_id = str(tid)
+        elif outcome == "no":
+            no_id = str(tid)
+    return yes_id, no_id
+
+
 def build_create_market_request_from_json(pm_market: dict) -> CreateMarketRequest:
     question = pm_market.get("question", "").strip()
     description = pm_market.get("description", "").strip()
     polymarket_id = pm_market.get("id")
     erc1155_tokens = _polymarket_to_erc1155_tokens(pm_market)
+    yes_tok, no_tok = _extract_yes_no_token_ids(pm_market)
     slug = pm_market.get("slug")
     start_date = pm_market.get("startDate")
     end_date = pm_market.get("endDate")
@@ -690,6 +714,8 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
         description=description,
         polymarket_id=polymarket_id,
         polymarket_condition_id=condition_id,
+        polymarket_yes_token_id=yes_tok,
+        polymarket_no_token_id=no_tok,
         erc1155_tokens=erc1155_tokens,
         slug=slug,
         start_date=_iso_to_unix(start_date),
@@ -714,7 +740,6 @@ def update_market_outcomes(db: sqlite3.Connection) -> None:
                 SET MARKET_STATE = ?
                 WHERE MARKET_ID = ?
                 """,
-                (state.value, market_id)
+                (state.value, market_id),
             )
             return
-
