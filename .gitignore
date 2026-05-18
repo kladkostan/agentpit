@@ -130,6 +130,9 @@ dmypy.json
 .pyre/
 /nanobot/admin_agent/config.json
 
+# Playwright MCP
+.playwright-mcp
+
 # Local deployment artifacts
 deployments/
 
