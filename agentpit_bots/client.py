@@ -9,8 +9,23 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 
+class _ResponseLike(Protocol):
+    status_code: int
+    text: str
+
+    def json(self) -> Any: ...
+
+
 class _SessionLike(Protocol):
-    def request(self, method, url, *, json=None, headers=None, timeout=None): ...   # noqa: ANN001
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> _ResponseLike: ...
 
 
 @dataclass(frozen=True)
