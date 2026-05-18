@@ -14,6 +14,7 @@ from agentpit.api.deps import (
 )
 from agentpit.api.exception_handlers import register_exception_handlers
 from agentpit.api.routes import (
+    admin,
     agents,
     auth,
     events,
@@ -83,7 +84,9 @@ def _build_onchain_admin(settings: Settings) -> OnchainAdmin:
     contracts = Contracts(client.web3, deployment)
     log.info(
         "on-chain stack ready: usd=%s faucet=%s exchange=%s",
-        deployment.usd, deployment.faucet, deployment.exchange,
+        deployment.usd,
+        deployment.faucet,
+        deployment.exchange,
     )
     return OnchainAdmin(client, contracts)
 
@@ -145,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
 
+    app.include_router(admin.router)
     app.include_router(system.router)
     app.include_router(auth.router)
     app.include_router(users.router)

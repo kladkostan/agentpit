@@ -35,15 +35,17 @@ class Settings(BaseSettings):
         default=Path("deployments/local.json"),
         validation_alias="AGENTPIT_DEPLOYMENT_PATH",
     )
-    operator_private_key: str | None = Field(
-        default=None, validation_alias="PK"
-    )
-    rpc_url_override: str | None = Field(
-        default=None, validation_alias="RPC_URL"
-    )
+    operator_private_key: str | None = Field(default=None, validation_alias="PK")
+    rpc_url_override: str | None = Field(default=None, validation_alias="RPC_URL")
     signup_gas_grant_wei: int = Field(
         default=10**18, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
     )
     tx_confirmations_timeout_s: int = Field(
         default=30, validation_alias="AGENTPIT_TX_TIMEOUT_S"
+    )
+
+    # Admin
+    admin_token: str = Field(
+        default="dev-admin-token",
+        description="Shared secret for /admin/* endpoints (set via AGENTPIT_ADMIN_TOKEN)",
     )

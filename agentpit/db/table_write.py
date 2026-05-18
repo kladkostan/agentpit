@@ -68,6 +68,16 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
+    def mark_user_as_bot_by_eth_address(
+        db: sqlite3.Connection, eth_address: str
+    ) -> bool:
+        cur = db.execute(
+            "UPDATE users SET IS_BOT = 1 WHERE LOWER(ETH_ADDRESS) = LOWER(?)",
+            (eth_address,),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def create_personality(
         db: sqlite3.Connection,
         personality_id: str,
