@@ -48,3 +48,4 @@ class BotConfig:
 DEFAULT = BotConfig()
 
 SHARES_SCALE = 1_000_000   # raw outcome-token units per display share
+PRICE_SCALE = 1_000_000    # USDC micro-units per dollar (price * 10^6)

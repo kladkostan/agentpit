@@ -1,8 +1,7 @@
 """NoiseTrader generates a single random order per tick within size/price bounds."""
 import random
 
-from agentpit_bots.config import BotConfig, SHARES_SCALE
-from agentpit_bots.strategies.anchor_mm import _PRICE_SCALE
+from agentpit_bots.config import BotConfig, PRICE_SCALE, SHARES_SCALE
 from agentpit_bots.strategies.noise_trader import NoiseTrader
 from agentpit_bots.strategies.base import MarketTokens
 
@@ -46,6 +45,6 @@ def test_aggressive_mode_crosses_inside():
             continue
         o = orders[0]
         if o.side == "BUY" and o.token_id == "yest":
-            assert o.price_int >= int(0.51 * _PRICE_SCALE)
+            assert o.price_int >= int(0.51 * PRICE_SCALE)
         elif o.side == "SELL" and o.token_id == "yest":
-            assert o.price_int <= int(0.49 * _PRICE_SCALE)
+            assert o.price_int <= int(0.49 * PRICE_SCALE)

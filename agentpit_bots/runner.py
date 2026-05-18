@@ -15,10 +15,10 @@ from dataclasses import dataclass
 
 from agentpit_bots.bot_pool import Bot, BotPool, BotRole
 from agentpit_bots.client import AgentpitClient
-from agentpit_bots.config import BotConfig, DEFAULT, SHARES_SCALE
+from agentpit_bots.config import BotConfig, DEFAULT, PRICE_SCALE, SHARES_SCALE
 from agentpit_bots.price_oracle import PriceOracle
 from agentpit_bots.reconcile import DesiredOrder, LiveOrder, reconcile
-from agentpit_bots.strategies.anchor_mm import AnchorMarketMaker, _PRICE_SCALE
+from agentpit_bots.strategies.anchor_mm import AnchorMarketMaker
 from agentpit_bots.strategies.base import MarketTokens
 from agentpit_bots.strategies.noise_trader import NoiseTrader
 
@@ -155,7 +155,7 @@ class Runner:
                     m.market_id, poly_mid,
                 )
                 continue
-            local_mid = (int(bids[0]["PRICE"]) + int(asks[0]["PRICE"])) / 2 / _PRICE_SCALE
+            local_mid = (int(bids[0]["PRICE"]) + int(asks[0]["PRICE"])) / 2 / PRICE_SCALE
             log.info(
                 "drift market_id=%s local_mid=%.4f poly_mid=%.4f drift_cents=%+.2f",
                 m.market_id, local_mid, poly_mid, (local_mid - poly_mid) * 100,
@@ -269,7 +269,7 @@ class Runner:
         else:
             log.warning("unknown_token_id token=%s market=%s", d.token_id, market.market_id)
             return
-        price_str = f"{d.price_int / _PRICE_SCALE:.2f}"
+        price_str = f"{d.price_int / PRICE_SCALE:.2f}"
         try:
             self._client.place_order(
                 token=bot.creds.token,

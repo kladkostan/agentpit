@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import random
 
-from agentpit_bots.config import BotConfig, SHARES_SCALE
+from agentpit_bots.config import BotConfig, PRICE_SCALE, SHARES_SCALE
 from agentpit_bots.reconcile import DesiredOrder
-from agentpit_bots.strategies.anchor_mm import _PRICE_SCALE, _clip
+from agentpit_bots.strategies.anchor_mm import _clip
 from agentpit_bots.strategies.base import MarketTokens, Strategy
 
 
@@ -52,6 +52,6 @@ class NoiseTrader(Strategy):
 
         return [DesiredOrder(
             side=side, token_id=token_id,
-            price_int=int(round(price * _PRICE_SCALE)),
+            price_int=int(round(price * PRICE_SCALE)),
             size=size_shares * SHARES_SCALE,
         )]

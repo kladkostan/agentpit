@@ -95,6 +95,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     _configure_root_logging()
 
+    if settings.admin_token == "dev-admin-token":
+        log.warning(
+            "admin_token is the unsafe default — set AGENTPIT_ADMIN_TOKEN before "
+            "exposing /admin/* to the network"
+        )
+
     db_session = DbSession(settings.db_path)
     coder = JwtCoder(settings)
     onchain_admin = _build_onchain_admin(settings)

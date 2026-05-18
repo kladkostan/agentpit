@@ -6,13 +6,12 @@ from BotConfig. Output is a list of DesiredOrder — pure function.
 """
 from __future__ import annotations
 
-from agentpit_bots.config import BotConfig, SHARES_SCALE
+from agentpit_bots.config import BotConfig, PRICE_SCALE, SHARES_SCALE
 from agentpit_bots.reconcile import DesiredOrder
 from agentpit_bots.strategies.base import MarketTokens, Strategy
 
 _MIN_PRICE = 0.01
 _MAX_PRICE = 0.99
-_PRICE_SCALE = 1_000_000   # USDC micro-units
 
 
 def _clip(x: float) -> float:
@@ -20,7 +19,7 @@ def _clip(x: float) -> float:
 
 
 def _price_int(p: float) -> int:
-    return int(round(p * _PRICE_SCALE))
+    return int(round(p * PRICE_SCALE))
 
 
 class AnchorMarketMaker(Strategy):
