@@ -53,7 +53,23 @@
   * {
     @apply border-border;
   }
+  html {
+    font-feature-settings: "ss01", "ss02", "cv11";
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "ss01", "ss02", "cv11", "tnum";
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  .hairline {
+    border-color: hsl(var(--border) / 0.7);
   }
 }

@@ -53,6 +53,48 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      fontFamily: {
+        // Two-family system: Instrument Serif (display) + Instrument Sans
+        // (UI/data). Mono is intentionally aliased to the same sans family
+        // so the historic `font-mono` utility keeps working visually while
+        // we drop the third typeface — tabular alignment is handled by
+        // `tabular-nums`, not by a separate monospace font.
+        sans: [
+          '"Instrument Sans"',
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "sans-serif",
+        ],
+        mono: [
+          '"Instrument Sans"',
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+        ],
+        display: [
+          '"Instrument Serif"',
+          "ui-serif",
+          "Georgia",
+          "Cambria",
+          "serif",
+        ],
+      },
+      keyframes: {
+        "pulse-dot": {
+          "0%, 100%": { opacity: "1", transform: "scale(1)" },
+          "50%": { opacity: "0.55", transform: "scale(0.92)" },
+        },
+        "fade-up": {
+          "0%": { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "pulse-dot": "pulse-dot 1.8s ease-in-out infinite",
+        "fade-up": "fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both",
+      },
     },
   },
   plugins: [animate],
