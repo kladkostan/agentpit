@@ -96,5 +96,6 @@ def test_create_market_round_trips_upstream_token_ids():
     )
     market = TableWrite.create_market(conn, req, True)
     fetched = TableRead.read_market(conn, market.market_id)
+    assert fetched is not None
     assert fetched.polymarket_yes_token_id == "111"
     assert fetched.polymarket_no_token_id == "222"
