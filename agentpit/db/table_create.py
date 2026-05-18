@@ -92,7 +92,8 @@ class TableCreate:
                 ETH_PRIVATE_KEY TEXT NOT NULL UNIQUE,
                 API_KEY         TEXT NOT NULL UNIQUE,
                 ONBOARDED_AT    INTEGER,
-                CREATED_AT      INTEGER NOT NULL
+                CREATED_AT      INTEGER NOT NULL,
+                IS_BOT          INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -116,11 +117,11 @@ class TableCreate:
             ("ETH_ADDRESS", "TEXT"),
             ("ONBOARDED_AT", "INTEGER"),
             ("CREATED_AT", "INTEGER"),
+            ("IS_BOT", "INTEGER NOT NULL DEFAULT 0"),
         ]
         for col, col_type in additions:
             if col not in existing:
                 db.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
-
 
     @staticmethod
     def create_markets_table(db: sqlite3.Connection) -> None:
@@ -135,6 +136,8 @@ class TableCreate:
                 EVENT_ID INTEGER,           -- optional parent event grouping markets
                 OUTCOME_LABEL TEXT,         -- short label shown inside an event (e.g. "France")
                 ICON_URL TEXT,              -- optional icon for the outcome row (flag, logo, etc.)
+                POLYMARKET_YES_TOKEN_ID TEXT,
+                POLYMARKET_NO_TOKEN_ID TEXT,
                 QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
                 SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
                 DESCRIPTION TEXT NOT NULL,  -- human-readable description
@@ -156,6 +159,10 @@ class TableCreate:
             db.execute("ALTER TABLE markets ADD COLUMN OUTCOME_LABEL TEXT")
         if "ICON_URL" not in cols:
             db.execute("ALTER TABLE markets ADD COLUMN ICON_URL TEXT")
+        if "POLYMARKET_YES_TOKEN_ID" not in cols:
+            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_YES_TOKEN_ID TEXT")
+        if "POLYMARKET_NO_TOKEN_ID" not in cols:
+            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_NO_TOKEN_ID TEXT")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(CONDITION_ID)"
         )
@@ -184,9 +191,7 @@ class TableCreate:
             )
             """
         )
-        db.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)"
-        )
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)")
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_polymarket_event_id "
             "ON events(POLYMARKET_EVENT_ID)"

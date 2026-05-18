@@ -17,6 +17,7 @@ class User(BaseModel):
     handle: str | None = None
     onboarded_at: int | None = None
     created_at: int
+    is_bot: bool = False
 
     def model_post_init(self, __context):
         if self.handle is not None:

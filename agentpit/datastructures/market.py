@@ -14,6 +14,8 @@ class Market(BaseModel):
     market_id: int
     polymarket_id: Optional[int] = None
     polymarket_condition_id: Optional[str] = None
+    polymarket_yes_token_id: str | None = None
+    polymarket_no_token_id: str | None = None
     condition_id: ConditionId = None
     description: str
     erc1155_tokens: list[tuple[str, str]]
@@ -26,12 +28,17 @@ class Market(BaseModel):
     icon_url: Optional[str] = None
 
     def model_post_init(self, __context):
-        check_state(self.market_state != MarketState.RESOLVED or self.resolved_outcome is not None,
-                    "Resolved market must have an outcome")
-        check_state(len(self.question) > 0,
-                    "Question must not be empty")
-        check_state(len(self.erc1155_tokens) > 0,
-                    "Must have at least one ERC1155 token")
-        check_state(self.end_date is None or self.end_date > self.start_date,
-                    "End date must be after start date")
+        check_state(
+            self.market_state != MarketState.RESOLVED
+            or self.resolved_outcome is not None,
+            "Resolved market must have an outcome",
+        )
+        check_state(len(self.question) > 0, "Question must not be empty")
+        check_state(
+            len(self.erc1155_tokens) > 0, "Must have at least one ERC1155 token"
+        )
+        check_state(
+            self.end_date is None or self.end_date > self.start_date,
+            "End date must be after start date",
+        )
         check_state(self.condition_id is not None)

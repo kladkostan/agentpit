@@ -19,21 +19,39 @@ _MARKET_COLS = (
     "START_DATE, END_DATE, ERC1155_TOKENS, "
     "COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE, "
     "RESOLVED_OUTCOME, "
-    "EVENT_ID, OUTCOME_LABEL, ICON_URL"
+    "EVENT_ID, OUTCOME_LABEL, ICON_URL, "
+    "POLYMARKET_YES_TOKEN_ID, POLYMARKET_NO_TOKEN_ID"
 )
 
 
 def _row_to_market(row: tuple) -> Market:
-    (market_id, polymarket_id, polymarket_condition_id, condition_id_str,
-     question, description, slug, start_date, end_date,
-     erc1155_tokens_json, market_state, resolved_outcome,
-     event_id, outcome_label, icon_url) = row
+    (
+        market_id,
+        polymarket_id,
+        polymarket_condition_id,
+        condition_id_str,
+        question,
+        description,
+        slug,
+        start_date,
+        end_date,
+        erc1155_tokens_json,
+        market_state,
+        resolved_outcome,
+        event_id,
+        outcome_label,
+        icon_url,
+        polymarket_yes_token_id,
+        polymarket_no_token_id,
+    ) = row
     erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
     return Market(
         question=question,
         market_id=market_id,
         polymarket_id=polymarket_id,
         polymarket_condition_id=polymarket_condition_id,
+        polymarket_yes_token_id=polymarket_yes_token_id,
+        polymarket_no_token_id=polymarket_no_token_id,
         condition_id=ConditionId(condition_id_str),
         description=description,
         slug=slug,
@@ -111,7 +129,6 @@ class TableRead:
 
         return MarketState(row[0])
 
-
     @staticmethod
     def get_private_key_for_api_key(
         db: sqlite3.Connection, api_key: str
@@ -164,13 +181,22 @@ class TableRead:
 
     _USER_COLS = (
         "USER_ID, EMAIL, HANDLE, ETH_ADDRESS, ETH_PRIVATE_KEY, "
-        "API_KEY, ONBOARDED_AT, CREATED_AT"
+        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT"
     )
 
     @staticmethod
     def _row_to_user(row: tuple) -> User:
-        (user_id, email, handle, eth_address, eth_private_key,
-         api_key, onboarded_at, created_at) = row
+        (
+            user_id,
+            email,
+            handle,
+            eth_address,
+            eth_private_key,
+            api_key,
+            onboarded_at,
+            created_at,
+            is_bot,
+        ) = row
         existing_key = parse_32b_hex_private_key(eth_private_key)
         acct = Account.from_key(existing_key)
         return User(
@@ -182,6 +208,7 @@ class TableRead:
             handle=handle,
             onboarded_at=onboarded_at,
             created_at=created_at if created_at is not None else 0,
+            is_bot=bool(is_bot),
         )
 
     @staticmethod
@@ -237,9 +264,7 @@ class TableRead:
 
     @staticmethod
     def list_all_markets(db: sqlite3.Connection) -> list[Market]:
-        cur = db.execute(
-            f"SELECT {_MARKET_COLS} FROM markets ORDER BY MARKET_ID"
-        )
+        cur = db.execute(f"SELECT {_MARKET_COLS} FROM markets ORDER BY MARKET_ID")
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
@@ -262,8 +287,17 @@ class TableRead:
 
     @staticmethod
     def _row_to_event(row: tuple) -> Event:
-        (event_id, slug, title, description, icon_url, category,
-         start_date, end_date, polymarket_event_id) = row
+        (
+            event_id,
+            slug,
+            title,
+            description,
+            icon_url,
+            category,
+            start_date,
+            end_date,
+            polymarket_event_id,
+        ) = row
         return Event(
             event_id=event_id,
             slug=slug,
@@ -304,9 +338,7 @@ class TableRead:
         return TableRead._row_to_event(row) if row else None
 
     @staticmethod
-    def list_markets_by_event_id(
-        db: sqlite3.Connection, event_id: int
-    ) -> list[Market]:
+    def list_markets_by_event_id(db: sqlite3.Connection, event_id: int) -> list[Market]:
         cur = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
             "WHERE EVENT_ID = ? ORDER BY MARKET_ID",
@@ -373,11 +405,13 @@ class TableRead:
         )
         transactions = []
         for row in cursor.fetchall():
-            transactions.append({
-                "transaction_id": row[0],
-                "timestamp": row[1],
-                "transaction_type": row[2],
-                "market_id": row[3],
-                "details": json.loads(row[4]) if row[4] else {},
-            })
+            transactions.append(
+                {
+                    "transaction_id": row[0],
+                    "timestamp": row[1],
+                    "transaction_type": row[2],
+                    "market_id": row[3],
+                    "details": json.loads(row[4]) if row[4] else {},
+                }
+            )
         return transactions

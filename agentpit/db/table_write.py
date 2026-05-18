@@ -63,8 +63,18 @@ class TableWrite:
         )
 
     @staticmethod
+    def mark_user_as_bot(db: sqlite3.Connection, api_key: str) -> bool:
+        cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = ?", (api_key,))
+        return cur.rowcount > 0
+
+    @staticmethod
     def create_personality(
-        db: sqlite3.Connection, personality_id: str, title: str, beliefs: str, methods: str, needs: str
+        db: sqlite3.Connection,
+        personality_id: str,
+        title: str,
+        beliefs: str,
+        methods: str,
+        needs: str,
     ) -> str:
         spec = json.dumps(
             {"beliefs": beliefs, "methods": methods, "needs": needs},
@@ -120,8 +130,16 @@ class TableWrite:
                     START_DATE = ?, END_DATE = ?, POLYMARKET_EVENT_ID = ?
                 WHERE EVENT_ID = ?
                 """,
-                (title, description, icon_url, category, start_date, end_date,
-                 polymarket_event_id, event_id),
+                (
+                    title,
+                    description,
+                    icon_url,
+                    category,
+                    start_date,
+                    end_date,
+                    polymarket_event_id,
+                    event_id,
+                ),
             )
         else:
             cur = db.execute(
@@ -130,8 +148,16 @@ class TableWrite:
                                     START_DATE, END_DATE, POLYMARKET_EVENT_ID)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (slug, title, description, icon_url, category,
-                 start_date, end_date, polymarket_event_id),
+                (
+                    slug,
+                    title,
+                    description,
+                    icon_url,
+                    category,
+                    start_date,
+                    end_date,
+                    polymarket_event_id,
+                ),
             )
             event_id = int(cur.lastrowid or 0)
         return Event(
@@ -169,17 +195,17 @@ class TableWrite:
 
     @staticmethod
     def create_market(
-            db : sqlite3.Connection,
-            request: CreateMarketRequest, is_polygon_market: bool
+        db: sqlite3.Connection, request: CreateMarketRequest, is_polygon_market: bool
     ) -> Market:
 
         # The local create-market path now sets `request.condition_id` upstream
         # (in MarketService) using the on-chain `getConditionId` view, so by the
         # time we get here the condition_id is always present.
-        check_state(request.condition_id is not None,
-                    "request.condition_id must be set before TableWrite.create_market")
+        check_state(
+            request.condition_id is not None,
+            "request.condition_id must be set before TableWrite.create_market",
+        )
         condition_id = request.condition_id
-
 
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
@@ -203,8 +229,10 @@ class TableWrite:
                                  MARKET_STATE,
                                  EVENT_ID,
                                  OUTCOME_LABEL,
-                                 ICON_URL)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 ICON_URL,
+                                 POLYMARKET_YES_TOKEN_ID,
+                                 POLYMARKET_NO_TOKEN_ID)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 next_market_id,
@@ -221,6 +249,8 @@ class TableWrite:
                 request.event_id,
                 request.outcome_label,
                 request.icon_url,
+                request.polymarket_yes_token_id,
+                request.polymarket_no_token_id,
             ),
         )
 
@@ -229,6 +259,8 @@ class TableWrite:
             market_id=next_market_id,
             polymarket_id=request.polymarket_id,
             polymarket_condition_id=request.polymarket_condition_id,
+            polymarket_yes_token_id=request.polymarket_yes_token_id,
+            polymarket_no_token_id=request.polymarket_no_token_id,
             condition_id=condition_id,
             description=request.description,
             slug=request.slug,
@@ -244,8 +276,7 @@ class TableWrite:
 
     @staticmethod
     def update_market_state_if_needed(
-            db: sqlite3.Connection,
-            request: CreateMarketRequest
+        db: sqlite3.Connection, request: CreateMarketRequest
     ) -> Market:
         # Compute condition_id from question and number of outcomes
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
@@ -253,11 +284,13 @@ class TableWrite:
         # Fetch existing market details to preserve state and IDs
         cursor = db.execute(
             "SELECT MARKET_ID, RESOLVED_OUTCOME FROM markets WHERE POLYMARKET_ID = ?",
-            (request.polymarket_id,)
+            (request.polymarket_id,),
         )
         row = cursor.fetchone()
         if not row:
-            raise ValueError(f"Market with Polymarket ID {request.polymarket_id} not found")
+            raise ValueError(
+                f"Market with Polymarket ID {request.polymarket_id} not found"
+            )
 
         market_id, resolved_outcome = row
 
@@ -283,7 +316,7 @@ class TableWrite:
                 request.end_date,
                 erc1155_tokens_json,
                 request.state,
-                request.polymarket_id
+                request.polymarket_id,
             ),
         )
 
@@ -298,16 +331,16 @@ class TableWrite:
             market_state=MarketState(request.state),
             start_date=request.start_date,
             end_date=request.end_date,
-            resolved_outcome=resolved_outcome
+            resolved_outcome=resolved_outcome,
         )
 
     @staticmethod
     def log_transaction(
-            db: sqlite3.Connection,
-            api_key: str,
-            transaction_type: str,
-            market_id: int | None = None,
-            details: dict | None = None
+        db: sqlite3.Connection,
+        api_key: str,
+        transaction_type: str,
+        market_id: int | None = None,
+        details: dict | None = None,
     ) -> None:
         """
         Log a transaction to the transactions table.
@@ -326,7 +359,7 @@ class TableWrite:
             INSERT INTO transactions (API_KEY, TRANSACTION_TYPE, MARKET_ID, DETAILS)
             VALUES (?, ?, ?, ?)
             """,
-            (api_key, transaction_type, market_id, details_json)
+            (api_key, transaction_type, market_id, details_json),
         )
 
     @staticmethod
@@ -353,12 +386,14 @@ class TableWrite:
 
         # Check state
         if market.market_state != MarketState.DRAFT:
-            raise ValueError(f"Market {market_id} is not in DRAFT state (current: {market.market_state.value})")
+            raise ValueError(
+                f"Market {market_id} is not in DRAFT state (current: {market.market_state.value})"
+            )
 
         # Update state
         db.execute(
             "UPDATE markets SET MARKET_STATE = ? WHERE MARKET_ID = ?",
-            (MarketState.ACTIVE.value, market_id)
+            (MarketState.ACTIVE.value, market_id),
         )
 
         # Return updated market
@@ -389,12 +424,14 @@ class TableWrite:
 
         # Check state
         if market.market_state != MarketState.ACTIVE:
-            raise ValueError(f"Market {market_id} is not in ACTIVE state (current: {market.market_state.value})")
+            raise ValueError(
+                f"Market {market_id} is not in ACTIVE state (current: {market.market_state.value})"
+            )
 
         # Update state to CLOSED
         db.execute(
             "UPDATE markets SET MARKET_STATE = ? WHERE MARKET_ID = ?",
-            (MarketState.CLOSED.value, market_id)
+            (MarketState.CLOSED.value, market_id),
         )
 
         # Return updated market
@@ -403,9 +440,7 @@ class TableWrite:
 
     @staticmethod
     def resolve_market(
-            db: sqlite3.Connection,
-            market_id: int,
-            winning_outcome_index: int
+        db: sqlite3.Connection, market_id: int, winning_outcome_index: int
     ) -> Market:
         """
         Resolve a market by specifying the winning outcome.
@@ -433,7 +468,9 @@ class TableWrite:
             raise ValueError(f"Market {market_id} is already resolved")
 
         # Validate outcome index
-        if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc1155_tokens):
+        if winning_outcome_index < 0 or winning_outcome_index >= len(
+            market.erc1155_tokens
+        ):
             raise ValueError(
                 f"Invalid winning_outcome_index {winning_outcome_index}. "
                 f"Market has {len(market.erc1155_tokens)} outcomes (indices 0-{len(market.erc1155_tokens)-1})"
@@ -442,7 +479,7 @@ class TableWrite:
         # Update state and outcome
         db.execute(
             "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE MARKET_ID = ?",
-            (MarketState.RESOLVED.value, winning_outcome_index, market_id)
+            (MarketState.RESOLVED.value, winning_outcome_index, market_id),
         )
 
         # Return updated market
@@ -479,9 +516,7 @@ class TableWrite:
 
     @staticmethod
     def update_market_state_to_resolved_if_needed(
-            db: sqlite3.Connection,
-            condition_id: ConditionId,
-            winning_outcome_index: int
+        db: sqlite3.Connection, condition_id: ConditionId, winning_outcome_index: int
     ) -> Market:
         """
         Idempotently resolves a market. If already resolved or cancelled, does nothing.
@@ -501,11 +536,16 @@ class TableWrite:
         if not market:
             raise ValueError(f"Market with condition_id {condition_id} not found")
 
-        if market.market_state == MarketState.RESOLVED or market.market_state == MarketState.CANCELLED:
+        if (
+            market.market_state == MarketState.RESOLVED
+            or market.market_state == MarketState.CANCELLED
+        ):
             return market
 
         # Validate outcome index
-        if winning_outcome_index < 0 or winning_outcome_index >= len(market.erc1155_tokens):
+        if winning_outcome_index < 0 or winning_outcome_index >= len(
+            market.erc1155_tokens
+        ):
             raise ValueError(
                 f"Invalid winning_outcome_index {winning_outcome_index}. "
                 f"Market has {len(market.erc1155_tokens)} outcomes"
@@ -513,7 +553,11 @@ class TableWrite:
 
         db.execute(
             "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE CONDITION_ID = ?",
-            (MarketState.RESOLVED.value, winning_outcome_index, market.condition_id.value)
+            (
+                MarketState.RESOLVED.value,
+                winning_outcome_index,
+                market.condition_id.value,
+            ),
         )
 
         market.market_state = MarketState.RESOLVED

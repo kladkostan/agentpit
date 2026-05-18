@@ -19,6 +19,8 @@ class CreateMarketRequest(BaseModel):
     end_date: int | None = None
     polymarket_id: int | None = None
     polymarket_condition_id: str | None = None
+    polymarket_yes_token_id: str | None = None
+    polymarket_no_token_id: str | None = None
     condition_id: ConditionId | None = None
     state: MarketState = MarketState.DRAFT
     event_id: int | None = None
@@ -33,10 +35,8 @@ class CreateMarketRequest(BaseModel):
         if self.start_date is None:
             self.start_date = int(time.time())
 
-        check_state(len(self.question) > 0,
-                    "Question must not be empty")
-        check_state(len(self.description) > 0,
-                    "Description must not be empty")
+        check_state(len(self.question) > 0, "Question must not be empty")
+        check_state(len(self.description) > 0, "Description must not be empty")
         # Either outcome_labels (for local on-chain creation) or erc1155_tokens
         # (for Polymarket sync) must be supplied.
         check_state(
@@ -49,7 +49,7 @@ class CreateMarketRequest(BaseModel):
                 "Need at least 2 outcome labels",
             )
         if self.start_date is not None and self.end_date is not None:
-            check_state(self.end_date >= self.start_date,
-                        "End date must be after or equal to start date")
-
-
+            check_state(
+                self.end_date >= self.start_date,
+                "End date must be after or equal to start date",
+            )
