@@ -126,3 +126,68 @@ def test_runner_disabled_market_skipped():
                     bots=[_bot("anchor-0", "ANCHOR")])
     runner.run_anchor_tick()
     assert client.placed == []
+
+
+class FakeClientWithPortfolio(FakeClient):
+    def __init__(self, markets, my_orders, portfolio):
+        super().__init__(markets, my_orders)
+        self._portfolio = portfolio
+        self.merged: list[tuple[int, int]] = []
+        self.split: list[tuple[int, int]] = []
+
+    def get_portfolio(self, *, token):
+        return self._portfolio
+
+    def merge_positions(self, *, token, market_id, amount):
+        self.merged.append((market_id, amount))
+        return {}
+
+    def split_position(self, *, token, market_id, amount):
+        self.split.append((market_id, amount))
+        return {}
+
+
+def test_rebalance_merges_when_both_sides_have_surplus():
+    markets = [{
+        "market_id": 1, "market_state": "ACTIVE",
+        "polymarket_yes_token_id": "poly-yes",
+        "polymarket_no_token_id": "poly-no",
+        "erc1155_tokens": [["local-yes", "Yes"], ["local-no", "No"]],
+    }]
+    portfolio = {
+        "usdc_balance": 5000,
+        "positions": [
+            {"market_id": 1, "token_id": "local-yes", "balance": 800 * 1_000_000},
+            {"market_id": 1, "token_id": "local-no",  "balance": 700 * 1_000_000},
+        ],
+    }
+    cfg = BotConfig(mm_rebalance_floor_shares=200)
+    oracle = FakeOracle({"poly-yes": 0.5})
+    client = FakeClientWithPortfolio(markets=markets, my_orders={}, portfolio=portfolio)
+    runner = Runner(client=client, oracle=oracle, cfg=cfg, bots=[_bot("anchor-0", "ANCHOR")])
+    runner.run_rebalance_tick()
+    # min(yes, no) = 700; surplus = 700 - 200 = 500 → merge 500.
+    assert client.merged == [(1, 500)]
+
+
+def test_split_when_one_side_depleted():
+    markets = [{
+        "market_id": 1, "market_state": "ACTIVE",
+        "polymarket_yes_token_id": "poly-yes",
+        "polymarket_no_token_id": "poly-no",
+        "erc1155_tokens": [["local-yes", "Yes"], ["local-no", "No"]],
+    }]
+    portfolio = {
+        "usdc_balance": 5000,
+        "positions": [
+            {"market_id": 1, "token_id": "local-yes", "balance": 50 * 1_000_000},
+            {"market_id": 1, "token_id": "local-no",  "balance": 5 * 1_000_000},   # depleted
+        ],
+    }
+    cfg = BotConfig(mm_quote_size_shares=100)
+    oracle = FakeOracle({"poly-yes": 0.5})
+    client = FakeClientWithPortfolio(markets=markets, my_orders={}, portfolio=portfolio)
+    runner = Runner(client=client, oracle=oracle, cfg=cfg, bots=[_bot("anchor-0", "ANCHOR")])
+    runner.run_rebalance_tick()
+    # min(yes, no) = 5 < quote_size 100 → re-split a complete set of quote_size.
+    assert client.split == [(1, 100)]

@@ -77,6 +77,56 @@ class Runner:
             market = self._rng.choice(markets)
             self._noise_tick_for_bot(bot, market)
 
+    def run_rebalance_tick(self) -> None:
+        """For each ANCHOR bot × market: merge surplus, split if depleted."""
+        markets = self._discover_markets(require_upstream_tokens=True)
+        if not markets:
+            return
+        market_by_id = {m.market_id: m for m in markets}
+        for bot in self._bots:
+            if bot.role != BotRole.ANCHOR:
+                continue
+            try:
+                portfolio = self._client.get_portfolio(token=bot.creds.token)
+            except Exception as exc:
+                log.warning("portfolio_failed bot=%s err=%s", bot.name, exc)
+                continue
+            by_market: dict[int, dict[str, int]] = {}
+            for pos in portfolio.get("positions", []):
+                mid = int(pos.get("market_id", 0))
+                if mid not in market_by_id:
+                    continue
+                tok = str(pos.get("token_id"))
+                bal_shares = int(pos.get("balance", 0)) // SHARES_SCALE
+                by_market.setdefault(mid, {})[tok] = bal_shares
+            for mid, market in market_by_id.items():
+                yes_bal = by_market.get(mid, {}).get(market.yes_local, 0)
+                no_bal = by_market.get(mid, {}).get(market.no_local, 0)
+                min_bal = min(yes_bal, no_bal)
+                if min_bal < self._cfg.mm_quote_size_shares:
+                    try:
+                        self._client.split_position(
+                            token=bot.creds.token, market_id=mid,
+                            amount=self._cfg.mm_quote_size_shares,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "split_failed bot=%s market=%s err=%s",
+                            bot.name, mid, exc,
+                        )
+                    continue
+                surplus = min_bal - self._cfg.mm_rebalance_floor_shares
+                if surplus > 0:
+                    try:
+                        self._client.merge_positions(
+                            token=bot.creds.token, market_id=mid, amount=surplus,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "merge_failed bot=%s market=%s err=%s",
+                            bot.name, mid, exc,
+                        )
+
     # --- per-bot loops -------------------------------------------------
 
     def _anchor_tick_for_bot(self, bot: Bot, markets: list[_MarketView]) -> None:
@@ -257,6 +307,8 @@ def main() -> int:
             if now - last_noise >= cfg.noise_tick_base_sec:
                 runner.run_noise_tick()
                 last_noise = now
+            if tick_index % cfg.mm_rebalance_every_ticks == 0:
+                runner.run_rebalance_tick()
             tick_index += 1
         except Exception:
             log.exception("tick_failed")
