@@ -31,6 +31,14 @@ def cancel_order(
     return {"order_id": order_id, "status": "cancelled"}
 
 
+@router.get("/orders/mine")
+def list_my_orders(
+    user: CurrentUserDep,
+    service: OrderServiceDep,
+) -> dict:
+    return {"orders": service.list_live_orders(user)}
+
+
 @router.get("/orderbook/{market_id}/{outcome}")
 def get_orderbook(
     market_id: int,

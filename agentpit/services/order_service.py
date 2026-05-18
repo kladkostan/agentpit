@@ -53,9 +53,7 @@ class OrderService:
         )
 
         # Pre-flight balance check — reject obvious losers before signing.
-        self._check_balance(
-            user.eth_address, payload.side, maker_amount, token_id_int
-        )
+        self._check_balance(user.eth_address, payload.side, maker_amount, token_id_int)
 
         order = OrderData(
             salt=secrets.randbits(256),
@@ -130,6 +128,10 @@ class OrderService:
             txHash=tx_hash,
         )
 
+    def list_live_orders(self, user: User) -> list[dict[str, Any]]:
+        with self._db.read() as conn:
+            return TableRead.list_live_orders_for_api_key(conn, user.api_key)
+
     def cancel_order(self, user: User, order_id: str) -> bool:
         with self._db.write() as conn:
             cur = conn.execute(
@@ -172,12 +174,12 @@ class OrderService:
         for token_id_str, label in market.erc1155_tokens:
             if label.upper() == outcome.upper():
                 return market, int(token_id_str), token_id_str
-        raise MarketStateError(
-            f"market {market_id} has no outcome '{outcome}'"
-        )
+        raise MarketStateError(f"market {market_id} has no outcome '{outcome}'")
 
     @staticmethod
-    def _amounts_from_price_size(side: str, price: Decimal, size: int) -> tuple[int, int]:
+    def _amounts_from_price_size(
+        side: str, price: Decimal, size: int
+    ) -> tuple[int, int]:
         """Return (makerAmount, takerAmount) given order side, price, and outcome-token size.
 
         BUY: maker offers collateral (USDC) to receive outcome tokens.
@@ -199,9 +201,7 @@ class OrderService:
         if side == "BUY":
             bal = self._onchain.usd_balance(eth_address)
             if bal < maker_amount:
-                raise InsufficientBalanceError(
-                    f"need {maker_amount} apUSD, have {bal}"
-                )
+                raise InsufficientBalanceError(f"need {maker_amount} apUSD, have {bal}")
         else:
             bal = self._onchain.ctf_balance(eth_address, token_id_int)
             if bal < maker_amount:
@@ -224,9 +224,7 @@ class OrderService:
         # REMAINING_AMOUNT is tracked in outcome-token units regardless of side
         # so the matching loop can compare BUY and SELL orders directly.
         # BUY: takerAmount = outcome qty. SELL: makerAmount = outcome qty.
-        outcome_remaining = (
-            order.takerAmount if order.side == 0 else order.makerAmount
-        )
+        outcome_remaining = order.takerAmount if order.side == 0 else order.makerAmount
         conn.execute(
             """
             INSERT INTO orders (
@@ -277,7 +275,10 @@ class OrderService:
         # Stable id derived from the signed fields. Not the EIP-712 hash; this
         # is purely an internal identifier.
         payload = json.dumps(
-            {k: (str(v) if isinstance(v, int) else v) for k, v in asdict(order).items()},
+            {
+                k: (str(v) if isinstance(v, int) else v)
+                for k, v in asdict(order).items()
+            },
             sort_keys=True,
         ).encode()
         return "0x" + keccak(payload).hex()
@@ -304,9 +305,7 @@ class OrderService:
         return str(Decimal(total_collateral) / Decimal(filled))
 
     @staticmethod
-    def _complement_token_id(
-        conn: sqlite3.Connection, token_id: str
-    ) -> str | None:
+    def _complement_token_id(conn: sqlite3.Connection, token_id: str) -> str | None:
         """Look up the binary-market complement of `token_id`, if one exists.
 
         Returns None when no two-outcome market contains this token (so the
@@ -418,14 +417,16 @@ class OrderService:
             trade_size = min(maker_remaining, taker_remaining)
             taker_remaining -= trade_size
             new_maker_remaining = maker_remaining - trade_size
-            matches.append({
-                "maker_row": maker,
-                "maker_order_id": maker["ORDER_ID"],
-                "price": int(maker["PRICE"]),
-                "trade_size": trade_size,
-                "new_maker_remaining": new_maker_remaining,
-                "match_kind": kind,
-            })
+            matches.append(
+                {
+                    "maker_row": maker,
+                    "maker_order_id": maker["ORDER_ID"],
+                    "price": int(maker["PRICE"]),
+                    "trade_size": trade_size,
+                    "new_maker_remaining": new_maker_remaining,
+                    "match_kind": kind,
+                }
+            )
 
         if dry_run:
             return matches
@@ -454,11 +455,13 @@ class OrderService:
         trade_id = "{}-{}-{}".format(
             taker_row["ORDER_ID"], match["maker_order_id"], secrets.token_hex(8)
         )
-        maker_orders_payload = [{
-            "order_id": match["maker_order_id"],
-            "owner": match["maker_row"]["MAKER"],
-            "matched_amount": str(match["trade_size"]),
-        }]
+        maker_orders_payload = [
+            {
+                "order_id": match["maker_order_id"],
+                "owner": match["maker_row"]["MAKER"],
+                "matched_amount": str(match["trade_size"]),
+            }
+        ]
         conn.execute(
             """
             INSERT INTO trades (
@@ -496,8 +499,8 @@ class OrderService:
         derived from the taker/maker token pairing, so NORMAL fills cannot
         share a tx with MINT/MERGE fills. Returns one tx hash per group.
         """
-        client = self._onchain._client                    # noqa: SLF001
-        exchange = self._onchain._contracts.exchange      # noqa: SLF001
+        client = self._onchain._client  # noqa: SLF001
+        exchange = self._onchain._contracts.exchange  # noqa: SLF001
 
         groups: dict[str, list[dict]] = {}
         for m in matches:
@@ -576,7 +579,9 @@ class OrderService:
             return trade_size
         # BUY maker
         ratio = Decimal(maker.makerAmount) / Decimal(maker.takerAmount)
-        return int((Decimal(trade_size) * ratio).to_integral_value(rounding=ROUND_HALF_UP))
+        return int(
+            (Decimal(trade_size) * ratio).to_integral_value(rounding=ROUND_HALF_UP)
+        )
 
     @staticmethod
     def _taker_fill_amount(taker: OrderData, trade_size: int) -> int:
