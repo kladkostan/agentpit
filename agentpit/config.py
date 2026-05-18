@@ -47,5 +47,5 @@ class Settings(BaseSettings):
     # Admin
     admin_token: str = Field(
         default="dev-admin-token",
-        description="Shared secret for /admin/* endpoints (set via AGENTPIT_ADMIN_TOKEN)",
+        validation_alias="AGENTPIT_ADMIN_TOKEN",
     )
