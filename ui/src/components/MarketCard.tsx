@@ -1,12 +1,13 @@
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getOrderbook } from "@/api/orders";
+import { useYesMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
-import type { OrderbookResponse } from "@/types/order";
 
 interface MarketCardProps {
   market: Market;
+  /** When provided, the card links to /events/:slug instead of /markets/:id.
+   * Used for singleton-market events so the URL surface stays event-centric. */
+  eventSlug?: string;
 }
 
 const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
@@ -30,46 +31,19 @@ function endLabel(seconds: number | null): string | null {
   return DATE_FMT.format(new Date(seconds * 1000));
 }
 
-function mid(book: OrderbookResponse | undefined): number | null {
-  if (!book) return null;
-  const bid =
-    book.bids.length > 0
-      ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
-      : null;
-  const ask =
-    book.asks.length > 0
-      ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
-      : null;
-  if (bid !== null && ask !== null) return (bid + ask) / 2;
-  return ask ?? bid;
-}
-
-function useYesMid(marketId: number, yesLabel: string | undefined) {
-  return useQuery({
-    queryKey: ["orderbook", marketId, yesLabel],
-    queryFn: () => {
-      if (!yesLabel) throw new Error("missing outcome label");
-      return getOrderbook(marketId, yesLabel);
-    },
-    enabled: Boolean(yesLabel),
-    refetchInterval: 30000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
-    staleTime: 15000,
-  });
-}
-
-export function MarketCard({ market }: MarketCardProps) {
+export function MarketCard({ market, eventSlug }: MarketCardProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
-  const { data } = useYesMid(market.market_id, yesLabel);
-  const yesMid = mid(data);
+  const { yesMid } = useYesMid(market.market_id, yesLabel);
   const yesCents = yesMid !== null ? Math.round(yesMid * 100) : null;
   const tone = STATE_TONE[market.market_state];
   const closes = endLabel(market.end_date);
+  const href = eventSlug
+    ? `/events/${eventSlug}`
+    : `/markets/${market.market_id}`;
 
   return (
     <Link
-      to={`/markets/${market.market_id}`}
+      to={href}
       className="group relative block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <article className="flex h-full flex-col gap-5 rounded-2xl border bg-card p-5 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-foreground/25 group-hover:shadow-[0_18px_36px_-22px_rgba(0,0,0,0.25)]">

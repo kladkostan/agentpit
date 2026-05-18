@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { TopNav } from "@/components/TopNav";
+import { EventDetailPage } from "@/pages/EventDetailPage";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { MarketDetailPage } from "@/pages/MarketDetailPage";
 
@@ -11,6 +12,7 @@ export default function App() {
       <main className="container py-8">
         <Routes>
           <Route path="/" element={<MarketsPage />} />
+          <Route path="/events/:slug" element={<EventDetailPage />} />
           <Route path="/markets/:id" element={<MarketDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -19,6 +19,9 @@ export interface Market {
   resolved_outcome: number | null;
   polymarket_id: number | null;
   condition_id: string;
+  event_id: number | null;
+  outcome_label: string | null;
+  icon_url: string | null;
 }
 
 export interface ListMarketsResponse {

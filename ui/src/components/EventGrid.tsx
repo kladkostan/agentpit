@@ -1,33 +1,30 @@
 import { useEffect, useRef } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
 import { MarketCard } from "@/components/MarketCard";
-import type { Market } from "@/types/market";
+import { MultiMarketEventCard } from "@/components/MultiMarketEventCard";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { EventWithMarkets } from "@/types/event";
 
-interface MarketGridProps {
-  markets: Market[];
+interface EventGridProps {
+  events: EventWithMarkets[];
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
 }
 
-export function MarketGrid({
-  markets,
+export function EventGrid({
+  events,
   hasNextPage,
   isFetchingNextPage,
   onLoadMore,
-}: MarketGridProps) {
+}: EventGridProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const node = sentinelRef.current;
-    if (!node || !hasNextPage) {
-      return;
-    }
+    if (!node || !hasNextPage) return;
     const observer = new IntersectionObserver((entries) => {
       const entry = entries[0];
-      if (entry?.isIntersecting) {
-        onLoadMore();
-      }
+      if (entry?.isIntersecting) onLoadMore();
     });
     observer.observe(node);
     return () => observer.disconnect();
@@ -36,11 +33,22 @@ export function MarketGrid({
   return (
     <>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {markets.map((market) => (
-          <MarketCard key={market.market_id} market={market} />
-        ))}
+        {events.map(({ event, markets }) =>
+          markets.length === 1 ? (
+            <MarketCard
+              key={event.event_id}
+              market={markets[0]!}
+              eventSlug={event.slug}
+            />
+          ) : (
+            <MultiMarketEventCard
+              key={event.event_id}
+              event={event}
+              markets={markets}
+            />
+          ),
+        )}
       </div>
-
       {hasNextPage ? (
         <div
           ref={sentinelRef}
@@ -53,7 +61,7 @@ export function MarketGrid({
   );
 }
 
-export function MarketGridSkeleton({ count = 8 }: { count?: number }) {
+export function EventGridSkeleton({ count = 8 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {Array.from({ length: count }, (_, idx) => (
@@ -85,7 +93,7 @@ function LoadingSpinner() {
     <div
       role="status"
       className="size-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground"
-      aria-label="Loading more markets"
+      aria-label="Loading more events"
     />
   );
 }

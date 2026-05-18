@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMarketsInfinite } from "@/api/markets";
+import { useEventsInfinite } from "@/api/events";
 import { Button } from "@/components/ui/button";
 import {
-  MarketGrid,
-  MarketGridSkeleton,
-} from "@/components/MarketGrid";
-import type { Market } from "@/types/market";
+  EventGrid,
+  EventGridSkeleton,
+} from "@/components/EventGrid";
+import type { EventWithMarkets } from "@/types/event";
 
 const DATE_FMT = new Intl.DateTimeFormat("en-US", {
   weekday: "long",
@@ -23,10 +23,10 @@ export function MarketsPage() {
     isFetchingNextPage,
     isLoading,
     refetch,
-  } = useMarketsInfinite();
+  } = useEventsInfinite();
 
-  const markets = useMemo<Market[]>(
-    () => data?.pages.flatMap((page) => page.markets) ?? [],
+  const events = useMemo<EventWithMarkets[]>(
+    () => data?.pages.flatMap((page) => page.events) ?? [],
     [data],
   );
   const total = data?.pages[0]?.total ?? null;
@@ -45,15 +45,24 @@ export function MarketsPage() {
   }, [trimmedQuery, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const filtered = useMemo(() => {
-    if (trimmedQuery.length === 0) return markets;
-    return markets.filter((m) =>
-      m.question.toLowerCase().includes(trimmedQuery),
-    );
-  }, [markets, trimmedQuery]);
+    if (trimmedQuery.length === 0) return events;
+    return events.filter(({ event, markets }) => {
+      if (event.title.toLowerCase().includes(trimmedQuery)) return true;
+      return markets.some((m) =>
+        (m.outcome_label ?? m.question).toLowerCase().includes(trimmedQuery),
+      );
+    });
+  }, [events, trimmedQuery]);
 
   const activeCount = useMemo(
-    () => markets.filter((m) => m.market_state === "ACTIVE").length,
-    [markets],
+    () =>
+      events.reduce(
+        (acc, ev) =>
+          acc +
+          ev.markets.filter((m) => m.market_state === "ACTIVE").length,
+        0,
+      ),
+    [events],
   );
 
   const isSearching = trimmedQuery.length > 0;
@@ -94,7 +103,7 @@ export function MarketsPage() {
       </header>
 
       {isLoading ? (
-        <MarketGridSkeleton />
+        <EventGridSkeleton />
       ) : error ? (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-8">
           <p className="text-xl font-semibold tracking-tight">
@@ -117,8 +126,8 @@ export function MarketsPage() {
       ) : filtered.length === 0 ? (
         <EmptyState query={query} onClear={() => setQuery("")} />
       ) : (
-        <MarketGrid
-          markets={filtered}
+        <EventGrid
+          events={filtered}
           hasNextPage={!isSearching && hasNextPage}
           isFetchingNextPage={isFetchingNextPage}
           onLoadMore={() => {
