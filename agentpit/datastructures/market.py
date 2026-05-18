@@ -14,8 +14,8 @@ class Market(BaseModel):
     market_id: int
     polymarket_id: Optional[int] = None
     polymarket_condition_id: Optional[str] = None
-    polymarket_yes_token_id: str | None = None
-    polymarket_no_token_id: str | None = None
+    polymarket_yes_token_id: Optional[str] = None
+    polymarket_no_token_id: Optional[str] = None
     condition_id: ConditionId = None
     description: str
     erc1155_tokens: list[tuple[str, str]]
