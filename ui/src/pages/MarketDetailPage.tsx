@@ -1,24 +1,53 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMarket } from "@/api/markets";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { MarketState } from "@/types/market";
-import { OutcomeChips } from "@/components/orders/OutcomeChips";
 import { Orderbook } from "@/components/orders/Orderbook";
 import { OrderTicket } from "@/components/orders/OrderTicket";
 
-const STATE_STYLES: Record<MarketState, string> = {
-  DRAFT: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200",
-  ACTIVE:
-    "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200",
-  CLOSED: "bg-slate-200 text-slate-700 dark:bg-slate-700/50 dark:text-slate-200",
-  RESOLVED: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200",
-  CANCELLED:
-    "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-200",
+const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
+  DRAFT: { dot: "bg-amber-500", label: "text-amber-700 dark:text-amber-400" },
+  ACTIVE: {
+    dot: "bg-emerald-500",
+    label: "text-emerald-700 dark:text-emerald-400",
+  },
+  CLOSED: { dot: "bg-slate-400", label: "text-slate-600 dark:text-slate-300" },
+  RESOLVED: { dot: "bg-sky-500", label: "text-sky-700 dark:text-sky-400" },
+  CANCELLED: { dot: "bg-rose-500", label: "text-rose-700 dark:text-rose-400" },
 };
+
+const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+function formatTs(seconds: number | null): string | null {
+  if (seconds === null) return null;
+  return DATE_FORMAT.format(new Date(seconds * 1000));
+}
+
+/** API sometimes wraps condition_id as `{ value: string }`. Normalize. */
+function unwrapHex(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (
+    value &&
+    typeof value === "object" &&
+    "value" in value &&
+    typeof (value as { value: unknown }).value === "string"
+  ) {
+    return (value as { value: string }).value;
+  }
+  return null;
+}
+
+function shortHex(hex: string): string {
+  if (hex.length <= 12) return hex;
+  return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
+}
 
 export function MarketDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -37,14 +66,14 @@ export function MarketDetailPage() {
 
   if (error || !market) {
     return (
-      <div className="flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-6">
-        <p className="text-sm font-medium text-destructive">
-          Failed to load market
+      <div className="mx-auto max-w-2xl rounded-2xl border border-destructive/30 bg-destructive/5 p-8">
+        <p className="text-2xl font-semibold tracking-tight">
+          Couldn't load this market
         </p>
-        <p className="text-xs text-muted-foreground">
+        <p className="mt-2 text-sm text-muted-foreground">
           {error instanceof Error ? error.message : "Market not found"}
         </p>
-        <div className="flex gap-2">
+        <div className="mt-6 flex gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -67,44 +96,91 @@ export function MarketDetailPage() {
     ? `Market is ${market.market_state}`
     : undefined;
 
-  return (
-    <article className="mx-auto max-w-5xl space-y-6">
-      <Link
-        to="/"
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← Back to markets
-      </Link>
+  const stateTone = STATE_TONE[market.market_state];
+  const startLabel = formatTs(market.start_date);
+  const endLabel = formatTs(market.end_date);
+  const conditionHex = unwrapHex(market.condition_id);
 
-      <header className="space-y-3">
-        <Badge
-          variant="secondary"
-          className={cn(
-            "w-fit border-transparent",
-            STATE_STYLES[market.market_state],
-          )}
+  return (
+    <article className="mx-auto w-full max-w-6xl animate-fade-up space-y-10">
+      <nav className="flex items-center justify-between text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">
+        <Link
+          to="/"
+          className="group flex items-center gap-2 transition-colors hover:text-foreground"
         >
-          {market.market_state}
-        </Badge>
-        <h1 className="text-3xl font-bold tracking-tight">{market.question}</h1>
-        {market.description ? (
-          <p className="whitespace-pre-line text-sm text-muted-foreground">
-            {market.description}
-          </p>
+          <span
+            aria-hidden
+            className="transition-transform group-hover:-translate-x-0.5"
+          >
+            ←
+          </span>
+          <span>Markets</span>
+        </Link>
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className={cn("size-1.5 rounded-full", stateTone.dot)}
+            />
+            <span className={stateTone.label}>{market.market_state}</span>
+          </span>
+          {endLabel ? (
+            <span>
+              <span className="text-foreground/40">closes</span> {endLabel}
+            </span>
+          ) : null}
+          <span className="text-foreground/40">#{market.market_id}</span>
+        </div>
+      </nav>
+
+      <header className="space-y-6">
+        <h1 className="text-balance text-3xl font-semibold leading-[1.15] tracking-tight md:text-[40px] md:leading-[1.1]">
+          {market.question}
+        </h1>
+        {startLabel || conditionHex || market.polymarket_id !== null ? (
+          <dl className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-4 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            {startLabel ? (
+              <div className="flex items-center gap-1.5">
+                <dt className="text-foreground/40">opened</dt>
+                <dd className="text-foreground/80">{startLabel}</dd>
+              </div>
+            ) : null}
+            {market.polymarket_id !== null ? (
+              <div className="flex items-center gap-1.5">
+                <dt className="text-foreground/40">polymarket</dt>
+                <dd className="text-foreground/80">#{market.polymarket_id}</dd>
+              </div>
+            ) : null}
+            {conditionHex ? (
+              <div className="flex items-center gap-1.5">
+                <dt className="text-foreground/40">condition</dt>
+                <dd className="text-foreground/80">{shortHex(conditionHex)}</dd>
+              </div>
+            ) : null}
+          </dl>
         ) : null}
       </header>
 
-      <OutcomeChips
-        tokens={market.erc1155_tokens}
-        selected={outcome}
-        onSelect={setSelectedOutcome}
-      />
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
-        <Orderbook marketId={market.market_id} outcome={outcome} />
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="space-y-8">
+          <Orderbook marketId={market.market_id} outcome={outcome} />
+          {market.description ? (
+            <section className="space-y-3 border-t pt-6">
+              <h2 className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                About this market
+              </h2>
+              <p className="whitespace-pre-line text-pretty text-base leading-relaxed text-foreground/80">
+                {market.description}
+              </p>
+            </section>
+          ) : null}
+        </div>
         <OrderTicket
           marketId={market.market_id}
+          tokens={market.erc1155_tokens}
           outcome={outcome}
+          question={market.question}
+          endDate={market.end_date}
           onOutcomeChange={setSelectedOutcome}
           isTradingDisabled={isTradingDisabled}
           {...(disabledReason !== undefined ? { disabledReason } : {})}
@@ -116,13 +192,20 @@ export function MarketDetailPage() {
 
 function MarketDetailSkeleton() {
   return (
-    <article className="mx-auto max-w-5xl space-y-6">
-      <Skeleton className="h-4 w-32" />
-      <Skeleton className="h-5 w-20 rounded-full" />
-      <Skeleton className="h-9 w-3/4" />
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-5/6" />
-      <Skeleton className="h-64 w-full rounded-lg" />
+    <article className="mx-auto w-full max-w-6xl space-y-10">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-40" />
+      </div>
+      <div className="space-y-4">
+        <Skeleton className="h-14 w-4/5" />
+        <Skeleton className="h-14 w-3/5" />
+      </div>
+      <Skeleton className="h-28 w-full rounded-2xl" />
+      <div className="grid gap-8 lg:grid-cols-[1fr_22rem]">
+        <Skeleton className="h-80 w-full rounded-2xl" />
+        <Skeleton className="h-96 w-full rounded-2xl" />
+      </div>
     </article>
   );
 }

@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { placeMarketOrder, placeOrder, useOrderbook } from "@/api/orders";
+import { getOrderbook, placeMarketOrder, placeOrder, useOrderbook } from "@/api/orders";
 import { usePortfolio } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { useRequireAuth } from "@/auth/useRequireAuth";
@@ -20,22 +18,59 @@ import {
   pickSellOutcome,
   sharesFromDollars,
 } from "@/components/orders/orderMath";
-import type { OrderSide } from "@/types/order";
+import type { Erc1155Token } from "@/types/market";
+import type { OrderSide, OrderbookResponse } from "@/types/order";
 import { ApiError } from "@/api/client";
 
 type Mode = "Limit" | "Market";
 
 interface OrderTicketProps {
   marketId: number;
+  tokens: Erc1155Token[];
   outcome: string;
+  question: string;
+  endDate: number | null;
   isTradingDisabled: boolean;
   disabledReason?: string;
   onOutcomeChange?: (outcome: string) => void;
 }
 
+const USD = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function formatDollars(n: number): string {
+  return USD.format(n);
+}
+
+function endsInLabel(endDate: number | null): string | null {
+  if (endDate === null) return null;
+  const msLeft = endDate * 1000 - Date.now();
+  if (msLeft <= 0) return "Closed";
+  const days = Math.ceil(msLeft / 86_400_000);
+  if (days <= 1) {
+    const hours = Math.max(1, Math.ceil(msLeft / 3_600_000));
+    return `Ends in ${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `Ends in ${days} days`;
+}
+
+/** Permissive decimal parser — strips locale commas and grouping. */
+function parseDecimal(input: string): number {
+  const trimmed = input.trim().replace(/,/g, ".");
+  if (trimmed === "") return NaN;
+  return Number(trimmed);
+}
+
 export function OrderTicket({
   marketId,
+  tokens,
   outcome,
+  question,
+  endDate,
   isTradingDisabled,
   disabledReason,
   onOutcomeChange,
@@ -52,7 +87,6 @@ export function OrderTicket({
   const { user } = useAuth();
   const { data: portfolio } = usePortfolio(Boolean(user));
 
-  // Display shares the user holds for each outcome of THIS market (label → shares).
   const heldByOutcome = useMemo(() => {
     const map = new Map<string, number>();
     if (!portfolio) return map;
@@ -91,8 +125,8 @@ export function OrderTicket({
 
   const limitMutation = useMutation({
     mutationFn: async () => {
-      const price = Number(limitPrice);
-      const shares = Number(limitShares);
+      const price = parseDecimal(limitPrice);
+      const shares = parseDecimal(limitShares);
       return placeOrder({
         market_id: marketId,
         outcome,
@@ -127,7 +161,7 @@ export function OrderTicket({
   const marketMutation = useMutation({
     mutationFn: async () => {
       if (!book) throw new Error("Orderbook not loaded yet");
-      const amount = Number(side === "BUY" ? marketAmount : limitShares);
+      const amount = parseDecimal(side === "BUY" ? marketAmount : limitShares);
       return placeMarketOrder({
         marketId,
         outcome,
@@ -164,20 +198,20 @@ export function OrderTicket({
   });
 
   const preview = useMemo(() => {
-    /* unchanged from Task 12 — preserved exactly */
     if (mode === "Limit") {
-      const price = Number(limitPrice);
-      const shares = Number(limitShares);
+      const price = parseDecimal(limitPrice);
+      const shares = parseDecimal(limitShares);
       if (!Number.isFinite(price) || !Number.isFinite(shares)) return null;
       if (price <= 0 || price >= 1 || shares <= 0) return null;
+      const cost = dollarsFromShares(shares, price);
       return {
-        priceLabel: `$${price.toFixed(2)}`,
-        sharesLabel: shares.toFixed(2),
-        totalLabel: `$${dollarsFromShares(shares, price).toFixed(2)}`,
+        price,
+        shares,
+        cost,
         capWarning: null as string | null,
       };
     }
-    const amount = Number(side === "BUY" ? marketAmount : limitShares);
+    const amount = parseDecimal(side === "BUY" ? marketAmount : limitShares);
     if (!book) return null;
     if (!Number.isFinite(amount) || amount <= 0) return null;
     if (side === "BUY") {
@@ -185,9 +219,9 @@ export function OrderTicket({
       if (!comp) return null;
       const shares = sharesFromDollars(amount, comp.priceCap);
       return {
-        priceLabel: `≤ $${comp.priceCap.toFixed(2)}`,
-        sharesLabel: `~${shares.toFixed(2)}`,
-        totalLabel: `$${amount.toFixed(2)}`,
+        price: comp.priceCap,
+        shares,
+        cost: amount,
         capWarning:
           comp.priceCap >= MAX_PROB
             ? `Cap clamped to ${MAX_PROB.toFixed(2)}`
@@ -198,9 +232,9 @@ export function OrderTicket({
     if (!comp) return null;
     const total = dollarsFromShares(amount, comp.priceCap);
     return {
-      priceLabel: `≥ $${comp.priceCap.toFixed(2)}`,
-      sharesLabel: amount.toFixed(2),
-      totalLabel: `~$${total.toFixed(2)}`,
+      price: comp.priceCap,
+      shares: amount,
+      cost: total,
       capWarning:
         comp.priceCap <= MIN_PROB
           ? `Cap clamped to ${MIN_PROB.toFixed(2)}`
@@ -224,173 +258,456 @@ export function OrderTicket({
     }
   });
 
-  return (
-    <section className="space-y-4 rounded-lg border bg-card p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Order ticket</h2>
-        <span className="text-xs text-muted-foreground">{outcome}</span>
-      </div>
+  const isBuy = side === "BUY";
+  const endsLabel = endsInLabel(endDate);
+  const ctaTone = isBuy
+    ? "bg-[#0F6E56] hover:bg-[#0F6E56]/90"
+    : "bg-rose-700 hover:bg-rose-700/90";
 
-      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
-        {(["BUY", "SELL"] as const).map((s) => (
+  const ctaLabel = (() => {
+    if (isTradingDisabled) return disabledReason ?? "Trading disabled";
+    if (limitMutation.isPending || marketMutation.isPending) return "Placing…";
+    if (!preview) return `${isBuy ? "Buy" : "Sell"} ${outcome}`;
+    const cents = Math.round(preview.price * 100);
+    const sharesStr = formatNumber(preview.shares);
+    return `${isBuy ? "Buy" : "Sell"} ${sharesStr} ${outcome.toUpperCase()} at ${cents}¢`;
+  })();
+
+  // Live cost hint shown next to the Shares label as user types.
+  const sharesValue = parseDecimal(limitShares);
+  const priceForCost = (() => {
+    if (mode === "Limit") return parseDecimal(limitPrice);
+    if (side === "BUY") return bestAsk ?? NaN;
+    return bestBid ?? NaN;
+  })();
+  const liveCost =
+    Number.isFinite(sharesValue) &&
+    sharesValue > 0 &&
+    Number.isFinite(priceForCost) &&
+    priceForCost > 0
+      ? sharesValue * priceForCost
+      : null;
+
+  return (
+    <section className="sticky top-20 w-full max-w-[360px] self-start overflow-hidden rounded-2xl border border-border/80 bg-card shadow-[0_1px_0_0_hsl(var(--border)),0_24px_60px_-24px_rgba(0,0,0,0.18)]">
+      <header className="space-y-1.5 border-b border-border/60 px-5 py-4">
+        <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
+          Market
+        </p>
+        <h2 className="text-[15px] font-medium leading-[1.35] text-foreground">
+          {question}
+        </h2>
+        {endsLabel ? (
+          <p className="text-xs text-muted-foreground">{endsLabel}</p>
+        ) : null}
+      </header>
+
+      <div className="space-y-3.5 px-5 py-5">
+        <OutcomePicker
+          marketId={marketId}
+          tokens={tokens}
+          selected={outcome}
+          onSelect={(label) => onOutcomeChange?.(label)}
+        />
+
+        <SegmentedSide side={side} onSelect={selectSide} />
+
+        <SegmentedMode mode={mode} onSelect={setMode} />
+
+        {mode === "Limit" ? (
+          <div className="space-y-3">
+            <Field label="Limit price" hint="USDC">
+              <ValueInput
+                id="limit-price"
+                value={limitPrice}
+                onChange={setLimitPrice}
+                disabled={isTradingDisabled}
+                suffix="per share"
+              />
+            </Field>
+            <Field
+              label="Shares"
+              hint={
+                liveCost !== null ? (
+                  <span>
+                    ≈ <span className="text-foreground/80">{formatDollars(liveCost)}</span>{" "}
+                    cost
+                  </span>
+                ) : null
+              }
+            >
+              <ValueInput
+                id="limit-shares"
+                value={limitShares}
+                onChange={setLimitShares}
+                disabled={isTradingDisabled}
+              />
+            </Field>
+            {!isBuy ? (
+              <Hint>
+                You hold{" "}
+                <span className="font-medium tabular-nums text-foreground/80">
+                  {heldOfCurrent.toFixed(2)}
+                </span>{" "}
+                {outcome} shares
+              </Hint>
+            ) : null}
+          </div>
+        ) : isBuy ? (
+          <div className="space-y-2">
+            <Field label="Amount" hint="USDC">
+              <ValueInput
+                id="market-amount"
+                value={marketAmount}
+                onChange={setMarketAmount}
+                disabled={isTradingDisabled}
+                suffix="to spend"
+              />
+            </Field>
+            <Hint>
+              Max slippage {SLIPPAGE_CAP.toFixed(2)} over best ask
+              {bestAsk !== null ? (
+                <>
+                  {" "}({Math.round(bestAsk * 100)}¢)
+                </>
+              ) : null}
+            </Hint>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Field
+              label="Shares to sell"
+              hint={
+                liveCost !== null ? (
+                  <span>
+                    ≈ <span className="text-foreground/80">{formatDollars(liveCost)}</span>{" "}
+                    received
+                  </span>
+                ) : null
+              }
+            >
+              <ValueInput
+                id="market-shares"
+                value={limitShares}
+                onChange={setLimitShares}
+                disabled={isTradingDisabled}
+              />
+            </Field>
+            <Hint>
+              You hold{" "}
+              <span className="font-medium tabular-nums text-foreground/80">
+                {heldOfCurrent.toFixed(2)}
+              </span>{" "}
+              {outcome} shares · max slippage {SLIPPAGE_CAP.toFixed(2)} under
+              best bid
+              {bestBid !== null ? <> ({Math.round(bestBid * 100)}¢)</> : null}
+            </Hint>
+          </div>
+        )}
+
+        {preview && isBuy ? (
+          <PayoutSummary
+            pay={preview.cost}
+            shares={preview.shares}
+            outcome={outcome}
+          />
+        ) : null}
+
+        {preview?.capWarning ? (
+          <p className="text-[11px] text-amber-700 dark:text-amber-400">
+            {preview.capWarning}
+          </p>
+        ) : null}
+
+        <Button
+          type="button"
+          disabled={!canSubmit}
+          className={cn(
+            "h-11 w-full rounded-lg text-sm font-medium text-white transition-all",
+            !isTradingDisabled && ctaTone,
+            !canSubmit && "opacity-60",
+          )}
+          onClick={onSubmit}
+        >
+          {ctaLabel}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- Outcome picker (cents, sans, strong selected state) ---------- */
+
+function OutcomePicker({
+  marketId,
+  tokens,
+  selected,
+  onSelect,
+}: {
+  marketId: number;
+  tokens: Erc1155Token[];
+  selected: string;
+  onSelect: (label: string) => void;
+}) {
+  const results = useQueries({
+    queries: tokens.map(([, label]) => ({
+      queryKey: ["orderbook", marketId, label],
+      queryFn: () => getOrderbook(marketId, label),
+      refetchInterval: 5000,
+      refetchIntervalInBackground: false,
+    })),
+  });
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Outcomes"
+      className="grid gap-2"
+      style={{
+        gridTemplateColumns: `repeat(${tokens.length}, minmax(0, 1fr))`,
+      }}
+    >
+      {tokens.map(([id, label], i) => {
+        const book = results[i]?.data as OrderbookResponse | undefined;
+        const cents = midCents(book);
+        const isActive = label === selected;
+        const isPositive = i === 0;
+        const tone = isPositive ? "emerald" : "rose";
+        return (
+          <button
+            key={id}
+            role="tab"
+            type="button"
+            aria-selected={isActive}
+            onClick={() => onSelect(label)}
+            className={cn(
+              "flex flex-col items-start gap-1 rounded-lg border px-3 py-2.5 text-left transition-all",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              isActive
+                ? tone === "emerald"
+                  ? "border-[1.5px] border-emerald-600 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                  : "border-[1.5px] border-rose-600 bg-rose-500/10 text-rose-800 dark:text-rose-200"
+                : "border-border/80 text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+            )}
+          >
+            <span className="text-[11px] font-medium uppercase tracking-[0.08em]">
+              {label.toUpperCase()}
+            </span>
+            <span className="flex items-baseline">
+              <span className="text-[22px] font-medium leading-none tabular-nums">
+                {cents !== null ? cents : "—"}
+              </span>
+              <span className="ml-0.5 text-[14px] leading-none opacity-70">
+                ¢
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function midCents(book: OrderbookResponse | undefined): number | null {
+  if (!book) return null;
+  const bid =
+    book.bids.length > 0
+      ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
+      : null;
+  const ask =
+    book.asks.length > 0
+      ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
+      : null;
+  if (bid !== null && ask !== null) return Math.round(((bid + ask) / 2) * 100);
+  const single = ask ?? bid;
+  return single !== null ? Math.round(single * 100) : null;
+}
+
+/* ---------- Buy / Sell (neutral segmented) ---------- */
+
+function SegmentedSide({
+  side,
+  onSelect,
+}: {
+  side: OrderSide;
+  onSelect: (next: OrderSide) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-0.5 rounded-lg bg-muted/60 p-[3px]">
+      {(["BUY", "SELL"] as const).map((s) => {
+        const active = side === s;
+        return (
           <button
             key={s}
             type="button"
-            onClick={() => selectSide(s)}
+            onClick={() => onSelect(s)}
             className={cn(
-              "rounded-sm py-1.5 text-sm font-medium transition",
-              side === s
-                ? s === "BUY"
-                  ? "bg-emerald-600 text-white shadow"
-                  : "bg-rose-600 text-white shadow"
+              "rounded-md py-1.5 text-[13px] font-medium transition-all",
+              active
+                ? "bg-background text-foreground shadow-[0_0_0_0.5px_hsl(var(--border)),0_1px_2px_rgba(0,0,0,0.04)]"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
             {s === "BUY" ? "Buy" : "Sell"}
           </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
-        {(["Limit", "Market"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => setMode(m)}
-            className={cn(
-              "rounded-sm py-1.5 text-sm font-medium transition",
-              mode === m
-                ? "bg-background shadow"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {mode === "Limit" ? (
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="limit-price">Limit price ($)</Label>
-            <Input
-              id="limit-price"
-              type="number"
-              inputMode="decimal"
-              min="0.01"
-              max="0.99"
-              step="0.01"
-              value={limitPrice}
-              onChange={(e) => setLimitPrice(e.target.value)}
-              disabled={isTradingDisabled}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="limit-shares">Shares</Label>
-            <Input
-              id="limit-shares"
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="1"
-              value={limitShares}
-              onChange={(e) => setLimitShares(e.target.value)}
-              disabled={isTradingDisabled}
-            />
-            {side === "SELL" ? (
-              <p className="text-xs text-muted-foreground">
-                You hold {heldOfCurrent.toFixed(2)} {outcome} shares
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : side === "BUY" ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="market-amount">Amount ($)</Label>
-          <Input
-            id="market-amount"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            value={marketAmount}
-            onChange={(e) => setMarketAmount(e.target.value)}
-            disabled={isTradingDisabled}
-          />
-          <p className="text-xs text-muted-foreground">
-            Max slippage: {SLIPPAGE_CAP.toFixed(2)} above best ask
-            {bestAsk !== null ? ` ($${bestAsk.toFixed(2)})` : ""}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          <Label htmlFor="market-shares">Shares to sell</Label>
-          <Input
-            id="market-shares"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="1"
-            value={limitShares}
-            onChange={(e) => setLimitShares(e.target.value)}
-            disabled={isTradingDisabled}
-          />
-          <p className="text-xs text-muted-foreground">
-            You hold {heldOfCurrent.toFixed(2)} {outcome} shares
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Max slippage: {SLIPPAGE_CAP.toFixed(2)} below best bid
-            {bestBid !== null ? ` ($${bestBid.toFixed(2)})` : ""}
-          </p>
-        </div>
-      )}
-
-      <dl className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs">
-        <Row label="Price" value={preview?.priceLabel ?? "—"} />
-        <Row label="Shares" value={preview?.sharesLabel ?? "—"} />
-        <Row label="Total" value={preview?.totalLabel ?? "—"} />
-        {preview?.capWarning ? (
-          <Row label="" value={preview.capWarning} muted />
-        ) : null}
-      </dl>
-
-      <Button
-        type="button"
-        size="lg"
-        disabled={!canSubmit}
-        className="w-full"
-        onClick={onSubmit}
-      >
-        {isTradingDisabled
-          ? (disabledReason ?? "Trading disabled")
-          : limitMutation.isPending || marketMutation.isPending
-            ? "Placing…"
-            : `${side === "BUY" ? "Buy" : "Sell"} ${outcome}`}
-      </Button>
-    </section>
+        );
+      })}
+    </div>
   );
 }
 
-function Row({
-  label,
-  value,
-  muted,
+/* ---------- Limit / Market (fixed underline) ---------- */
+
+function SegmentedMode({
+  mode,
+  onSelect,
 }: {
-  label: string;
-  value: string;
-  muted?: boolean;
+  mode: "Limit" | "Market";
+  onSelect: (next: "Limit" | "Market") => void;
 }) {
   return (
-    <div className="flex items-baseline justify-between">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "tabular-nums",
-          muted ? "text-muted-foreground" : "font-medium",
-        )}
-      >
-        {value}
-      </dd>
+    <div className="flex items-center gap-4 border-b border-border/60">
+      {(["Limit", "Market"] as const).map((m) => {
+        const active = mode === m;
+        return (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onSelect(m)}
+            className={cn(
+              "relative inline-block pb-2 pt-1 text-[13px] transition-colors",
+              active
+                ? "font-medium text-foreground"
+                : "font-normal text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {m}
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -bottom-[0.5px] left-0 right-0 h-[1.5px] transition-colors",
+                active ? "bg-foreground" : "bg-transparent",
+              )}
+            />
+          </button>
+        );
+      })}
     </div>
   );
+}
+
+/* ---------- Compact field shell ---------- */
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-border/80 bg-background px-3 py-2.5 transition-colors focus-within:border-foreground/45">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[12px] text-muted-foreground">{label}</span>
+        {hint ? (
+          <span className="text-[11px] text-muted-foreground/80">{hint}</span>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* ---------- Locale-stable decimal input ---------- */
+
+function ValueInput({
+  id,
+  value,
+  onChange,
+  disabled,
+  suffix,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+  suffix?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <input
+        id={id}
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="min-w-0 flex-1 bg-transparent text-[22px] font-medium tabular-nums text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
+        placeholder="0"
+      />
+      {suffix ? (
+        <span className="text-[13px] text-muted-foreground">{suffix}</span>
+      ) : null}
+    </div>
+  );
+}
+
+/* ---------- Payout summary ---------- */
+
+function PayoutSummary({
+  pay,
+  shares,
+  outcome,
+}: {
+  pay: number;
+  shares: number;
+  outcome: string;
+}) {
+  // Each winning share pays $1.00; profit is the difference.
+  const payout = shares * 1;
+  const profit = payout - pay;
+  const profitPct = pay > 0 ? (profit / pay) * 100 : 0;
+
+  return (
+    <div className="space-y-2 rounded-lg bg-emerald-500/8 px-3.5 py-3 text-[12px] dark:bg-emerald-500/10">
+      <div className="flex items-baseline justify-between text-emerald-900 dark:text-emerald-200">
+        <span>You pay</span>
+        <span className="tabular-nums">{formatDollars(pay)}</span>
+      </div>
+      <div className="flex items-baseline justify-between text-emerald-900 dark:text-emerald-200">
+        <span>
+          If {outcome.toUpperCase()} wins, you get
+        </span>
+        <span className="tabular-nums">{formatDollars(payout)}</span>
+      </div>
+      <div className="-mx-3.5 border-t border-emerald-700/15 dark:border-emerald-300/15" />
+      <div className="flex items-baseline justify-between font-medium text-emerald-900 dark:text-emerald-100">
+        <span>Potential profit</span>
+        <span className="tabular-nums">
+          {profit >= 0 ? "+" : "−"}
+          {formatDollars(Math.abs(profit))}{" "}
+          <span className="font-normal text-emerald-700 dark:text-emerald-300">
+            ({profit >= 0 ? "+" : "−"}
+            {Math.abs(profitPct).toFixed(0)}%)
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Hint footnote ---------- */
+
+function Hint({ children }: { children: React.ReactNode }) {
+  return <p className="px-1 text-[11px] text-muted-foreground">{children}</p>;
+}
+
+/* ---------- Helpers ---------- */
+
+function formatNumber(n: number): string {
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(2);
 }
