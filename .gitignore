@@ -141,3 +141,5 @@ deployments/
 
 # sqlite3 database files
 *.db
+
+agentpit_bots/creds.json
