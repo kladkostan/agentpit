@@ -46,3 +46,13 @@ def get_orderbook(
     service: OrderServiceDep,
 ) -> dict:
     return service.get_orderbook(market_id, outcome)
+
+
+@router.get("/sparkline/{market_id}/{outcome}")
+def get_sparkline(
+    market_id: int,
+    outcome: str,
+    service: OrderServiceDep,
+    window_hours: int = 24,
+) -> dict:
+    return service.get_sparkline(market_id, outcome, window_hours=window_hours)

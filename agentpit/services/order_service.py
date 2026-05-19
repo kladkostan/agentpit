@@ -161,6 +161,47 @@ class OrderService:
         )
         return {"market_id": market_id, "outcome": outcome, "bids": bids, "asks": asks}
 
+    def get_sparkline(
+        self, market_id: int, outcome: str, window_hours: int = 24
+    ) -> dict[str, Any]:
+        """Recent trade prices + window volume for a market+outcome.
+
+        Returns at most 60 (time, price) points from the trailing
+        `window_hours` window. Used by home-page cards to render a
+        sparkline + the trailing-window % move and dollar volume.
+        """
+        _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
+        now = int(datetime.now(timezone.utc).timestamp())
+        since = now - max(1, window_hours) * 3600
+        with self._db.read() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT MATCH_TIME, PRICE, TRADE_SIZE FROM trades "
+                "WHERE ASSET_ID = ? AND MATCH_TIME >= ? "
+                "AND STATUS != 'FAILED' "
+                "ORDER BY MATCH_TIME ASC",
+                (token_id_str, since),
+            ).fetchall()
+        points = [{"t": int(r["MATCH_TIME"]), "p": int(r["PRICE"])} for r in rows]
+        # Downsample if we have a lot of trades — keep the shape readable.
+        max_points = 60
+        if len(points) > max_points:
+            stride = len(points) / max_points
+            sampled = [points[int(i * stride)] for i in range(max_points)]
+            if sampled[-1] != points[-1]:
+                sampled[-1] = points[-1]
+            points = sampled
+        volume_micro_usd = sum(
+            (int(r["PRICE"]) * int(r["TRADE_SIZE"])) // _PRICE_ONE for r in rows
+        )
+        return {
+            "market_id": market_id,
+            "outcome": outcome,
+            "window_hours": window_hours,
+            "points": points,
+            "volume_micro_usd": int(volume_micro_usd),
+        }
+
     # --- internals ------------------------------------------------------
 
     def _resolve_market(self, payload: PlaceOrderRequest):
