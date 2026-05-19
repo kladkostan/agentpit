@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { useSparkline } from "@/api/markets";
+import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
+import { formatShortDate, formatVolume } from "@/lib/format";
 import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
@@ -23,31 +25,13 @@ const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
   CANCELLED: { dot: "bg-rose-500", label: "text-rose-700 dark:text-rose-400" },
 };
 
-const DATE_FMT = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-});
-
-function endLabel(seconds: number | null): string | null {
-  if (seconds === null) return null;
-  return DATE_FMT.format(new Date(seconds * 1000));
-}
-
-/** Compact dollar formatter for volume — $850, $12.4K, $8.1M, $1.2B. */
-function formatVolume(usd: number): string {
-  if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`;
-  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`;
-  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
-  return `$${Math.round(usd)}`;
-}
-
 export function MarketCard({ market, eventSlug }: MarketCardProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
   const { data: spark } = useSparkline(market.market_id, yesLabel);
   const yesCents = yesMid !== null ? Math.round(yesMid * 100) : null;
   const tone = STATE_TONE[market.market_state];
-  const closes = endLabel(market.end_date);
+  const closes = formatShortDate(market.end_date);
   const href = eventSlug
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;
@@ -62,13 +46,7 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
           (points[points.length - 1]!.p - points[0]!.p) / 10_000,
         )
       : null;
-  const chartTone: "up" | "down" | "neutral" =
-    change === null || change === 0
-      ? "neutral"
-      : change > 0
-        ? "up"
-        : "down";
-  const volumeUsd = spark ? spark.volume_micro_usd / 1_000_000 : 0;
+  const volumeUsd = spark ? spark.volume_total_micro_usd / 1_000_000 : 0;
 
   return (
     <Link
@@ -96,7 +74,7 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
           {market.question}
         </h3>
 
-        <div className="flex items-end justify-between gap-3 border-t pt-4">
+        <div className="flex items-end justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-1">
             <div
               className={cn(
@@ -113,20 +91,25 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
                 %
               </span>
             </div>
-            <ChanceMeta change={change} />
+            <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+              chance
+            </span>
           </div>
-          <Sparkline
-            points={points}
-            tone={chartTone}
-            width={120}
-            height={48}
-            className="shrink-0"
-          />
+          <div className="flex flex-col items-end gap-1">
+            <Sparkline
+              points={points}
+              strokeColor={CHART_PRIMARY_COLOR}
+              width={180}
+              height={56}
+              className="shrink-0"
+            />
+            <TodayChange change={change} />
+          </div>
         </div>
 
         {volumeUsd > 0 ? (
-          <div className="border-t pt-3 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/80 tabular-nums">
-            {formatVolume(volumeUsd)} <span className="text-foreground/40">vol · 24h</span>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/80 tabular-nums">
+            {formatVolume(volumeUsd)} <span className="text-foreground/40">vol</span>
           </div>
         ) : null}
       </article>
@@ -140,36 +123,23 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
   );
 }
 
-function ChanceMeta({ change }: { change: number | null }) {
-  if (change === null) {
-    return (
-      <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-        chance
-      </span>
-    );
-  }
+/** Renders the trailing-24h price change. Up/down moves get a sky-blue
+ *  arrow + magnitude; a zero net move shows a muted "flat today" so the
+ *  card doesn't look identical to one that has no trade history yet. */
+function TodayChange({ change }: { change: number | null }) {
+  if (change === null) return null;
   if (change === 0) {
     return (
-      <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-        chance · flat
+      <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70">
+        flat today
       </span>
     );
   }
   const isUp = change > 0;
   return (
-    <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-      <span className="text-foreground/70">chance</span>
-      <span
-        className={cn(
-          "flex items-center gap-0.5 tabular-nums",
-          isUp
-            ? "text-emerald-700 dark:text-emerald-400"
-            : "text-rose-700 dark:text-rose-400",
-        )}
-      >
-        <span aria-hidden>{isUp ? "↑" : "↓"}</span>
-        {Math.abs(change)}% · 24h
-      </span>
+    <span className="flex items-center gap-0.5 font-mono text-[10px] uppercase tracking-[0.22em] tabular-nums text-sky-700 dark:text-sky-400">
+      <span aria-hidden>{isUp ? "↑" : "↓"}</span>
+      {Math.abs(change)}% today
     </span>
   );
 }

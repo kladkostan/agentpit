@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useYesMidMap } from "@/lib/useYesMid";
 import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
+import { formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/types/event";
 import type { Market } from "@/types/market";
@@ -12,16 +13,6 @@ interface MultiMarketEventCardProps {
 }
 
 const PREVIEW_COUNT = 2;
-
-const DATE_FMT = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-});
-
-function endLabel(seconds: number | null): string | null {
-  if (seconds === null) return null;
-  return DATE_FMT.format(new Date(seconds * 1000));
-}
 
 function OutcomeIcon({ market }: { market: Market }) {
   const icon = market.icon_url;
@@ -82,7 +73,7 @@ export function MultiMarketEventCard({
   );
   const previewMarkets = ranked.slice(0, PREVIEW_COUNT);
   const extra = ranked.length - previewMarkets.length;
-  const closes = endLabel(event.end_date);
+  const closes = formatShortDate(event.end_date);
 
   return (
     <Link
@@ -120,7 +111,7 @@ export function MultiMarketEventCard({
           </h3>
         </div>
 
-        <div className="border-t pt-3">
+        <div>
           {previewMarkets.map((m) => (
             <PreviewRow
               key={m.market_id}
