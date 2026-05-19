@@ -8,19 +8,9 @@ import { OrderTicket } from "@/components/orders/OrderTicket";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
+import { formatLongDate } from "@/lib/format";
 import { useYesMidMap } from "@/lib/useYesMid";
 import type { MarketState } from "@/types/market";
-
-const DATE_FMT = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-function formatDate(seconds: number | null): string | null {
-  if (seconds === null) return null;
-  return DATE_FMT.format(new Date(seconds * 1000));
-}
 
 const NON_TRADEABLE: ReadonlySet<MarketState> = new Set([
   "RESOLVED",
@@ -97,7 +87,7 @@ export function EventDetailPage() {
   }
 
   const { event, markets } = data;
-  const endLabel = formatDate(event.end_date);
+  const endLabel = formatLongDate(event.end_date);
   const isSingleMarket = markets.length === 1;
   const onlyMarket = markets[0] ?? null;
 
@@ -119,7 +109,7 @@ export function EventDetailPage() {
         ← All events
       </Link>
 
-      <header className="space-y-5 border-b pb-8">
+      <header className="space-y-5 pb-8">
         <div className="flex items-center gap-2.5 font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
           <span
             aria-hidden
@@ -149,12 +139,6 @@ export function EventDetailPage() {
           </h1>
         </div>
 
-        {event.description ? (
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            {event.description}
-          </p>
-        ) : null}
-
         <div className="flex flex-wrap gap-x-5 gap-y-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           {endLabel ? (
             <span>
@@ -169,56 +153,69 @@ export function EventDetailPage() {
         </div>
       </header>
 
-      <EventChart markets={markets} midByMarket={midByMarket} />
-
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
-        {isSingleMarket && onlyMarket ? (
-          <div className="rounded-2xl border bg-card/40 px-5 py-5">
-            <Orderbook
-              marketId={onlyMarket.market_id}
-              outcome={
-                selection?.outcome ||
-                onlyMarket.erc1155_tokens[0]?.[1] ||
-                ""
-              }
-            />
-          </div>
-        ) : (
-          <div className="rounded-2xl border bg-card/40">
-            {ordered.map((market, idx) => {
-              const isExpanded = selection?.marketId === market.market_id;
-              const yesLabel = market.erc1155_tokens[0]?.[1] ?? "";
-              return (
-                <Fragment key={market.market_id}>
-                  <EventLeaderboardRow
-                    market={market}
-                    rank={idx + 1}
-                    isSelected={isExpanded}
-                    selectedOutcome={isExpanded ? selection.outcome : null}
-                    onToggleMarket={(marketId, outcome) =>
-                      setSelection((prev) =>
-                        prev?.marketId === marketId
-                          ? null
-                          : { marketId, outcome },
-                      )
-                    }
-                    onPickOutcome={(marketId, outcome) =>
-                      setSelection({ marketId, outcome })
-                    }
-                  />
-                  {isExpanded ? (
-                    <div className="border-b border-border/60 bg-foreground/[0.02] px-5 py-4 animate-fade-up">
-                      <Orderbook
-                        marketId={market.market_id}
-                        outcome={selection.outcome || yesLabel}
-                      />
-                    </div>
-                  ) : null}
-                </Fragment>
-              );
-            })}
-          </div>
-        )}
+        <div className="space-y-8">
+          <EventChart markets={markets} midByMarket={midByMarket} />
+
+          {isSingleMarket && onlyMarket ? (
+            <div className="rounded-2xl border bg-card/40 px-5 py-5">
+              <Orderbook
+                marketId={onlyMarket.market_id}
+                outcome={
+                  selection?.outcome ||
+                  onlyMarket.erc1155_tokens[0]?.[1] ||
+                  ""
+                }
+              />
+            </div>
+          ) : (
+            <div className="rounded-2xl border bg-card/40">
+              {ordered.map((market, idx) => {
+                const isExpanded = selection?.marketId === market.market_id;
+                const yesLabel = market.erc1155_tokens[0]?.[1] ?? "";
+                return (
+                  <Fragment key={market.market_id}>
+                    <EventLeaderboardRow
+                      market={market}
+                      rank={idx + 1}
+                      isSelected={isExpanded}
+                      selectedOutcome={isExpanded ? selection.outcome : null}
+                      onToggleMarket={(marketId, outcome) =>
+                        setSelection((prev) =>
+                          prev?.marketId === marketId
+                            ? null
+                            : { marketId, outcome },
+                        )
+                      }
+                      onPickOutcome={(marketId, outcome) =>
+                        setSelection({ marketId, outcome })
+                      }
+                    />
+                    {isExpanded ? (
+                      <div className="border-b border-border/60 bg-foreground/[0.02] px-5 py-4 animate-fade-up">
+                        <Orderbook
+                          marketId={market.market_id}
+                          outcome={selection.outcome || yesLabel}
+                        />
+                      </div>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </div>
+          )}
+
+          {event.description ? (
+            <section className="space-y-3">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                About this market
+              </h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {event.description}
+              </p>
+            </section>
+          ) : null}
+        </div>
 
         <aside className="lg:sticky lg:top-20 lg:self-start">
           {selectedMarket ? (
