@@ -1,9 +1,13 @@
 import { useId, useMemo } from "react";
-import { projectToViewBox, smoothPath } from "@/lib/chartGeometry";
+import {
+  projectToViewBox,
+  smoothPath,
+  type SparklineSample,
+} from "@/lib/chartGeometry";
 import { cn } from "@/lib/utils";
 
 interface SparklineProps {
-  points: ReadonlyArray<{ t: number; p: number }>;
+  points: ReadonlyArray<SparklineSample>;
   width?: number;
   height?: number;
   tone?: "up" | "down" | "neutral";
@@ -22,7 +26,6 @@ const TONE_FILL: Record<NonNullable<SparklineProps["tone"]>, string> = {
   down: "text-rose-500",
   neutral: "text-muted-foreground/40",
 };
-
 
 export function Sparkline({
   points,

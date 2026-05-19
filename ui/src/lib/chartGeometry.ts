@@ -57,6 +57,14 @@ export interface ProjectionDims {
 
 /** Project sparkline samples into chart-local SVG coords.
  *
+ *  Y-axis convention: higher price → higher in the chart (smaller y).
+ *  In `"fixed"` mode the axis spans 0 → 1_000_000 (i.e. 0% → 100%) so
+ *  multiple charts have directly-comparable elevations. In `"relative"`
+ *  mode the input's own min/max stretches across the full height.
+ *
+ *  Out-of-range prices in fixed mode are clamped to the chart edges to
+ *  defend against bad upstream data.
+ *
  *  X-axis is by sample index, not by timestamp — sparse trade streams stay
  *  comfortably spaced rather than clumping near recent activity.
  */
