@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Iterable
 
 from agentpit_bots.client import BotCredentials
+from agentpit_bots.config import SHARES_SCALE
 
 log = logging.getLogger(__name__)
 
@@ -53,12 +54,14 @@ class BotPool:
         anchor_pool_size: int,
         noise_pool_size: int,
         inventory_split_shares: int = 500,
+        noise_inventory_split_shares: int = 100,
     ):
         self._client = client
         self._creds_path = Path(creds_path)
         self._anchor_pool_size = anchor_pool_size
         self._noise_pool_size = noise_pool_size
         self._inventory_split_shares = inventory_split_shares
+        self._noise_inventory_split_shares = noise_inventory_split_shares
 
     def ensure_provisioned(
         self, *, market_ids_for_inventory: Iterable[int]
@@ -96,16 +99,27 @@ class BotPool:
 
         self._save(new_entries)
 
-        # Inventory split for anchor bots.
+        # Inventory split per bot role:
+        #   - anchor needs a deep float to quote both sides of every market
+        #   - noise needs a small float so its SELL picks can fire — without
+        #     it, noise BUYs rest forever (never cross the anchor's SELL) and
+        #     the ask side of every market shows only the anchor's one quote.
+        # Pass noise_inventory_split_shares=0 to skip the noise bootstrap.
         market_ids = list(market_ids_for_inventory)
         for bot in bots:
-            if bot.role != BotRole.ANCHOR:
+            if bot.role == BotRole.ANCHOR:
+                shares = self._inventory_split_shares
+            elif bot.role == BotRole.NOISE:
+                shares = self._noise_inventory_split_shares
+            else:
+                continue
+            if shares <= 0:
                 continue
             for market_id in market_ids:
                 try:
                     self._client.split_position(
                         token=bot.creds.token, market_id=market_id,
-                        amount=self._inventory_split_shares,
+                        amount=shares * SHARES_SCALE,
                     )
                 except Exception as exc:
                     log.warning(
