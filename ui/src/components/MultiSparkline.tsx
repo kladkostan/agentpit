@@ -18,6 +18,8 @@ interface MultiSparklineProps {
 }
 
 const GRIDLINE_Y_PCT = [25, 50, 75] as const;
+const PAD_X = 4;
+const PAD_Y = 6;
 
 export function MultiSparkline({
   series,
@@ -32,12 +34,16 @@ export function MultiSparkline({
         coords: projectToViewBox(s.points, {
           width,
           height,
-          padX: 4,
-          padY: 6,
+          padX: PAD_X,
+          padY: PAD_Y,
         }),
       })),
     [series, width, height],
   );
+
+  // Gridlines align with the padded data area, not the raw viewBox edges,
+  // so the 50% line sits exactly between the projected 0 and 1 prices.
+  const innerH = height - PAD_Y * 2;
 
   return (
     <svg
@@ -48,7 +54,7 @@ export function MultiSparkline({
     >
       {/* Gridlines */}
       {GRIDLINE_Y_PCT.map((pct) => {
-        const y = height - (pct / 100) * height;
+        const y = PAD_Y + innerH - (pct / 100) * innerH;
         return (
           <line
             key={pct}

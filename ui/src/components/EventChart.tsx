@@ -34,6 +34,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
         staleTime: 30_000,
         refetchInterval: 60_000,
         refetchOnWindowFocus: false,
+        refetchIntervalInBackground: false,
       };
     }),
   });
