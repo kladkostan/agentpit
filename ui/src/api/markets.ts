@@ -22,21 +22,24 @@ export function useMarket(id: number | string | undefined) {
 export async function getSparkline(
   marketId: number,
   outcome: string,
+  windowHours = 24,
 ): Promise<SparklineResponse> {
+  const params = new URLSearchParams({ window_hours: String(windowHours) });
   return apiFetch<SparklineResponse>(
-    `/sparkline/${marketId}/${encodeURIComponent(outcome)}`,
+    `/sparkline/${marketId}/${encodeURIComponent(outcome)}?${params}`,
   );
 }
 
 export function useSparkline(
   marketId: number,
   outcome: string | undefined,
+  windowHours = 24,
 ) {
   return useQuery({
-    queryKey: ["sparkline", marketId, outcome],
+    queryKey: ["sparkline", marketId, outcome, windowHours],
     queryFn: () => {
       if (!outcome) throw new Error("outcome is required");
-      return getSparkline(marketId, outcome);
+      return getSparkline(marketId, outcome, windowHours);
     },
     enabled: Boolean(outcome),
     staleTime: 30_000,

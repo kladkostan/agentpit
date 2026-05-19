@@ -17,9 +17,11 @@ interface MultiSparklineProps {
   className?: string;
 }
 
-const GRIDLINE_Y_PCT = [25, 50, 75] as const;
-const PAD_X = 4;
-const PAD_Y = 6;
+/** Interior gridline positions, in % of the chart's height. */
+export const GRIDLINE_Y_PCT = [25, 50, 75] as const;
+/** Inner-padding around the projected data area, in viewBox units. */
+export const PAD_X = 4;
+export const PAD_Y = 6;
 
 export function MultiSparkline({
   series,
@@ -49,7 +51,8 @@ export function MultiSparkline({
     <svg
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
-      className={cn("block h-[180px] w-full overflow-visible", className)}
+      style={{ height }}
+      className={cn("block w-full overflow-visible", className)}
       aria-hidden
     >
       {/* Gridlines */}

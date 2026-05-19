@@ -45,4 +45,6 @@ export interface SparklineResponse {
   points: SparklinePoint[];
   /** Window volume in micro-USDC (divide by 1e6 for dollars). */
   volume_micro_usd: number;
+  /** All-time volume in micro-USDC, independent of window_hours. */
+  volume_total_micro_usd: number;
 }

@@ -11,6 +11,9 @@ interface SparklineProps {
   width?: number;
   height?: number;
   tone?: "up" | "down" | "neutral";
+  /** Overrides the tone-derived stroke + fill color when set. CSS color
+   *  string (e.g. `"rgb(14 165 233)"` for sky-500). */
+  strokeColor?: string;
   /** Extra classes for the outer <svg>. */
   className?: string;
 }
@@ -32,6 +35,7 @@ export function Sparkline({
   width = 160,
   height = 56,
   tone = "neutral",
+  strokeColor,
   className,
 }: SparklineProps) {
   const gradientId = useId();
@@ -76,8 +80,13 @@ export function Sparkline({
   }
 
   const last = geometry.coords[geometry.coords.length - 1]!;
-  const strokeClass = TONE_STROKE[tone];
-  const fillClass = TONE_FILL[tone];
+  // When strokeColor is provided, drive both the line and the area-fill
+  // gradient off `currentColor` set inline; otherwise fall back to the
+  // tone-derived Tailwind classes.
+  const useCustomColor = strokeColor !== undefined;
+  const strokeClass = useCustomColor ? "" : TONE_STROKE[tone];
+  const fillClass = useCustomColor ? "" : TONE_FILL[tone];
+  const inlineColorStyle = useCustomColor ? { color: strokeColor } : undefined;
 
   return (
     <svg
@@ -85,6 +94,7 @@ export function Sparkline({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       className={cn("overflow-visible", className)}
+      style={inlineColorStyle}
       aria-hidden
     >
       <defs>
@@ -101,6 +111,7 @@ export function Sparkline({
       <path
         d={geometry.path}
         className={strokeClass}
+        stroke={useCustomColor ? "currentColor" : undefined}
         fill="none"
         strokeWidth={1.5}
         strokeLinecap="round"
@@ -112,6 +123,7 @@ export function Sparkline({
         cy={last[1]}
         r={2.5}
         className={cn(strokeClass, "fill-background")}
+        stroke={useCustomColor ? "currentColor" : undefined}
         strokeWidth={1.5}
       />
     </svg>
