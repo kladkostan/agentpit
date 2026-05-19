@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useEvent } from "@/api/events";
+import { EventChart } from "@/components/EventChart";
 import { EventLeaderboardRow } from "@/components/EventLeaderboardRow";
 import { Orderbook } from "@/components/orders/Orderbook";
 import { OrderTicket } from "@/components/orders/OrderTicket";
@@ -97,6 +98,8 @@ export function EventDetailPage() {
 
   const { event, markets } = data;
   const endLabel = formatDate(event.end_date);
+  const isSingleMarket = markets.length === 1;
+  const onlyMarket = markets[0] ?? null;
 
   const selectedMarket =
     selection !== null
@@ -158,47 +161,64 @@ export function EventDetailPage() {
               <span className="text-foreground/40">Closes</span> {endLabel}
             </span>
           ) : null}
-          <span>
-            <span className="text-foreground/40">Sorted by</span> highest chance
-          </span>
+          {!isSingleMarket ? (
+            <span>
+              <span className="text-foreground/40">Sorted by</span> highest chance
+            </span>
+          ) : null}
         </div>
       </header>
 
+      <EventChart markets={markets} midByMarket={midByMarket} />
+
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="rounded-2xl border bg-card/40">
-          {ordered.map((market, idx) => {
-            const isExpanded = selection?.marketId === market.market_id;
-            const yesLabel = market.erc1155_tokens[0]?.[1] ?? "";
-            return (
-              <Fragment key={market.market_id}>
-                <EventLeaderboardRow
-                  market={market}
-                  rank={idx + 1}
-                  isSelected={isExpanded}
-                  selectedOutcome={isExpanded ? selection.outcome : null}
-                  onToggleMarket={(marketId, outcome) =>
-                    setSelection((prev) =>
-                      prev?.marketId === marketId
-                        ? null
-                        : { marketId, outcome },
-                    )
-                  }
-                  onPickOutcome={(marketId, outcome) =>
-                    setSelection({ marketId, outcome })
-                  }
-                />
-                {isExpanded ? (
-                  <div className="border-b border-border/60 bg-foreground/[0.02] px-5 py-4 animate-fade-up">
-                    <Orderbook
-                      marketId={market.market_id}
-                      outcome={selection.outcome || yesLabel}
-                    />
-                  </div>
-                ) : null}
-              </Fragment>
-            );
-          })}
-        </div>
+        {isSingleMarket && onlyMarket ? (
+          <div className="rounded-2xl border bg-card/40 px-5 py-5">
+            <Orderbook
+              marketId={onlyMarket.market_id}
+              outcome={
+                selection?.outcome ||
+                onlyMarket.erc1155_tokens[0]?.[1] ||
+                ""
+              }
+            />
+          </div>
+        ) : (
+          <div className="rounded-2xl border bg-card/40">
+            {ordered.map((market, idx) => {
+              const isExpanded = selection?.marketId === market.market_id;
+              const yesLabel = market.erc1155_tokens[0]?.[1] ?? "";
+              return (
+                <Fragment key={market.market_id}>
+                  <EventLeaderboardRow
+                    market={market}
+                    rank={idx + 1}
+                    isSelected={isExpanded}
+                    selectedOutcome={isExpanded ? selection.outcome : null}
+                    onToggleMarket={(marketId, outcome) =>
+                      setSelection((prev) =>
+                        prev?.marketId === marketId
+                          ? null
+                          : { marketId, outcome },
+                      )
+                    }
+                    onPickOutcome={(marketId, outcome) =>
+                      setSelection({ marketId, outcome })
+                    }
+                  />
+                  {isExpanded ? (
+                    <div className="border-b border-border/60 bg-foreground/[0.02] px-5 py-4 animate-fade-up">
+                      <Orderbook
+                        marketId={market.market_id}
+                        outcome={selection.outcome || yesLabel}
+                      />
+                    </div>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
 
         <aside className="lg:sticky lg:top-20 lg:self-start">
           {selectedMarket ? (
