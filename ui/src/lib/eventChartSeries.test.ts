@@ -72,8 +72,8 @@ describe("pickChartSeries", () => {
     expect(series.map((s) => s.market.market_id)).toEqual([1, 2]);
   });
 
-  it("uses the outcome_label or question as the legend label", () => {
-    const m = fakeMarket(1, "France?");
+  it("prefers outcome_label over question for the legend label", () => {
+    const m = fakeMarket(1, "Will France win the 2026 World Cup?");
     m.outcome_label = "France";
     const series = pickChartSeries(
       [m],
@@ -82,5 +82,17 @@ describe("pickChartSeries", () => {
       4,
     );
     expect(series[0]!.label).toBe("France");
+  });
+
+  it("falls back to question when outcome_label is null", () => {
+    const m = fakeMarket(1, "Will GTA VI release before June 2026?");
+    m.outcome_label = null;
+    const series = pickChartSeries(
+      [m],
+      new Map([[1, 0.5]]),
+      PALETTE,
+      4,
+    );
+    expect(series[0]!.label).toBe("Will GTA VI release before June 2026?");
   });
 });

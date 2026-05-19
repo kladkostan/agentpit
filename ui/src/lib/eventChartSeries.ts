@@ -19,7 +19,7 @@ export function pickChartSeries(
   midByMarket: ReadonlyMap<number, number>,
   palette: ReadonlyArray<string>,
   n: number,
-): ChartSeries[] {
+): ReadonlyArray<ChartSeries> {
   const ranked = sortMarketsByYesMid(markets, midByMarket);
   const top = ranked.slice(0, Math.min(n, palette.length));
   return top.map((market, i) => ({
