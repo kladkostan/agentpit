@@ -88,8 +88,13 @@ class AgentpitClient:
         # /markets returns ListMarketsResponse: {"markets": [...]}
         return self._get("/markets")["markets"]
 
-    def get_portfolio(self, *, token: str) -> dict[str, Any]:
-        return self._get("/portfolio", token=token)
+    def get_portfolio(
+        self, *, token: str, market_id: int | None = None
+    ) -> dict[str, Any]:
+        path = "/portfolio"
+        if market_id is not None:
+            path += f"?market_id={market_id}"
+        return self._get(path, token=token)
 
     def split_position(
         self, *, token: str, market_id: int, amount: int

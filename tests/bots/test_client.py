@@ -137,3 +137,13 @@ def test_get_portfolio(session):
     c = AgentpitClient(base_url="http://x", session=session)
     out = c.get_portfolio(token="tok-abc")
     assert out["usdc_balance"] == 1000
+    _, url, _, _ = session.calls[0]
+    assert url == "http://x/portfolio"
+
+
+def test_get_portfolio_with_market_id_appends_query_string(session):
+    session.next_response = FakeResponse(200, {"usdc_balance": 0, "positions": []})
+    c = AgentpitClient(base_url="http://x", session=session)
+    c.get_portfolio(token="tok-abc", market_id=7)
+    _, url, _, _ = session.calls[0]
+    assert url == "http://x/portfolio?market_id=7"

@@ -87,3 +87,6 @@ class PriceOracle:
     @property
     def snapshot(self) -> OracleSnapshot:
         return self._snap
+
+    def midpoint(self, token_id: str) -> float | None:
+        return self._snap.midpoint(token_id)

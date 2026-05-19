@@ -99,15 +99,23 @@ class Runner:
                 tok = str(pos.get("token_id"))
                 bal_shares = int(pos.get("balance", 0)) // SHARES_SCALE
                 by_market.setdefault(mid, {})[tok] = bal_shares
+            splits = merges = 0
             for mid, market in market_by_id.items():
                 yes_bal = by_market.get(mid, {}).get(market.yes_local, 0)
                 no_bal = by_market.get(mid, {}).get(market.no_local, 0)
                 min_bal = min(yes_bal, no_bal)
                 if min_bal < self._cfg.mm_quote_size_shares:
+                    amount = self._cfg.mm_quote_size_shares
                     try:
                         self._client.split_position(
                             token=bot.creds.token, market_id=mid,
-                            amount=self._cfg.mm_quote_size_shares,
+                            amount=amount * SHARES_SCALE,
+                        )
+                        splits += 1
+                        log.info(
+                            "rebalance_split bot=%s market=%s shares=%s "
+                            "yes_bal=%s no_bal=%s reason=depleted",
+                            bot.name, mid, amount, yes_bal, no_bal,
                         )
                     except Exception as exc:
                         log.warning(
@@ -119,13 +127,25 @@ class Runner:
                 if surplus > 0:
                     try:
                         self._client.merge_positions(
-                            token=bot.creds.token, market_id=mid, amount=surplus,
+                            token=bot.creds.token, market_id=mid,
+                            amount=surplus * SHARES_SCALE,
+                        )
+                        merges += 1
+                        log.info(
+                            "rebalance_merge bot=%s market=%s shares=%s "
+                            "yes_bal=%s no_bal=%s floor=%s",
+                            bot.name, mid, surplus, yes_bal, no_bal,
+                            self._cfg.mm_rebalance_floor_shares,
                         )
                     except Exception as exc:
                         log.warning(
                             "merge_failed bot=%s market=%s err=%s",
                             bot.name, mid, exc,
                         )
+            log.info(
+                "rebalance_summary bot=%s splits=%s merges=%s onchain_txs=%s",
+                bot.name, splits, merges, splits + merges,
+            )
 
     def log_drift(self) -> None:
         """Log local vs polymarket mid for every enabled market.
@@ -149,26 +169,32 @@ class Runner:
                 continue
             bids = book.get("bids") or []
             asks = book.get("asks") or []
+            n_bids, n_asks = len(bids), len(asks)
             if not bids or not asks:
                 log.info(
-                    "drift market_id=%s local_mid=none poly_mid=%.4f",
-                    m.market_id, poly_mid,
+                    "drift market_id=%s local_mid=none poly_mid=%.4f "
+                    "bids=%s asks=%s",
+                    m.market_id, poly_mid, n_bids, n_asks,
                 )
                 continue
             local_mid = (int(bids[0]["PRICE"]) + int(asks[0]["PRICE"])) / 2 / PRICE_SCALE
             log.info(
-                "drift market_id=%s local_mid=%.4f poly_mid=%.4f drift_cents=%+.2f",
+                "drift market_id=%s local_mid=%.4f poly_mid=%.4f drift_cents=%+.2f "
+                "bids=%s asks=%s",
                 m.market_id, local_mid, poly_mid, (local_mid - poly_mid) * 100,
+                n_bids, n_asks,
             )
 
     # --- per-bot loops -------------------------------------------------
 
     def _anchor_tick_for_bot(self, bot: Bot, markets: list[_MarketView]) -> None:
         live_orders = self._fetch_live_orders(bot)
+        total_cancels = total_creates = quoted_markets = skipped_markets = 0
         for m in markets:
             mid = self._oracle.midpoint(m.poly_yes_token_id) if m.poly_yes_token_id else None
             if mid is None:
                 log.info("oracle_stale market_id=%s", m.market_id)
+                skipped_markets += 1
                 continue
             desired = self._anchor_strat.compute_desired_orders(
                 market=MarketTokens(
@@ -178,20 +204,41 @@ class Runner:
                 ),
                 poly_yes_mid=mid,
             )
+            if not desired:
+                # Self-cross guard kicked in (mid too close to 0 or 1).
+                skipped_markets += 1
+                continue
+            quoted_markets += 1
             live_for_market = [
                 lo for lo in live_orders
                 if lo.token_id in (m.yes_local, m.no_local)
             ]
             cancels, creates = reconcile(live_for_market, desired)
+            total_cancels += len(cancels)
+            total_creates += len(creates)
             for cid in cancels:
                 self._safe_cancel(bot, cid)
             for create in creates:
                 self._safe_place(bot, create, m)
+        log.info(
+            "anchor_summary bot=%s quoted=%s skipped=%s cancels=%s creates=%s",
+            bot.name, quoted_markets, skipped_markets, total_cancels, total_creates,
+        )
 
     def _noise_tick_for_bot(self, bot: Bot, market: _MarketView) -> None:
         mid = self._oracle.midpoint(market.poly_yes_token_id) if market.poly_yes_token_id else None
         if mid is None:
             return
+        try:
+            portfolio = self._client.get_portfolio(
+                token=bot.creds.token, market_id=market.market_id,
+            )
+        except Exception as exc:
+            log.warning("portfolio_failed bot=%s err=%s", bot.name, exc)
+            return
+        balances: dict[str, int] = {}
+        for pos in portfolio.get("positions", []):
+            balances[str(pos.get("token_id"))] = int(pos.get("balance", 0))
         desired = self._noise_strat.compute_desired_orders(
             market=MarketTokens(
                 market_id=market.market_id,
@@ -199,8 +246,26 @@ class Runner:
                 no_token_id=market.no_local,
             ),
             poly_yes_mid=mid,
+            token_balances=balances,
         )
+        if not desired:
+            log.info(
+                "noise_skip bot=%s market=%s reason=no_orders mid=%.4f",
+                bot.name, market.market_id, mid,
+            )
+            return
         for d in desired:
+            # Distance from this outcome's anchor mid in cents.
+            anchor_mid = mid if d.token_id == market.yes_local else 1.0 - mid
+            price = d.price_int / PRICE_SCALE
+            dist_cents = abs(price - anchor_mid) * 100
+            log.info(
+                "noise_order bot=%s market=%s side=%s outcome=%s price=%.4f "
+                "dist_cents=%.2f size_shares=%s",
+                bot.name, market.market_id, d.side,
+                "Yes" if d.token_id == market.yes_local else "No",
+                price, dist_cents, d.size // SHARES_SCALE,
+            )
             self._safe_place(bot, d, market)
 
     # --- helpers --------------------------------------------------------
@@ -308,6 +373,7 @@ def _build_runner(cfg: BotConfig) -> tuple[Runner, BotPool, list[int]]:
         anchor_pool_size=cfg.anchor_pool_size,
         noise_pool_size=cfg.noise_pool_size,
         inventory_split_shares=cfg.inventory_split_shares,
+        noise_inventory_split_shares=cfg.noise_inventory_split_shares,
     )
     markets = [m for m in ap_client.get_markets()
                if m.get("market_state") == "ACTIVE"
@@ -334,21 +400,25 @@ def main() -> int:
     log.info("bot_runner_starting tick_sec=%s", cfg.tick_interval_sec)
     tick_index = 0
     last_noise = 0.0
-    while True:
-        try:
-            runner.run_anchor_tick()
-            if tick_index % max(1, 60 // cfg.tick_interval_sec) == 0:
-                runner.log_drift()
-            now = time.time()
-            if now - last_noise >= cfg.noise_tick_base_sec:
-                runner.run_noise_tick()
-                last_noise = now
-            if tick_index % cfg.mm_rebalance_every_ticks == 0:
-                runner.run_rebalance_tick()
-            tick_index += 1
-        except Exception:
-            log.exception("tick_failed")
-        time.sleep(cfg.tick_interval_sec)
+    try:
+        while True:
+            try:
+                runner.run_anchor_tick()
+                if tick_index % max(1, 60 // cfg.tick_interval_sec) == 0:
+                    runner.log_drift()
+                now = time.time()
+                if now - last_noise >= cfg.noise_tick_base_sec:
+                    runner.run_noise_tick()
+                    last_noise = now
+                if tick_index % cfg.mm_rebalance_every_ticks == 0:
+                    runner.run_rebalance_tick()
+                tick_index += 1
+            except Exception:
+                log.exception("tick_failed")
+            time.sleep(cfg.tick_interval_sec)
+    except KeyboardInterrupt:
+        log.info("bot_runner_stopping (ctrl-c)")
+        return 0
 
 
 if __name__ == "__main__":

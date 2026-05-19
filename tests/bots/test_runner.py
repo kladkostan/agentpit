@@ -27,9 +27,10 @@ class FakeOracle:
 
 
 class FakeClient:
-    def __init__(self, markets, my_orders):
+    def __init__(self, markets, my_orders, portfolio=None):
         self._markets = markets
         self._my_orders = my_orders
+        self._portfolio = portfolio or {"usdc_balance": 0, "positions": []}
         self.placed: list[dict] = []
         self.cancelled: list[str] = []
 
@@ -38,6 +39,16 @@ class FakeClient:
 
     def list_my_orders(self, *, token):
         return list(self._my_orders.get(token, []))
+
+    def get_portfolio(self, *, token, market_id=None):
+        if market_id is None:
+            return self._portfolio
+        # Mirror server-side filter: only positions for the requested market.
+        positions = [
+            p for p in self._portfolio.get("positions", [])
+            if int(p.get("market_id", 0)) == market_id
+        ]
+        return {**self._portfolio, "positions": positions}
 
     def place_order(self, *, token, market_id, outcome, side, price, size):
         self.placed.append({
@@ -102,14 +113,58 @@ def test_runner_noise_tick_emits_one_order_per_noise_bot():
         "polymarket_no_token_id": "poly-no",
         "erc1155_tokens": [["local-yes", "Yes"], ["local-no", "No"]],
     }]
+    # Both outcomes pre-funded so any SELL draw passes the bootstrap check.
+    portfolio = {
+        "usdc_balance": 10_000 * 1_000_000,
+        "positions": [
+            {"market_id": 1, "token_id": "local-yes", "balance": 1_000 * 1_000_000},
+            {"market_id": 1, "token_id": "local-no",  "balance": 1_000 * 1_000_000},
+        ],
+    }
     oracle = FakeOracle({"poly-yes": 0.5})
-    client = FakeClient(markets=markets, my_orders={})
+    client = FakeClient(markets=markets, my_orders={}, portfolio=portfolio)
     cfg = BotConfig()
     bots = [_bot("noise-0", "NOISE"), _bot("noise-1", "NOISE")]
     runner = Runner(client=client, oracle=oracle, cfg=cfg, bots=bots,
                     rng=random.Random(0))
     runner.run_noise_tick()
     assert len(client.placed) == 2  # one per noise bot
+
+
+def test_runner_noise_tick_threads_portfolio_into_strategy(monkeypatch):
+    """Runner fetches portfolio per noise bot and passes per-market balances
+    to NoiseTrader.compute_desired_orders."""
+    markets = [{
+        "market_id": 1, "market_state": "ACTIVE",
+        "polymarket_yes_token_id": "poly-yes",
+        "polymarket_no_token_id": "poly-no",
+        "erc1155_tokens": [["local-yes", "Yes"], ["local-no", "No"]],
+    }]
+    portfolio = {
+        "usdc_balance": 0,
+        "positions": [
+            {"market_id": 1, "token_id": "local-yes", "balance": 42},
+            {"market_id": 1, "token_id": "local-no",  "balance": 7},
+            # Different market — should be filtered out.
+            {"market_id": 2, "token_id": "other",     "balance": 999},
+        ],
+    }
+    oracle = FakeOracle({"poly-yes": 0.5})
+    client = FakeClient(markets=markets, my_orders={}, portfolio=portfolio)
+    cfg = BotConfig()
+    runner = Runner(client=client, oracle=oracle, cfg=cfg,
+                    bots=[_bot("noise-0", "NOISE")], rng=random.Random(0))
+
+    seen: list[dict[str, int] | None] = []
+    real_compute = runner._noise_strat.compute_desired_orders
+
+    def spy(**kwargs):
+        seen.append(kwargs.get("token_balances"))
+        return real_compute(**kwargs)
+
+    monkeypatch.setattr(runner._noise_strat, "compute_desired_orders", spy)
+    runner.run_noise_tick()
+    assert seen == [{"local-yes": 42, "local-no": 7}]
 
 
 def test_runner_disabled_market_skipped():
@@ -135,8 +190,15 @@ class FakeClientWithPortfolio(FakeClient):
         self.merged: list[tuple[int, int]] = []
         self.split: list[tuple[int, int]] = []
 
-    def get_portfolio(self, *, token):
-        return self._portfolio
+    def get_portfolio(self, *, token, market_id=None):
+        if market_id is None:
+            return self._portfolio
+        # Mirror server-side filter: only positions for the requested market.
+        positions = [
+            p for p in self._portfolio.get("positions", [])
+            if int(p.get("market_id", 0)) == market_id
+        ]
+        return {**self._portfolio, "positions": positions}
 
     def merge_positions(self, *, token, market_id, amount):
         self.merged.append((market_id, amount))
@@ -166,8 +228,8 @@ def test_rebalance_merges_when_both_sides_have_surplus():
     client = FakeClientWithPortfolio(markets=markets, my_orders={}, portfolio=portfolio)
     runner = Runner(client=client, oracle=oracle, cfg=cfg, bots=[_bot("anchor-0", "ANCHOR")])
     runner.run_rebalance_tick()
-    # min(yes, no) = 700; surplus = 700 - 200 = 500 → merge 500.
-    assert client.merged == [(1, 500)]
+    # min(yes, no) = 700; surplus = 700 - 200 = 500 shares → merge raw 500*1e6.
+    assert client.merged == [(1, 500 * 1_000_000)]
 
 
 def test_split_when_one_side_depleted():
@@ -190,7 +252,8 @@ def test_split_when_one_side_depleted():
     runner = Runner(client=client, oracle=oracle, cfg=cfg, bots=[_bot("anchor-0", "ANCHOR")])
     runner.run_rebalance_tick()
     # min(yes, no) = 5 < quote_size 100 → re-split a complete set of quote_size.
-    assert client.split == [(1, 100)]
+    # 100 shares → 100 * SHARES_SCALE (1e6) raw.
+    assert client.split == [(1, 100 * 1_000_000)]
 
 
 def test_runner_emits_drift_log_per_market(caplog):

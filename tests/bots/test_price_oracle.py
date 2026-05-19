@@ -68,3 +68,12 @@ def test_midpoint_unknown_token_returns_none(fake_clob):
     oracle = PriceOracle(clob=fake_clob)
     snap = oracle.refresh([])
     assert snap.midpoint("nope") is None
+
+
+def test_oracle_midpoint_reads_latest_snapshot(fake_clob):
+    # Runner calls oracle.midpoint(token_id) directly, not snapshot.midpoint(...).
+    fake_clob.next_response = {"t1": 0.33}
+    oracle = PriceOracle(clob=fake_clob)
+    oracle.refresh(["t1"])
+    assert oracle.midpoint("t1") == 0.33
+    assert oracle.midpoint("nope") is None
