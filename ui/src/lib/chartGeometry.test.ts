@@ -93,4 +93,32 @@ describe("projectToViewBox", () => {
     expect(out[0]).toEqual([5, 48]);
     expect(out[1]).toEqual([95, 2]);
   });
+
+  it("relative scaleMode stretches the input price range across the full height", () => {
+    // A market trading between 0.45 and 0.55 looks near-flat under the
+    // default fixed scale; relative mode auto-scales it so the curve fills
+    // the chart — same behavior the home-page Sparkline had pre-extraction.
+    const out = projectToViewBox(
+      [
+        { t: 0, p: 450_000 },
+        { t: 1, p: 500_000 },
+        { t: 2, p: 550_000 },
+      ],
+      { ...dims, scaleMode: "relative" },
+    );
+    expect(out.map(([, y]) => y)).toEqual([50, 25, 0]);
+  });
+
+  it("relative scaleMode collapses constant-price series to the vertical center", () => {
+    // Avoid divide-by-zero when min == max; the row collapses to the
+    // midline so we still see a horizontal trace.
+    const out = projectToViewBox(
+      [
+        { t: 0, p: 500_000 },
+        { t: 1, p: 500_000 },
+      ],
+      { ...dims, scaleMode: "relative" },
+    );
+    expect(out.map(([, y]) => y)).toEqual([25, 25]);
+  });
 });

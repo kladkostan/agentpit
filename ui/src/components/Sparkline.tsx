@@ -40,6 +40,7 @@ export function Sparkline({
       height,
       padX: 1,
       padY: 4,
+      scaleMode: "relative",
     });
     const path = smoothPath(coords);
     const last = coords[coords.length - 1]!;
