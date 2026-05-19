@@ -173,16 +173,19 @@ class OrderService:
         _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
         now = int(datetime.now(timezone.utc).timestamp())
         since = now - max(1, window_hours) * 3600
+        # Single query returns the windowed points and both the windowed
+        # and all-time volume aggregates so the endpoint only hits SQLite
+        # once per request.
         with self._db.read() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT MATCH_TIME, PRICE, TRADE_SIZE FROM trades "
-                "WHERE ASSET_ID = ? AND MATCH_TIME >= ? "
-                "AND STATUS != 'FAILED' "
+                "WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
                 "ORDER BY MATCH_TIME ASC",
-                (token_id_str, since),
+                (token_id_str,),
             ).fetchall()
-        points = [{"t": int(r["MATCH_TIME"]), "p": int(r["PRICE"])} for r in rows]
+        windowed = [r for r in rows if int(r["MATCH_TIME"]) >= since]
+        points = [{"t": int(r["MATCH_TIME"]), "p": int(r["PRICE"])} for r in windowed]
         # Downsample if we have a lot of trades — keep the shape readable.
         max_points = 60
         if len(points) > max_points:
@@ -192,6 +195,9 @@ class OrderService:
                 sampled[-1] = points[-1]
             points = sampled
         volume_micro_usd = sum(
+            (int(r["PRICE"]) * int(r["TRADE_SIZE"])) // _PRICE_ONE for r in windowed
+        )
+        volume_total_micro_usd = sum(
             (int(r["PRICE"]) * int(r["TRADE_SIZE"])) // _PRICE_ONE for r in rows
         )
         return {
@@ -200,6 +206,7 @@ class OrderService:
             "window_hours": window_hours,
             "points": points,
             "volume_micro_usd": int(volume_micro_usd),
+            "volume_total_micro_usd": int(volume_total_micro_usd),
         }
 
     # --- internals ------------------------------------------------------
