@@ -1,6 +1,5 @@
 """AnchorMarketMaker.compute_desired_orders — pure function over (market, mid)."""
 from agentpit_bots.config import BotConfig, SHARES_SCALE
-from agentpit_bots.reconcile import DesiredOrder
 from agentpit_bots.strategies.anchor_mm import AnchorMarketMaker, MarketTokens
 
 
@@ -34,3 +33,15 @@ def test_no_quotes_when_mid_is_none():
     cfg = BotConfig()
     strat = AnchorMarketMaker(cfg)
     assert strat.compute_desired_orders(market=_market(), poly_yes_mid=None) == []
+
+
+def test_skips_outcome_side_when_clipped_bid_meets_clipped_ask():
+    """Self-cross guard: when clipping pushes bid >= ask, drop that side
+    rather than post a guaranteed self-match."""
+    # half=0.005 + mid=0.001 → yes_bid clip to 0.01, yes_ask clip to 0.01 (cross).
+    # no_mid=0.999 → no_bid=0.994, no_ask clip to 0.99 → cross.
+    cfg = BotConfig(mm_half_spread_usd=0.005)
+    strat = AnchorMarketMaker(cfg)
+    assert strat.compute_desired_orders(market=_market(), poly_yes_mid=0.001) == []
+
+

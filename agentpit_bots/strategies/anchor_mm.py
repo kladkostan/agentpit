@@ -40,13 +40,17 @@ class AnchorMarketMaker(Strategy):
         no_bid = _clip(no_mid - half)
         no_ask = _clip(no_mid + half)
 
-        return [
-            DesiredOrder(side="BUY",  token_id=market.yes_token_id,
-                         price_int=_price_int(yes_bid), size=size),
-            DesiredOrder(side="SELL", token_id=market.yes_token_id,
-                         price_int=_price_int(yes_ask), size=size),
-            DesiredOrder(side="BUY",  token_id=market.no_token_id,
-                         price_int=_price_int(no_bid), size=size),
-            DesiredOrder(side="SELL", token_id=market.no_token_id,
-                         price_int=_price_int(no_ask), size=size),
-        ]
+        orders: list[DesiredOrder] = []
+        # Skip any outcome whose clipped quotes would self-cross — posting a
+        # bid ≥ ask trades the bot against itself and drains its inventory.
+        if yes_bid < yes_ask:
+            orders.append(DesiredOrder(side="BUY", token_id=market.yes_token_id,
+                                       price_int=_price_int(yes_bid), size=size))
+            orders.append(DesiredOrder(side="SELL", token_id=market.yes_token_id,
+                                       price_int=_price_int(yes_ask), size=size))
+        if no_bid < no_ask:
+            orders.append(DesiredOrder(side="BUY", token_id=market.no_token_id,
+                                       price_int=_price_int(no_bid), size=size))
+            orders.append(DesiredOrder(side="SELL", token_id=market.no_token_id,
+                                       price_int=_price_int(no_ask), size=size))
+        return orders
