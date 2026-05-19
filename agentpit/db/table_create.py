@@ -239,6 +239,24 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_price_snapshots_table(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS price_snapshots (
+                SNAPSHOT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                MARKET_ID INTEGER NOT NULL,
+                ASSET_ID TEXT NOT NULL,
+                T INTEGER NOT NULL,
+                MID_MICRO_USD INTEGER NOT NULL
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_snapshots_market_t "
+            "ON price_snapshots(MARKET_ID, T)"
+        )
+
+    @staticmethod
     def create_all_tables(db: sqlite3.Connection) -> None:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(db)
@@ -249,3 +267,4 @@ class TableCreate:
         TableCreate.create_events_table(db)
         TableCreate.create_markets_table(db)
         TableCreate.create_transactions_table(db)
+        TableCreate.create_price_snapshots_table(db)

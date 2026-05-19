@@ -37,6 +37,7 @@ from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 from agentpit.polymarket.polymarket_sync import fetch_and_sync_polymarket_markets
 from agentpit.services.event_service import EventService
+from agentpit.services.snapshot_service import SnapshotService
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +70,29 @@ async def _polymarket_sync_loop(
             raise
         except Exception:
             log.exception("Polymarket sync failed")
+        await asyncio.sleep(interval_seconds)
+
+
+def _run_snapshot_tick(db: DbSession, retention_seconds: int) -> tuple[int, int]:
+    service = SnapshotService(db)
+    inserted = service.take_snapshot()
+    deleted = service.prune_old(retention_seconds)
+    return inserted, deleted
+
+
+async def _snapshot_loop(
+    db: DbSession, interval_seconds: int, retention_seconds: int
+) -> None:
+    while True:
+        try:
+            inserted, deleted = await asyncio.to_thread(
+                _run_snapshot_tick, db, retention_seconds
+            )
+            log.info("Snapshot tick: %d inserted, %d pruned", inserted, deleted)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Snapshot tick failed")
         await asyncio.sleep(interval_seconds)
 
 
@@ -127,13 +151,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         else:
             log.info("Polymarket sync disabled (set SYNC=true to enable)")
+
+        snapshot_task: asyncio.Task | None = None
+        if settings.snapshot_enabled:
+            retention_seconds = settings.snapshot_retention_days * 86_400
+            log.info(
+                "Snapshot loop enabled (interval=%ds, retention=%dd)",
+                settings.snapshot_interval_seconds,
+                settings.snapshot_retention_days,
+            )
+            snapshot_task = asyncio.create_task(
+                _snapshot_loop(
+                    db_session,
+                    settings.snapshot_interval_seconds,
+                    retention_seconds,
+                )
+            )
+        else:
+            log.info(
+                "Snapshot loop disabled (set SNAPSHOT_ENABLED=true to enable)"
+            )
         try:
             yield
         finally:
-            if sync_task is not None:
-                sync_task.cancel()
+            for task in (sync_task, snapshot_task):
+                if task is None:
+                    continue
+                task.cancel()
                 try:
-                    await sync_task
+                    await task
                 except asyncio.CancelledError:
                     pass
             db_session.close()

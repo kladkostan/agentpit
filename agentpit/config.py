@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     sync_interval_seconds: int = Field(
         default=60 * 60, validation_alias="AGENTPIT_SYNC_INTERVAL_SECONDS"
     )
+    snapshot_enabled: bool = Field(default=False, validation_alias="SNAPSHOT_ENABLED")
+    snapshot_interval_seconds: int = Field(
+        default=15 * 60, validation_alias="AGENTPIT_SNAPSHOT_INTERVAL_SECONDS"
+    )
+    snapshot_retention_days: int = Field(
+        default=30, validation_alias="AGENTPIT_SNAPSHOT_RETENTION_DAYS"
+    )
     cors_origins: list[str] = Field(
         default=["http://localhost:5173"], validation_alias="AGENTPIT_CORS_ORIGINS"
     )
