@@ -93,6 +93,18 @@ def _ensure_tokens(market: dict) -> None:
     market["tokens"] = tokens
 
 
+def _as_float(value: object) -> float:
+    """Coerce a Gamma numeric field (which arrives as int, float, str, or None) to float; 0.0 on failure."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 def _to_bool(value: object) -> bool | None:
     """Coerce common bool-like values; return None if unknown."""
     if isinstance(value, bool):
@@ -224,12 +236,17 @@ def fetch_all_polymarket_markets(
             if not m.get("condition_id"):
                 continue
 
-            try:
-                liquidity = float(m.get("liquidity") or 0)
-            except (TypeError, ValueError):
-                liquidity = 0.0
+            # Use the stronger of orderbook depth ("liquidity") and cumulative
+            # trade volume ("volumeNum"). Multi-outcome favorites (e.g. France
+            # in a World Cup event) have shallow books on the cheap side even
+            # though they're heavily traded — filtering on liquidity alone
+            # silently drops exactly the markets users care about.
+            liquidity = _as_float(m.get("liquidity"))
+            volume = _as_float(m.get("volumeNum"))
+            if volume == 0.0:
+                volume = _as_float(m.get("volume"))
 
-            if liquidity < liquidity_threshold:
+            if max(liquidity, volume) < liquidity_threshold:
                 continue
 
             # Filter archived if not requested (API might leak them or mock data includes them)
