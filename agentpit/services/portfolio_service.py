@@ -1,5 +1,7 @@
 from agentpit.datastructures.portfolio_response import PortfolioResponse, Position
-from agentpit.datastructures.transaction_history_response import TransactionHistoryResponse
+from agentpit.datastructures.transaction_history_response import (
+    TransactionHistoryResponse,
+)
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -13,10 +15,24 @@ class PortfolioService:
         self._db = db
         self._onchain = onchain
 
-    def get_portfolio(self, user: User) -> PortfolioResponse:
+    def get_portfolio(
+        self, user: User, *, market_id: int | None = None
+    ) -> PortfolioResponse:
+        """Return outcome-token balances + apUSD.
+
+        When `market_id` is set, restrict the scan to that single market —
+        cuts the per-request ctf_balance fanout from O(num_markets * outcomes)
+        down to O(outcomes). Callers that only care about one market (e.g.
+        the noise bot deciding whether it can SELL on the market it picked)
+        should pass it.
+        """
         positions: list[Position] = []
         with self._db.read() as conn:
-            all_markets, _ = TableRead.list_markets(conn, limit=10000)
+            if market_id is not None:
+                market = TableRead.read_market(conn, market_id)
+                all_markets = [market] if market is not None else []
+            else:
+                all_markets, _ = TableRead.list_markets(conn, limit=10000)
 
         usdc_balance = self._onchain.usd_balance(user.eth_address)
         for market in all_markets:
