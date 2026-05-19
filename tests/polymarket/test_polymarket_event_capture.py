@@ -3,6 +3,7 @@
 These do NOT touch anvil/on-chain — they exercise the parsers and the
 DB-only binding helper.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -186,16 +187,10 @@ def test_bind_market_to_upstream_event_reuses_existing_event_by_polymarket_id(db
     m1 = _seed_market(db, question="france?", cond_id=_hex32("fr"))
     m2 = _seed_market(db, question="spain?", cond_id=_hex32("es"))
     pm_template = {
-        "events": [
-            {"id": "evt-1", "slug": "wc", "title": "WC"}
-        ],
+        "events": [{"id": "evt-1", "slug": "wc", "title": "WC"}],
     }
-    bind_market_to_upstream_event(
-        db, m1, {**pm_template, "groupItemTitle": "France"}
-    )
-    bind_market_to_upstream_event(
-        db, m2, {**pm_template, "groupItemTitle": "Spain"}
-    )
+    bind_market_to_upstream_event(db, m1, {**pm_template, "groupItemTitle": "France"})
+    bind_market_to_upstream_event(db, m2, {**pm_template, "groupItemTitle": "Spain"})
 
     rm1 = TableRead.read_market(db, m1.market_id)
     rm2 = TableRead.read_market(db, m2.market_id)
@@ -238,9 +233,10 @@ def test_bind_existing_market_to_upstream_event_uses_polymarket_id_lookup(db):
 
 def test_bind_existing_market_to_upstream_event_returns_false_when_unknown(db):
     pm = {"events": [{"id": "x", "slug": "x", "title": "X"}]}
-    assert bind_existing_market_to_upstream_event(
-        db, polymarket_id=9999, pm_market=pm
-    ) is False
+    assert (
+        bind_existing_market_to_upstream_event(db, polymarket_id=9999, pm_market=pm)
+        is False
+    )
 
 
 def test_bind_market_to_upstream_event_rebinds_from_singleton_to_real_event(db):
@@ -251,9 +247,7 @@ def test_bind_market_to_upstream_event_rebinds_from_singleton_to_real_event(db):
     market = _seed_market(db, question="france?", cond_id=_hex32("fr"))
 
     # Simulate the auto-wrap that runs at startup: market gets a singleton.
-    singleton = TableWrite.upsert_event(
-        db, slug=market.slug, title=market.question
-    )
+    singleton = TableWrite.upsert_event(db, slug=market.slug, title=market.question)
     TableWrite.attach_market_to_event(
         db, market_id=market.market_id, event_id=singleton.event_id
     )

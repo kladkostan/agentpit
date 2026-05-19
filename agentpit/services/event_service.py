@@ -22,8 +22,7 @@ class EventService:
                 conn, limit=limit, offset=offset
             )
         events = [
-            EventWithMarkets(event=event, markets=markets)
-            for event, markets in pairs
+            EventWithMarkets(event=event, markets=markets) for event, markets in pairs
         ]
         return ListEventsResponse(
             events=events, total=total, limit=limit, offset=offset

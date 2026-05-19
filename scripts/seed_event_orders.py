@@ -13,6 +13,7 @@ Usage:
 Re-running is safe: the per-market seeder mints fresh users on each invocation,
 so orders accumulate across runs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,8 +43,14 @@ def fetch_event_market_ids(base: str, slug: str) -> list[int]:
 def seed_one(base: str, market_id: int) -> bool:
     """Run the per-market seeder. Returns True on success."""
     result = subprocess.run(
-        [sys.executable, str(PER_MARKET_SEEDER),
-         "--base", base, "--market", str(market_id)],
+        [
+            sys.executable,
+            str(PER_MARKET_SEEDER),
+            "--base",
+            base,
+            "--market",
+            str(market_id),
+        ],
     )
     return result.returncode == 0
 
@@ -53,7 +60,9 @@ def main() -> int:
     ap.add_argument("--base", default="http://localhost:8000", help="API base URL")
     ap.add_argument("--event", required=True, help="Event slug to seed")
     ap.add_argument(
-        "--limit", type=int, default=0,
+        "--limit",
+        type=int,
+        default=0,
         help="Only seed the first N sub-markets (0 = all)",
     )
     args = ap.parse_args()

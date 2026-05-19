@@ -4,6 +4,7 @@ The whole product assumes anvil + the deployed exchange exist. Silently
 booting in a degraded "catalog only" mode would let users create accounts
 and place orders that can never settle.
 """
+
 from pathlib import Path
 
 import pytest

@@ -4,6 +4,7 @@ The live balance is asserted in
 tests/onchain/test_trade_flow.py::test_register_funds_user_and_grants_approvals.
 This file only covers the auth gate.
 """
+
 from fastapi.testclient import TestClient
 
 from agentpit.api.main import app

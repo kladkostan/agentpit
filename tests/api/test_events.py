@@ -1,4 +1,5 @@
 """HTTP-level tests for the /events endpoints."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -64,12 +65,18 @@ def test_list_events_returns_events_with_their_markets(client_and_db):
     with session.write() as conn:
         event = TableWrite.upsert_event(conn, slug="wc", title="WC")
     m1 = _seed_market(
-        session, question="france?", cond_id=_hex32("fr"),
-        event_id=event.event_id, outcome_label="France",
+        session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=event.event_id,
+        outcome_label="France",
     )
     m2 = _seed_market(
-        session, question="spain?", cond_id=_hex32("es"),
-        event_id=event.event_id, outcome_label="Spain",
+        session,
+        question="spain?",
+        cond_id=_hex32("es"),
+        event_id=event.event_id,
+        outcome_label="Spain",
     )
 
     resp = client.get("/events?limit=10&offset=0")
@@ -79,9 +86,7 @@ def test_list_events_returns_events_with_their_markets(client_and_db):
     assert len(body["events"]) == 1
     summary = body["events"][0]
     assert summary["event"]["slug"] == "wc"
-    assert {m["market_id"] for m in summary["markets"]} == {
-        m1.market_id, m2.market_id
-    }
+    assert {m["market_id"] for m in summary["markets"]} == {m1.market_id, m2.market_id}
 
 
 def test_list_events_rejects_bad_pagination(client_and_db):
@@ -103,13 +108,19 @@ def test_get_event_by_slug_returns_event_and_markets(client_and_db):
     client, session = client_and_db
     with session.write() as conn:
         event = TableWrite.upsert_event(
-            conn, slug="wc", title="2026 FIFA World Cup Winner",
-            description="Who lifts the cup?", icon_url="https://i/wc.svg",
+            conn,
+            slug="wc",
+            title="2026 FIFA World Cup Winner",
+            description="Who lifts the cup?",
+            icon_url="https://i/wc.svg",
             category="Sports",
         )
     m1 = _seed_market(
-        session, question="france?", cond_id=_hex32("fr"),
-        event_id=event.event_id, outcome_label="France",
+        session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=event.event_id,
+        outcome_label="France",
     )
 
     resp = client.get("/events/wc")

@@ -23,9 +23,7 @@ class OnchainAdmin:
     # --- onboarding -------------------------------------------------
 
     def faucet_drip(self, recipient: str, *, timeout: int = 30) -> TxReceipt:
-        fn = self._contracts.faucet.functions.drip(
-            Web3.to_checksum_address(recipient)
-        )
+        fn = self._contracts.faucet.functions.drip(Web3.to_checksum_address(recipient))
         return send_admin_tx(self._client, fn, timeout=timeout)
 
     def fund_gas(
@@ -71,7 +69,12 @@ class OnchainAdmin:
     # --- markets ----------------------------------------------------
 
     def prepare_condition(
-        self, oracle: str, question_id: bytes, outcome_slot_count: int, *, timeout: int = 30
+        self,
+        oracle: str,
+        question_id: bytes,
+        outcome_slot_count: int,
+        *,
+        timeout: int = 30,
     ) -> TxReceipt:
         fn = self._contracts.ctf.functions.prepareCondition(
             Web3.to_checksum_address(oracle), question_id, outcome_slot_count

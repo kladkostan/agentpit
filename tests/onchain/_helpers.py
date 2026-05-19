@@ -3,6 +3,7 @@
 Each test creates its own app + clients so it's isolated from the singleton
 app built by tests/conftest.py with on-chain disabled.
 """
+
 import secrets
 import uuid
 

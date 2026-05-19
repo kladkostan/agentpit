@@ -10,8 +10,6 @@ class RedeemPositionRequest(BaseModel):
         check_state(self.api_key, "api_key must not be empty")
 
 
-
-
 class TransferUsdcResponse(BaseModel):
     from_address: str
     to_address: str

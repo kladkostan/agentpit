@@ -76,7 +76,9 @@ def is_hex256(value: str) -> bool:
     if not isinstance(value, str) or not value:
         return False
     token_hex = value[2:] if value.lower().startswith("0x") else value
-    return len(token_hex) == 64 and all(c in "0123456789abcdefABCDEF" for c in token_hex)
+    return len(token_hex) == 64 and all(
+        c in "0123456789abcdefABCDEF" for c in token_hex
+    )
 
 
 @validate_call(config=_STRICT)
@@ -91,10 +93,7 @@ def _iso_to_unix(ts: str) -> int:
     # and pads/truncates it to 6 digits.
     if "." in ts:
         ts = re.sub(
-            r"\.(\d+)",
-            lambda m: "." + m.group(1).ljust(6, "0")[:6],
-            ts,
-            count=1
+            r"\.(\d+)", lambda m: "." + m.group(1).ljust(6, "0")[:6], ts, count=1
         )
 
     dt = datetime.fromisoformat(ts)
@@ -110,4 +109,3 @@ def hex2bytes(val: str) -> bytes:
         return bytes.fromhex(val[2:])
     else:
         return bytes.fromhex(val)
-

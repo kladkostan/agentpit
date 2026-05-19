@@ -12,6 +12,7 @@ Usage:
 
 Re-running is safe: countries already attached to the event are skipped.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,18 +43,19 @@ EVENT_DESCRIPTION = (
     "Who will lift the 2026 FIFA World Cup? "
     "Each country resolves YES if they win the tournament."
 )
-EVENT_ICON = "https://upload.wikimedia.org/wikipedia/en/0/04/2026_FIFA_World_Cup_emblem.svg"
+EVENT_ICON = (
+    "https://upload.wikimedia.org/wikipedia/en/0/04/2026_FIFA_World_Cup_emblem.svg"
+)
 EVENT_CATEGORY = "Sports"
 # Approx Jul 19, 2026 — the scheduled final.
-EVENT_END_DATE = int(
-    time.mktime(time.strptime("2026-07-19", "%Y-%m-%d"))
-)
+EVENT_END_DATE = int(time.mktime(time.strptime("2026-07-19", "%Y-%m-%d")))
 
 
 @dataclass(frozen=True)
 class Country:
     name: str
     flag: str  # emoji used as the icon — UI may swap for a flag SVG later
+
 
 COUNTRIES: tuple[Country, ...] = (
     Country("France", "🇫🇷"),
@@ -67,8 +69,12 @@ COUNTRIES: tuple[Country, ...] = (
 
 
 def _request(
-    base: str, path: str, *, method: str = "GET",
-    body: dict | None = None, token: str | None = None,
+    base: str,
+    path: str,
+    *,
+    method: str = "GET",
+    body: dict | None = None,
+    token: str | None = None,
 ) -> dict[str, Any]:
     url = f"{base.rstrip('/')}{path}"
     data = json.dumps(body).encode() if body is not None else None
@@ -90,14 +96,20 @@ def register_admin(base: str) -> tuple[str, str]:
     stamp = int(time.time())
     email = f"seed-wc-admin-{stamp}@example.com"
     res = _request(
-        base, "/register", method="POST",
+        base,
+        "/register",
+        method="POST",
         body={"email": email, "password": "seedpass-12345"},
     )
     return res["access_token"], res["user"]["eth_address"]
 
 
 def create_country_market(
-    base: str, token: str, country: Country, *, end_date: int,
+    base: str,
+    token: str,
+    country: Country,
+    *,
+    end_date: int,
 ) -> dict[str, Any]:
     payload = {
         "question": f"Will {country.name} win the 2026 FIFA World Cup?",
@@ -163,7 +175,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://localhost:8000")
     ap.add_argument(
-        "--book", action="store_true",
+        "--book",
+        action="store_true",
         help="Also populate an orderbook for each sub-market via seed_market_orders.py",
     )
     args = ap.parse_args()
@@ -176,12 +189,17 @@ def main() -> int:
         return 1
     print(f"   admin {address}")
 
-    print(f"\n→ creating {len(COUNTRIES)} sub-markets (on-chain prepareCondition + registerToken)")
+    print(
+        f"\n→ creating {len(COUNTRIES)} sub-markets (on-chain prepareCondition + registerToken)"
+    )
     market_ids: list[int] = []
     for country in COUNTRIES:
         try:
             market = create_country_market(
-                args.base, token, country, end_date=EVENT_END_DATE,
+                args.base,
+                token,
+                country,
+                end_date=EVENT_END_DATE,
             )
         except RuntimeError as exc:
             print(f"   ✗ {country.name:<10} skipped — {exc}", file=sys.stderr)
@@ -202,7 +220,9 @@ def main() -> int:
         try:
             seed_orderbooks(args.base, market_ids)
         except subprocess.CalledProcessError as exc:
-            print(f"WARN: orderbook seeding failed for one market: {exc}", file=sys.stderr)
+            print(
+                f"WARN: orderbook seeding failed for one market: {exc}", file=sys.stderr
+            )
 
     print(f"\n✓ done — open {args.base.replace(':8000', ':5173')}/events/{EVENT_SLUG}")
     return 0

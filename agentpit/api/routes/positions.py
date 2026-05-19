@@ -31,7 +31,9 @@ def merge_positions(
     return service.merge(user, market_id, payload)
 
 
-@router.post("/markets/{market_id}/redeem_position", response_model=RedeemPositionResponse)
+@router.post(
+    "/markets/{market_id}/redeem_position", response_model=RedeemPositionResponse
+)
 def redeem_position(
     market_id: int,
     user: CurrentUserDep,

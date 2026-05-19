@@ -10,6 +10,7 @@ make sqlite3 internally thread-safe), and the corruption surfaces as
 This was first observed when the new EventDetailPage fired 30+ parallel
 orderbook fetches against a multi-market event.
 """
+
 from __future__ import annotations
 
 import threading

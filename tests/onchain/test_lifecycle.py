@@ -3,6 +3,7 @@
 Markets state-machine: DRAFT → ACTIVE → CLOSED → RESOLVED, plus cancel and
 invalid transitions. Lives on-chain because market creation does prepareCondition.
 """
+
 from tests.onchain._helpers import create_market, fresh_client
 
 

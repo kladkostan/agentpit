@@ -4,6 +4,8 @@ from fastapi import HTTPException
 from pydantic import ConfigDict, validate_call
 
 _STRICT = ConfigDict(strict=True)
+
+
 def check_state(expression: bool, msg: str = "") -> None:
     """
     Raises LogicError if `expression` is False, formatting a message similar to the C++ macro.
@@ -26,5 +28,3 @@ def check_state(expression: bool, msg: str = "") -> None:
     base = f"Check failed::{expr_text} \n {file}:{line} {func}"
     detail = f"(): {msg}" if msg else "()"
     raise HTTPException(400, base + detail)
-
-

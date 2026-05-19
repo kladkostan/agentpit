@@ -11,7 +11,9 @@ router = APIRouter(tags=["markets"])
 
 
 @router.get("/markets", response_model=ListMarketsResponse)
-def list_markets(service: MarketServiceDep, limit: int = 100, offset: int = 0) -> ListMarketsResponse:
+def list_markets(
+    service: MarketServiceDep, limit: int = 100, offset: int = 0
+) -> ListMarketsResponse:
     return service.list_markets(limit=limit, offset=offset)
 
 

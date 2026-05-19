@@ -5,6 +5,7 @@ audit rows were written by the simulator-era TableWrite paths; in the on-chain
 flow we don't yet emit per-action audit rows (a follow-up task), so this only
 verifies the empty-list path and the auth gate.
 """
+
 from fastapi.testclient import TestClient
 
 from agentpit.api.main import app

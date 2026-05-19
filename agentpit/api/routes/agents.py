@@ -8,5 +8,7 @@ router = APIRouter(tags=["agents"])
 
 
 @router.post("/create_agent", response_model=CreateAgentResponse)
-def create_agent(payload: CreateAgentRequest, service: AgentServiceDep) -> CreateAgentResponse:
+def create_agent(
+    payload: CreateAgentRequest, service: AgentServiceDep
+) -> CreateAgentResponse:
     return service.create_agent(payload)

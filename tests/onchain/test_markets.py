@@ -2,6 +2,7 @@
 
 Live-chain because POST /markets calls prepareCondition + registerToken.
 """
+
 from tests.onchain._helpers import create_market, fresh_client, unique_question
 
 

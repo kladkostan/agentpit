@@ -7,7 +7,5 @@ class GetUsdcBalanceResponse(BaseModel):
     balance: int
 
     def model_post_init(self, __context):
-        check_state(len(self.eth_address) > 0,
-                    "ETH address must not be empty")
-        check_state(self.balance >= 0,
-                    "Balance must be non-negative")
+        check_state(len(self.eth_address) > 0, "ETH address must not be empty")
+        check_state(self.balance >= 0, "Balance must be non-negative")

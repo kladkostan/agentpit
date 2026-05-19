@@ -3,6 +3,7 @@
 splitPosition + mergePositions + insufficient-balance rejections. All flows
 go through real CTF on-chain calls signed by the user's server-held key.
 """
+
 from tests.onchain._helpers import create_market, fresh_client, hdr, register
 
 

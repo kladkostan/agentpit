@@ -2,7 +2,9 @@ from fastapi import APIRouter
 
 from agentpit.api.deps import PersonalityServiceDep
 from agentpit.datastructures.create_personality_request import CreatePersonalityRequest
-from agentpit.datastructures.create_personality_response import CreatePersonalityResponse
+from agentpit.datastructures.create_personality_response import (
+    CreatePersonalityResponse,
+)
 
 router = APIRouter(tags=["personalities"])
 

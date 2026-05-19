@@ -9,9 +9,8 @@ class PositionResponse(BaseModel):
     token_balances: dict[str, int]  # token_id -> new balance
 
     def model_post_init(self, __context):
-        check_state(self.market_id >= 0,
-                    "Market ID must be non-negative")
-        check_state(self.amount >= 0,
-                    "Amount must be non-negative")
-        check_state(self.collateral_amount >= 0,
-                    "Collateral amount must be non-negative")
+        check_state(self.market_id >= 0, "Market ID must be non-negative")
+        check_state(self.amount >= 0, "Amount must be non-negative")
+        check_state(
+            self.collateral_amount >= 0, "Collateral amount must be non-negative"
+        )

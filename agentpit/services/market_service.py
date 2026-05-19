@@ -37,7 +37,9 @@ class MarketService:
             raise InvalidPaginationError("offset must be non-negative")
         with self._db.read() as conn:
             markets, total = TableRead.list_markets(conn, limit=limit, offset=offset)
-        return ListMarketsResponse(markets=markets, total=total, limit=limit, offset=offset)
+        return ListMarketsResponse(
+            markets=markets, total=total, limit=limit, offset=offset
+        )
 
     def get_market(self, market_id: int) -> Market:
         with self._db.read() as conn:
@@ -141,9 +143,9 @@ def prepare_market_on_chain(
         )
     question_id = keccak(text=question)
     oracle = admin._client.admin.address  # noqa: SLF001 — intentional
-    ctf = admin._contracts.ctf            # noqa: SLF001
+    ctf = admin._contracts.ctf  # noqa: SLF001
     usd_address = admin._contracts.usd.address  # noqa: SLF001
-    exch = admin._contracts.exchange      # noqa: SLF001
+    exch = admin._contracts.exchange  # noqa: SLF001
 
     condition_id_bytes = ctf.functions.getConditionId(
         Web3.to_checksum_address(oracle), question_id, outcome_count
@@ -174,7 +176,8 @@ def prepare_market_on_chain(
     except Exception as exc:
         log.info(
             "registerToken raised for %s: %s — verifying registry state",
-            condition_id_bytes.hex(), exc,
+            condition_id_bytes.hex(),
+            exc,
         )
 
     comp_a, _ = exch.functions.registry(token_ids[0]).call()
@@ -188,11 +191,10 @@ def prepare_market_on_chain(
         )
 
     condition_id_hex = "0x" + condition_id_bytes.hex()
-    erc1155_tokens = list(zip(
-        (str(t) for t in token_ids), outcome_labels
-    ))
+    erc1155_tokens = list(zip((str(t) for t in token_ids), outcome_labels))
     log.info(
         "market prepared on-chain: condition_id=%s tokens=%s",
-        condition_id_hex, token_ids,
+        condition_id_hex,
+        token_ids,
     )
     return ConditionId(condition_id_hex), erc1155_tokens

@@ -1,4 +1,5 @@
 """DAL-level tests for the events table and the market<->event binding."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -103,9 +104,7 @@ def test_get_event_by_slug_returns_event(db):
 
 
 def test_get_event_by_polymarket_event_id_returns_event(db):
-    TableWrite.upsert_event(
-        db, slug="wc", title="WC", polymarket_event_id="pm-evt-1"
-    )
+    TableWrite.upsert_event(db, slug="wc", title="WC", polymarket_event_id="pm-evt-1")
     found = TableRead.get_event_by_polymarket_event_id(db, "pm-evt-1")
     assert found is not None
     assert found.slug == "wc"
@@ -180,8 +179,12 @@ def test_list_markets_by_event_id_returns_only_event_members(db):
     event_a = TableWrite.upsert_event(db, slug="a", title="A")
     event_b = TableWrite.upsert_event(db, slug="b", title="B")
 
-    m1 = _make_market(db, question="q1", cond_id=_hex32("q1"), event_id=event_a.event_id)
-    m2 = _make_market(db, question="q2", cond_id=_hex32("q2"), event_id=event_a.event_id)
+    m1 = _make_market(
+        db, question="q1", cond_id=_hex32("q1"), event_id=event_a.event_id
+    )
+    m2 = _make_market(
+        db, question="q2", cond_id=_hex32("q2"), event_id=event_a.event_id
+    )
     _make_market(db, question="q3", cond_id=_hex32("q3"), event_id=event_b.event_id)
     _make_market(db, question="orphan", cond_id=_hex32("orphan"))
 
@@ -192,9 +195,15 @@ def test_list_markets_by_event_id_returns_only_event_members(db):
 def test_list_events_with_markets_pairs_each_event_with_its_markets(db):
     event_a = TableWrite.upsert_event(db, slug="a", title="A")
     event_b = TableWrite.upsert_event(db, slug="b", title="B")
-    m1 = _make_market(db, question="q1", cond_id=_hex32("q1"), event_id=event_a.event_id)
-    m2 = _make_market(db, question="q2", cond_id=_hex32("q2"), event_id=event_a.event_id)
-    m3 = _make_market(db, question="q3", cond_id=_hex32("q3"), event_id=event_b.event_id)
+    m1 = _make_market(
+        db, question="q1", cond_id=_hex32("q1"), event_id=event_a.event_id
+    )
+    m2 = _make_market(
+        db, question="q2", cond_id=_hex32("q2"), event_id=event_a.event_id
+    )
+    m3 = _make_market(
+        db, question="q3", cond_id=_hex32("q3"), event_id=event_b.event_id
+    )
 
     pairs, total = TableRead.list_events_with_markets(db, limit=10, offset=0)
     assert total == 2
@@ -221,7 +230,9 @@ def test_list_events_with_markets_paginates(db):
 
 def test_list_orphan_markets_returns_only_unbound_markets(db):
     event = TableWrite.upsert_event(db, slug="bound", title="Bound")
-    bound = _make_market(db, question="bound", cond_id=_hex32("bound"), event_id=event.event_id)
+    bound = _make_market(
+        db, question="bound", cond_id=_hex32("bound"), event_id=event.event_id
+    )
     orphan = _make_market(db, question="orphan", cond_id=_hex32("orphan"))
 
     orphans = TableRead.list_orphan_markets(db)

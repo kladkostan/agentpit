@@ -5,6 +5,7 @@ admin (which is the local oracle for every locally-prepared condition)
 calls `reportPayouts` on the local CTF, then we flip the local row to
 RESOLVED. Users redeem locally.
 """
+
 import secrets
 
 import pytest

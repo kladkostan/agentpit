@@ -4,6 +4,7 @@ These tests need anvil running on RPC_URL with the agentpit stack deployed
 (`./scripts/run_node.sh && ./scripts/deploy_exchange.sh`). They are skipped if
 the RPC is not reachable so `pytest -q` stays green in CI.
 """
+
 import os
 from pathlib import Path
 
@@ -34,6 +35,8 @@ _ONCHAIN_OK = _rpc_reachable() and Path("deployments/local.json").exists()
 def pytest_collection_modifyitems(config, items):
     if _ONCHAIN_OK:
         return
-    skip = pytest.mark.skip(reason="anvil not running or deployments/local.json missing")
+    skip = pytest.mark.skip(
+        reason="anvil not running or deployments/local.json missing"
+    )
     for item in items:
         item.add_marker(skip)

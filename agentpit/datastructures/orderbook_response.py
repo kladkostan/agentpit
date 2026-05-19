@@ -9,12 +9,9 @@ class OrderbookEntry(BaseModel):
     num_orders: int
 
     def model_post_init(self, __context):
-        check_state(self.price >= 0,
-                    "Price must be non-negative")
-        check_state(self.amount >= 0,
-                    "Amount must be non-negative")
-        check_state(self.num_orders >= 0,
-                    "Number of orders must be non-negative")
+        check_state(self.price >= 0, "Price must be non-negative")
+        check_state(self.amount >= 0, "Amount must be non-negative")
+        check_state(self.num_orders >= 0, "Number of orders must be non-negative")
 
 
 class OrderbookResponse(BaseModel):
@@ -23,5 +20,4 @@ class OrderbookResponse(BaseModel):
     asks: Dict[str, List[OrderbookEntry]]  # token_id -> list of sell orders
 
     def model_post_init(self, __context):
-        check_state(self.market_id >= 0,
-                    "Market ID must be non-negative")
+        check_state(self.market_id >= 0, "Market ID must be non-negative")

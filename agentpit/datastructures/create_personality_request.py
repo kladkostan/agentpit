@@ -15,4 +15,3 @@ class CreatePersonalityRequest(BaseModel):
         check_state(len(self.beliefs) > 0, "beliefs must not be empty")
         check_state(len(self.methods) > 0, "methods must not be empty")
         check_state(len(self.needs) > 0, "needs must not be empty")
-

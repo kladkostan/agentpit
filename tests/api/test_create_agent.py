@@ -100,4 +100,3 @@ def test_create_multiple_agents():
             body = resp.json()
             assert body["agent_id"] == f"multi_agent_{i}"
             assert body["personality_id"] == "shared_personality"
-

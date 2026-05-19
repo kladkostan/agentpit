@@ -65,9 +65,7 @@ def _request(
             return json.loads(resp.read().decode() or "{}")
     except urllib.error.HTTPError as e:
         body_text = e.read().decode(errors="replace")
-        raise RuntimeError(
-            f"{method} {path} → HTTP {e.code}: {body_text}"
-        ) from None
+        raise RuntimeError(f"{method} {path} → HTTP {e.code}: {body_text}") from None
 
 
 def register_user(base: str, name: str, stamp: int) -> User:
@@ -127,41 +125,50 @@ def seed(base: str, market_id: int) -> None:
     print("\n→ phase 1: complementary MINT (alice YES + bob NO)")
     phase1: list[tuple[str, str, str, float, int]] = [
         ("alice", "BUY", "Yes", 0.55, 80),
-        ("bob",   "BUY", "No",  0.50, 80),
+        ("bob", "BUY", "No", 0.50, 80),
     ]
     for who, side, outcome, price, shares in phase1:
         res = place_order(
-            base, users[who],
-            market_id=market_id, outcome=outcome, side=side,
-            price=price, shares=shares,
+            base,
+            users[who],
+            market_id=market_id,
+            outcome=outcome,
+            side=side,
+            price=price,
+            shares=shares,
         )
         filled = int(res["filledSize"]) / SHARES_SCALE
-        print(f"   {who:<6} {_label(side, outcome, price, shares)}  → filled {filled:.0f}")
+        print(
+            f"   {who:<6} {_label(side, outcome, price, shares)}  → filled {filled:.0f}"
+        )
 
     # ---- Phase 2: bid stack on both sides ------------------------------
     # All sums stay below 1.0 so nothing crosses. Carol/dave/eve provide
     # most of the depth; bob/alice add a few small bids too.
     print("\n→ phase 2: resting bids (BUY YES / BUY NO)")
     phase2: list[tuple[str, str, str, float, int]] = [
-        ("carol", "BUY", "Yes", 0.28,  30),
-        ("dave",  "BUY", "Yes", 0.25,  40),
-        ("eve",   "BUY", "Yes", 0.22,  60),
-        ("carol", "BUY", "Yes", 0.20,  25),
-        ("dave",  "BUY", "Yes", 0.18,  50),
-        ("eve",   "BUY", "Yes", 0.15, 100),
-
-        ("eve",   "BUY", "No",  0.70,  20),
-        ("carol", "BUY", "No",  0.68,  25),
-        ("dave",  "BUY", "No",  0.65,  35),
-        ("eve",   "BUY", "No",  0.62,  40),
-        ("carol", "BUY", "No",  0.60,  50),
-        ("dave",  "BUY", "No",  0.55,  60),
+        ("carol", "BUY", "Yes", 0.28, 30),
+        ("dave", "BUY", "Yes", 0.25, 40),
+        ("eve", "BUY", "Yes", 0.22, 60),
+        ("carol", "BUY", "Yes", 0.20, 25),
+        ("dave", "BUY", "Yes", 0.18, 50),
+        ("eve", "BUY", "Yes", 0.15, 100),
+        ("eve", "BUY", "No", 0.70, 20),
+        ("carol", "BUY", "No", 0.68, 25),
+        ("dave", "BUY", "No", 0.65, 35),
+        ("eve", "BUY", "No", 0.62, 40),
+        ("carol", "BUY", "No", 0.60, 50),
+        ("dave", "BUY", "No", 0.55, 60),
     ]
     for who, side, outcome, price, shares in phase2:
         res = place_order(
-            base, users[who],
-            market_id=market_id, outcome=outcome, side=side,
-            price=price, shares=shares,
+            base,
+            users[who],
+            market_id=market_id,
+            outcome=outcome,
+            side=side,
+            price=price,
+            shares=shares,
         )
         status = res.get("status", "?")
         print(f"   {who:<6} {_label(side, outcome, price, shares)}  → {status}")
@@ -174,16 +181,19 @@ def seed(base: str, market_id: int) -> None:
         ("alice", "SELL", "Yes", 0.32, 15),
         ("alice", "SELL", "Yes", 0.35, 25),
         ("alice", "SELL", "Yes", 0.40, 20),
-
-        ("bob",   "SELL", "No",  0.72, 15),
-        ("bob",   "SELL", "No",  0.75, 25),
-        ("bob",   "SELL", "No",  0.80, 20),
+        ("bob", "SELL", "No", 0.72, 15),
+        ("bob", "SELL", "No", 0.75, 25),
+        ("bob", "SELL", "No", 0.80, 20),
     ]
     for who, side, outcome, price, shares in phase3:
         res = place_order(
-            base, users[who],
-            market_id=market_id, outcome=outcome, side=side,
-            price=price, shares=shares,
+            base,
+            users[who],
+            market_id=market_id,
+            outcome=outcome,
+            side=side,
+            price=price,
+            shares=shares,
         )
         status = res.get("status", "?")
         print(f"   {who:<6} {_label(side, outcome, price, shares)}  → {status}")

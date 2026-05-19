@@ -2,6 +2,7 @@
 
 Exercises the full happy path against a running anvil + deployed stack.
 """
+
 import secrets
 import uuid
 
@@ -59,8 +60,12 @@ def test_match_settles_on_chain():
 
     a_email = _email()
     b_email = _email()
-    ra = client.post("/register", json={"email": a_email, "password": "hunter22hunter22"}).json()
-    rb = client.post("/register", json={"email": b_email, "password": "hunter22hunter22"}).json()
+    ra = client.post(
+        "/register", json={"email": a_email, "password": "hunter22hunter22"}
+    ).json()
+    rb = client.post(
+        "/register", json={"email": b_email, "password": "hunter22hunter22"}
+    ).json()
     ta, tb = ra["access_token"], rb["access_token"]
     ea, eb = ra["user"]["eth_address"], rb["user"]["eth_address"]
 
@@ -93,8 +98,11 @@ def test_match_settles_on_chain():
         "/orders",
         headers=_hdr(ta),
         json={
-            "market_id": market["market_id"], "outcome": "YES",
-            "side": "BUY", "price": "0.6", "size": 100_000_000,
+            "market_id": market["market_id"],
+            "outcome": "YES",
+            "side": "BUY",
+            "price": "0.6",
+            "size": 100_000_000,
         },
     ).json()
     assert pa["success"] and pa["status"] == "live"
@@ -103,8 +111,11 @@ def test_match_settles_on_chain():
         "/orders",
         headers=_hdr(tb),
         json={
-            "market_id": market["market_id"], "outcome": "YES",
-            "side": "SELL", "price": "0.6", "size": 100_000_000,
+            "market_id": market["market_id"],
+            "outcome": "YES",
+            "side": "SELL",
+            "price": "0.6",
+            "size": 100_000_000,
         },
     ).json()
     assert pb["success"], pb
@@ -171,8 +182,11 @@ def test_complementary_buys_mint_via_split():
         "/orders",
         headers=_hdr(ta),
         json={
-            "market_id": market["market_id"], "outcome": "YES",
-            "side": "BUY", "price": "0.3", "size": 100_000_000,
+            "market_id": market["market_id"],
+            "outcome": "YES",
+            "side": "BUY",
+            "price": "0.3",
+            "size": 100_000_000,
         },
     ).json()
     assert pa["success"] and pa["status"] == "live", pa
@@ -182,8 +196,11 @@ def test_complementary_buys_mint_via_split():
         "/orders",
         headers=_hdr(tb),
         json={
-            "market_id": market["market_id"], "outcome": "NO",
-            "side": "BUY", "price": "0.7", "size": 50_000_000,
+            "market_id": market["market_id"],
+            "outcome": "NO",
+            "side": "BUY",
+            "price": "0.7",
+            "size": 50_000_000,
         },
     ).json()
     assert pb["success"], pb
@@ -198,9 +215,5 @@ def test_complementary_buys_mint_via_split():
     assert admin.ctf_balance(ea, yes_id) == 50_000_000
     assert admin.ctf_balance(eb, no_id) == 50_000_000
     # A's order remains live with 50M outstanding.
-    book = client.get(
-        f"/orderbook/{market['market_id']}/YES"
-    ).json()
-    assert any(
-        int(b["REMAINING_AMOUNT"]) == 50_000_000 for b in book["bids"]
-    ), book
+    book = client.get(f"/orderbook/{market['market_id']}/YES").json()
+    assert any(int(b["REMAINING_AMOUNT"]) == 50_000_000 for b in book["bids"]), book

@@ -66,4 +66,3 @@ def test_create_multiple_personalities():
 
         # All IDs should be unique
         assert len(set(ids)) == 3
-

@@ -24,7 +24,7 @@ class OrderData:
     expiration: int
     nonce: int
     feeRateBps: int
-    side: int           # 0 = BUY, 1 = SELL
+    side: int  # 0 = BUY, 1 = SELL
     signatureType: int  # 0 = EOA / EIP712
 
 

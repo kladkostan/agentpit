@@ -4,6 +4,7 @@ The service wraps DB reads/writes and is the single entry-point for routes.
 It also owns the "every market belongs to an event" invariant via the
 auto-wrap helper used at startup.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -70,18 +71,27 @@ def test_get_event_by_slug_returns_event_with_markets(db_session):
     with db_session.write() as conn:
         event = TableWrite.upsert_event(conn, slug="wc", title="WC")
     m_france = _seed_market(
-        db_session, question="france?", cond_id=_hex32("france"),
-        event_id=event.event_id, outcome_label="France",
+        db_session,
+        question="france?",
+        cond_id=_hex32("france"),
+        event_id=event.event_id,
+        outcome_label="France",
     )
     m_spain = _seed_market(
-        db_session, question="spain?", cond_id=_hex32("spain"),
-        event_id=event.event_id, outcome_label="Spain",
+        db_session,
+        question="spain?",
+        cond_id=_hex32("spain"),
+        event_id=event.event_id,
+        outcome_label="Spain",
     )
 
     service = EventService(db_session)
     detail = service.get_event_by_slug("wc")
     assert detail.event.slug == "wc"
-    assert {m.market_id for m in detail.markets} == {m_france.market_id, m_spain.market_id}
+    assert {m.market_id for m in detail.markets} == {
+        m_france.market_id,
+        m_spain.market_id,
+    }
 
 
 # ----- list_events ------------------------------------------------------------
@@ -103,10 +113,20 @@ def test_list_events_returns_paginated_event_summaries(db_session):
 def test_list_events_includes_member_markets_per_event(db_session):
     with db_session.write() as conn:
         event = TableWrite.upsert_event(conn, slug="wc", title="WC")
-    _seed_market(db_session, question="france?", cond_id=_hex32("fr"),
-                 event_id=event.event_id, outcome_label="France")
-    _seed_market(db_session, question="spain?", cond_id=_hex32("es"),
-                 event_id=event.event_id, outcome_label="Spain")
+    _seed_market(
+        db_session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=event.event_id,
+        outcome_label="France",
+    )
+    _seed_market(
+        db_session,
+        question="spain?",
+        cond_id=_hex32("es"),
+        event_id=event.event_id,
+        outcome_label="Spain",
+    )
 
     service = EventService(db_session)
     resp = service.list_events(limit=10, offset=0)
@@ -150,8 +170,11 @@ def test_ensure_singleton_events_leaves_already_bound_markets_alone(db_session):
     with db_session.write() as conn:
         event = TableWrite.upsert_event(conn, slug="wc", title="WC")
     bound = _seed_market(
-        db_session, question="france?", cond_id=_hex32("fr"),
-        event_id=event.event_id, outcome_label="France",
+        db_session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=event.event_id,
+        outcome_label="France",
     )
 
     service = EventService(db_session)
@@ -182,8 +205,11 @@ def test_wrap_market_in_singleton_noop_when_already_bound(db_session):
     with db_session.write() as conn:
         existing = TableWrite.upsert_event(conn, slug="wc", title="WC")
     market = _seed_market(
-        db_session, question="france?", cond_id=_hex32("fr"),
-        event_id=existing.event_id, outcome_label="France",
+        db_session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=existing.event_id,
+        outcome_label="France",
     )
 
     service = EventService(db_session)

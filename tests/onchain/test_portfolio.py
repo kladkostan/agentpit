@@ -3,6 +3,7 @@
 /portfolio reads on-chain apUSD + ERC1155 outcome-token balances and joins
 them with the local markets table.
 """
+
 from tests.onchain._helpers import create_market, fresh_client, hdr, register
 
 
@@ -13,7 +14,7 @@ def test_portfolio_for_fresh_user_shows_signup_grant_and_no_positions():
     assert resp.status_code == 200
     body = resp.json()
     assert body["eth_address"] == user["user"]["eth_address"]
-    assert body["usdc_balance"] > 0   # faucet drip happened at register
+    assert body["usdc_balance"] > 0  # faucet drip happened at register
     assert body["positions"] == []
 
 

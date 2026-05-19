@@ -3,6 +3,7 @@
 Resolve a market on-chain, then verify the redeem path pays out only the
 holders of the winning outcome.
 """
+
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -58,6 +59,7 @@ def test_resolve_then_winner_redeems():
     # admin.reportPayouts(questionId, [1, 0]) — YES wins
     fn = admin._contracts.ctf.functions.reportPayouts(question_id, [1, 0])
     from agentpit.onchain.user_wallet import send_admin_tx
+
     send_admin_tx(admin._client, fn)
 
     # Mark resolved in DB so position service allows redeem.

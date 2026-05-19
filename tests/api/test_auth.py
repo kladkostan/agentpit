@@ -3,6 +3,7 @@
 Anvil + the deployed exchange must be running — register hits the faucet
 and grants approvals as part of every signup.
 """
+
 from fastapi.testclient import TestClient
 
 from agentpit.api.main import app
@@ -16,7 +17,11 @@ def test_register_returns_jwt_and_user():
     with TestClient(app) as client:
         resp = client.post(
             "/register",
-            json={"email": "alice@example.com", "password": "hunter22hunter22", "handle": "alice"},
+            json={
+                "email": "alice@example.com",
+                "password": "hunter22hunter22",
+                "handle": "alice",
+            },
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
