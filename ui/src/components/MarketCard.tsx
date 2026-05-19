@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { Sparkline } from "@/components/Sparkline";
+import { useSparkline } from "@/api/markets";
 import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
@@ -31,15 +33,42 @@ function endLabel(seconds: number | null): string | null {
   return DATE_FMT.format(new Date(seconds * 1000));
 }
 
+/** Compact dollar formatter for volume — $850, $12.4K, $8.1M, $1.2B. */
+function formatVolume(usd: number): string {
+  if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`;
+  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`;
+  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
+  return `$${Math.round(usd)}`;
+}
+
 export function MarketCard({ market, eventSlug }: MarketCardProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
+  const { data: spark } = useSparkline(market.market_id, yesLabel);
   const yesCents = yesMid !== null ? Math.round(yesMid * 100) : null;
   const tone = STATE_TONE[market.market_state];
   const closes = endLabel(market.end_date);
   const href = eventSlug
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;
+
+  const points = spark?.points ?? [];
+  // Change is expressed in percentage points of probability (Δcents).
+  // Sparkline prices are micro-USDC ∈ [0, 1_000_000] → divide by 10_000 to
+  // get cents, then round to an integer delta.
+  const change =
+    points.length >= 2
+      ? Math.round(
+          (points[points.length - 1]!.p - points[0]!.p) / 10_000,
+        )
+      : null;
+  const chartTone: "up" | "down" | "neutral" =
+    change === null || change === 0
+      ? "neutral"
+      : change > 0
+        ? "up"
+        : "down";
+  const volumeUsd = spark ? spark.volume_micro_usd / 1_000_000 : 0;
 
   return (
     <Link
@@ -67,19 +96,43 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
           {market.question}
         </h3>
 
-        {yesCents !== null ? (
-          <ProbabilityRow yesPct={yesCents} />
-        ) : (
-          <div className="border-t pt-4">
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              no book yet
-            </span>
+        <div className="flex items-end justify-between gap-3 border-t pt-4">
+          <div className="flex min-w-0 flex-col gap-1">
+            <div
+              className={cn(
+                "flex items-baseline gap-1",
+                yesCents === null
+                  ? "text-muted-foreground/50"
+                  : "text-foreground",
+              )}
+            >
+              <span className="font-display text-[44px] leading-none tracking-tight tabular-nums">
+                {yesCents ?? "—"}
+              </span>
+              <span className="font-display text-xl leading-none opacity-60">
+                %
+              </span>
+            </div>
+            <ChanceMeta change={change} />
           </div>
-        )}
+          <Sparkline
+            points={points}
+            tone={chartTone}
+            width={120}
+            height={48}
+            className="shrink-0"
+          />
+        </div>
+
+        {volumeUsd > 0 ? (
+          <div className="border-t pt-3 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/80 tabular-nums">
+            {formatVolume(volumeUsd)} <span className="text-foreground/40">vol · 24h</span>
+          </div>
+        ) : null}
       </article>
       <span
         aria-hidden
-        className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 translate-x-0 font-display text-2xl text-muted-foreground/0 transition-all duration-200 group-hover:translate-x-1 group-hover:text-muted-foreground"
+        className="pointer-events-none absolute right-5 top-[52%] -translate-y-1/2 translate-x-0 font-display text-2xl text-muted-foreground/0 transition-all duration-200 group-hover:translate-x-1 group-hover:text-muted-foreground"
       >
         →
       </span>
@@ -87,43 +140,36 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
   );
 }
 
-function ProbabilityRow({ yesPct }: { yesPct: number }) {
-  const noPct = 100 - yesPct;
+function ChanceMeta({ change }: { change: number | null }) {
+  if (change === null) {
+    return (
+      <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+        chance
+      </span>
+    );
+  }
+  if (change === 0) {
+    return (
+      <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+        chance · flat
+      </span>
+    );
+  }
+  const isUp = change > 0;
   return (
-    <div className="space-y-3 border-t pt-4">
-      <div className="flex items-end justify-between gap-4">
-        <div className="flex items-baseline gap-1.5 text-emerald-700 dark:text-emerald-400">
-          <span className="font-display text-4xl leading-none tabular-nums">
-            {yesPct}
-          </span>
-          <span className="font-display text-2xl leading-none opacity-70">
-            %
-          </span>
-          <span className="ml-1 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-            chance
-          </span>
-        </div>
-        <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.22em]">
-          <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
-            <span aria-hidden className="size-1.5 rounded-full bg-emerald-500" />
-            Yes
-          </span>
-          <span className="flex items-center gap-1.5 text-rose-700 dark:text-rose-400">
-            <span aria-hidden className="size-1.5 rounded-full bg-rose-500" />
-            No
-          </span>
-        </div>
-      </div>
-      <div
-        className="relative h-1 overflow-hidden rounded-full bg-rose-500/15 dark:bg-rose-500/20"
-        role="img"
-        aria-label={`Yes ${yesPct}%, No ${noPct}%`}
+    <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+      <span className="text-foreground/70">chance</span>
+      <span
+        className={cn(
+          "flex items-center gap-0.5 tabular-nums",
+          isUp
+            ? "text-emerald-700 dark:text-emerald-400"
+            : "text-rose-700 dark:text-rose-400",
+        )}
       >
-        <div
-          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500"
-          style={{ width: `${yesPct}%` }}
-        />
-      </div>
-    </div>
+        <span aria-hidden>{isUp ? "↑" : "↓"}</span>
+        {Math.abs(change)}% · 24h
+      </span>
+    </span>
   );
 }

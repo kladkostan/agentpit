@@ -11,7 +11,17 @@ interface MultiMarketEventCardProps {
   markets: Market[];
 }
 
-const PREVIEW_COUNT = 3;
+const PREVIEW_COUNT = 2;
+
+const DATE_FMT = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+});
+
+function endLabel(seconds: number | null): string | null {
+  if (seconds === null) return null;
+  return DATE_FMT.format(new Date(seconds * 1000));
+}
 
 function OutcomeIcon({ market }: { market: Market }) {
   const icon = market.icon_url;
@@ -72,6 +82,7 @@ export function MultiMarketEventCard({
   );
   const previewMarkets = ranked.slice(0, PREVIEW_COUNT);
   const extra = ranked.length - previewMarkets.length;
+  const closes = endLabel(event.end_date);
 
   return (
     <Link
@@ -84,9 +95,15 @@ export function MultiMarketEventCard({
             <span aria-hidden className="size-1.5 rounded-full bg-foreground/30" />
             Event · {markets.length} outcomes
           </span>
-          {event.category ? (
-            <span className="text-foreground/40">{event.category}</span>
-          ) : null}
+          <span>
+            {closes ? (
+              <>
+                <span className="text-foreground/40">closes</span> {closes}
+              </>
+            ) : event.category ? (
+              <span className="text-foreground/40">{event.category}</span>
+            ) : null}
+          </span>
         </div>
 
         <div className="flex items-start gap-3">
