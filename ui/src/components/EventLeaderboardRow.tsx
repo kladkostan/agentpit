@@ -1,4 +1,6 @@
-import { deriveNoCents, useOutcomeMid } from "@/lib/useYesMid";
+import { bestAskMicro, deriveNoAskMicro } from "@/components/orders/orderMath";
+import { formatProbabilityPct } from "@/lib/format";
+import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
 
@@ -51,11 +53,16 @@ export function EventLeaderboardRow({
 }: EventLeaderboardRowProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const noLabel = market.erc1155_tokens[1]?.[1];
-  const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
-  const { mid: noMid } = useOutcomeMid(market.market_id, noLabel);
-  const yesCents = yesMid !== null ? yesMid * 100 : null;
-  const noCents = deriveNoCents(yesMid, noMid);
-  const yesPct = yesCents !== null ? Math.round(yesCents) : null;
+  const yes = useOutcomeMid(market.market_id, yesLabel);
+  const no = useOutcomeMid(market.market_id, noLabel);
+  // The Yes/No chips are buy entry points, so show the price to BUY each
+  // outcome — the order book's best ask — which agrees with the book to the
+  // cent. The big % stays the mid (the market's implied probability).
+  const yesAskMicro = yes.data ? bestAskMicro(yes.data.asks) : null;
+  const noAskMicro = deriveNoAskMicro(no.data?.asks ?? [], yes.data?.bids ?? []);
+  const yesCents = yesAskMicro !== null ? yesAskMicro / 10_000 : null;
+  const noCents = noAskMicro !== null ? noAskMicro / 10_000 : null;
+  const yesPctLabel = formatProbabilityPct(yes.mid);
   const label = market.outcome_label ?? market.question;
 
   return (
@@ -83,13 +90,13 @@ export function EventLeaderboardRow({
         <span className="flex w-[72px] items-baseline justify-end gap-1">
           <span
             className={cn(
-              "font-display text-2xl leading-none tabular-nums",
-              yesPct === null && "text-muted-foreground/40",
+              "text-2xl font-semibold leading-none tabular-nums",
+              yes.mid === null && "text-muted-foreground/40",
             )}
           >
-            {yesPct ?? "—"}
+            {yesPctLabel}
           </span>
-          <span className="font-display text-sm leading-none opacity-60">%</span>
+          <span className="text-sm font-semibold leading-none opacity-60">%</span>
         </span>
       </button>
 

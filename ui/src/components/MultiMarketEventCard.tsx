@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useYesMidMap } from "@/lib/useYesMid";
 import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
-import { formatShortDate } from "@/lib/format";
+import { formatProbabilityPct, formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/types/event";
 import type { Market } from "@/types/market";
@@ -43,7 +43,7 @@ function PreviewRow({
   market: Market;
   mid: number | undefined;
 }) {
-  const pct = mid !== undefined ? Math.round(mid * 100) : null;
+  const pctLabel = formatProbabilityPct(mid ?? null);
   const label = market.outcome_label ?? market.question;
   return (
     <div className="flex items-center gap-3 py-1.5">
@@ -51,12 +51,12 @@ function PreviewRow({
       <span className="flex-1 truncate text-sm">{label}</span>
       <span
         className={cn(
-          "font-display text-lg leading-none tabular-nums",
-          pct === null && "text-muted-foreground/40",
+          "text-lg font-semibold leading-none tabular-nums",
+          mid === undefined && "text-muted-foreground/40",
         )}
       >
-        {pct ?? "—"}
-        <span className="ml-0.5 text-xs opacity-60">%</span>
+        {pctLabel}
+        <span className="ml-0.5 text-xs font-semibold opacity-60">%</span>
       </span>
     </div>
   );

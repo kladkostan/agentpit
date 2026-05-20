@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { useSparkline } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
-import { formatShortDate, formatVolume } from "@/lib/format";
+import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
 import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
@@ -29,7 +29,7 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
   const { data: spark } = useSparkline(market.market_id, yesLabel);
-  const yesCents = yesMid !== null ? Math.round(yesMid * 100) : null;
+  const yesPctLabel = formatProbabilityPct(yesMid);
   const tone = STATE_TONE[market.market_state];
   const closes = formatShortDate(market.end_date);
   const href = eventSlug
@@ -79,15 +79,15 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
             <div
               className={cn(
                 "flex items-baseline gap-1",
-                yesCents === null
+                yesMid === null
                   ? "text-muted-foreground/50"
                   : "text-foreground",
               )}
             >
-              <span className="font-display text-[44px] leading-none tracking-tight tabular-nums">
-                {yesCents ?? "—"}
+              <span className="text-[44px] font-semibold leading-none tracking-tight tabular-nums">
+                {yesPctLabel}
               </span>
-              <span className="font-display text-xl leading-none opacity-60">
+              <span className="text-xl font-semibold leading-none opacity-60">
                 %
               </span>
             </div>
@@ -113,12 +113,6 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
           </div>
         ) : null}
       </article>
-      <span
-        aria-hidden
-        className="pointer-events-none absolute right-5 top-[52%] -translate-y-1/2 translate-x-0 font-display text-2xl text-muted-foreground/0 transition-all duration-200 group-hover:translate-x-1 group-hover:text-muted-foreground"
-      >
-        →
-      </span>
     </Link>
   );
 }
