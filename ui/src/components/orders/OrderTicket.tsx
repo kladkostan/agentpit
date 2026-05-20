@@ -12,6 +12,8 @@ import {
   MIN_PROB,
   SHARES_SCALE,
   SLIPPAGE_CAP,
+  bestAskMicro,
+  bestBidMicro,
   computeMarketBuy,
   computeMarketSell,
   dollarsFromShares,
@@ -307,6 +309,7 @@ export function OrderTicket({
           marketId={marketId}
           tokens={tokens}
           selected={outcome}
+          side={side}
           onSelect={(label) => onOutcomeChange?.(label)}
         />
 
@@ -442,11 +445,13 @@ function OutcomePicker({
   marketId,
   tokens,
   selected,
+  side,
   onSelect,
 }: {
   marketId: number;
   tokens: Erc1155Token[];
   selected: string;
+  side: OrderSide;
   onSelect: (label: string) => void;
 }) {
   const results = useQueries({
@@ -469,7 +474,13 @@ function OutcomePicker({
     >
       {tokens.map(([id, label], i) => {
         const book = results[i]?.data as OrderbookResponse | undefined;
-        const cents = midCents(book);
+        // Show the price you'd actually trade at for the current side: the
+        // best ask when buying, the best bid when selling — not the mid.
+        const micro =
+          side === "BUY"
+            ? bestAskMicro(book?.asks ?? [])
+            : bestBidMicro(book?.bids ?? []);
+        const cents = micro !== null ? micro / 10_000 : null;
         const isActive = label === selected;
         const isPositive = i === 0;
         const tone = isPositive ? "emerald" : "rose";
@@ -495,7 +506,7 @@ function OutcomePicker({
             </span>
             <span className="flex items-baseline">
               <span className="text-[22px] font-medium leading-none tabular-nums">
-                {cents !== null ? cents : "—"}
+                {cents !== null ? cents.toFixed(1) : "—"}
               </span>
               <span className="ml-0.5 text-[14px] leading-none opacity-70">
                 ¢
@@ -506,21 +517,6 @@ function OutcomePicker({
       })}
     </div>
   );
-}
-
-function midCents(book: OrderbookResponse | undefined): number | null {
-  if (!book) return null;
-  const bid =
-    book.bids.length > 0
-      ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
-      : null;
-  const ask =
-    book.asks.length > 0
-      ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
-      : null;
-  if (bid !== null && ask !== null) return Math.round(((bid + ask) / 2) * 100);
-  const single = ask ?? bid;
-  return single !== null ? Math.round(single * 100) : null;
 }
 
 /* ---------- Buy / Sell (neutral segmented) ---------- */

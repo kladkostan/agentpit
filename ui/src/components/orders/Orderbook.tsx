@@ -1,8 +1,11 @@
 import { useOrderbook } from "@/api/orders";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { OrderbookEntry } from "@/types/order";
-import { SHARES_SCALE } from "@/components/orders/orderMath";
+import {
+  aggregateLevels,
+  SHARES_SCALE,
+  type OrderbookLevel,
+} from "@/components/orders/orderMath";
 
 interface OrderbookProps {
   marketId: number;
@@ -11,26 +14,14 @@ interface OrderbookProps {
 
 const DEPTH = 8;
 
-const formatPrice = (microUsdc: number): string =>
-  (microUsdc / 1_000_000).toFixed(2);
+// 0.1¢ tick → cents with 1 decimal, matching the spread/mid readout below.
+const formatCents = (microUsdc: number): string =>
+  (microUsdc / 10_000).toFixed(1);
 
 const formatSize = (microShares: number): string => {
   const v = microShares / SHARES_SCALE;
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
   return v.toFixed(2);
-};
-
-const aggregateByPrice = (entries: OrderbookEntry[]): OrderbookEntry[] => {
-  const acc = new Map<number, OrderbookEntry>();
-  for (const e of entries) {
-    const existing = acc.get(e.PRICE);
-    if (existing) {
-      existing.REMAINING_AMOUNT += e.REMAINING_AMOUNT;
-    } else {
-      acc.set(e.PRICE, { ...e });
-    }
-  }
-  return [...acc.values()];
 };
 
 export function Orderbook({ marketId, outcome }: OrderbookProps) {
@@ -55,22 +46,22 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
     );
   }
 
-  const asks = aggregateByPrice(data.asks)
-    .sort((a, b) => a.PRICE - b.PRICE)
+  const asks = aggregateLevels(data.asks)
+    .sort((a, b) => a.price - b.price)
     .slice(0, DEPTH)
     .reverse();
-  const bids = aggregateByPrice(data.bids)
-    .sort((a, b) => b.PRICE - a.PRICE)
+  const bids = aggregateLevels(data.bids)
+    .sort((a, b) => b.price - a.price)
     .slice(0, DEPTH);
 
   const maxSize = Math.max(
     1,
-    ...asks.map((e) => e.REMAINING_AMOUNT),
-    ...bids.map((e) => e.REMAINING_AMOUNT),
+    ...asks.map((e) => e.size),
+    ...bids.map((e) => e.size),
   );
 
-  const bestAsk = asks.length ? asks[asks.length - 1]!.PRICE / 1_000_000 : null;
-  const bestBid = bids.length ? bids[0]!.PRICE / 1_000_000 : null;
+  const bestAsk = asks.length ? asks[asks.length - 1]!.price / 1_000_000 : null;
+  const bestBid = bids.length ? bids[0]!.price / 1_000_000 : null;
   const spread =
     bestAsk !== null && bestBid !== null ? bestAsk - bestBid : null;
   const mid =
@@ -80,7 +71,7 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
     <section className="space-y-4">
       <header className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-3">
-          <h2 className="font-display text-2xl leading-none tracking-tight">
+          <h2 className="text-2xl leading-none tracking-tight">
             Order book
           </h2>
           <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
@@ -118,7 +109,7 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
         ) : (
           asks.map((entry) => (
             <Row
-              key={entry.ORDER_ID}
+              key={`ask-${entry.price}`}
               entry={entry}
               kind="ask"
               maxSize={maxSize}
@@ -133,11 +124,14 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
           <span className="flex items-center gap-4">
             {mid !== null ? (
               <span className="text-muted-foreground">
-                mid <span className="text-foreground">${mid.toFixed(3)}</span>
+                mid{" "}
+                <span className="text-foreground">
+                  {(mid * 100).toFixed(1)}¢
+                </span>
               </span>
             ) : null}
             <span className="text-foreground">
-              {spread !== null ? `$${spread.toFixed(3)}` : "—"}
+              {spread !== null ? `${(spread * 100).toFixed(1)}¢` : "—"}
             </span>
           </span>
         </div>
@@ -149,7 +143,7 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
         ) : (
           bids.map((entry) => (
             <Row
-              key={entry.ORDER_ID}
+              key={`bid-${entry.price}`}
               entry={entry}
               kind="bid"
               maxSize={maxSize}
@@ -166,17 +160,17 @@ function Row({
   kind,
   maxSize,
 }: {
-  entry: OrderbookEntry;
+  entry: OrderbookLevel;
   kind: "ask" | "bid";
   maxSize: number;
 }) {
-  const price = formatPrice(entry.PRICE);
-  const size = formatSize(entry.REMAINING_AMOUNT);
+  const price = formatCents(entry.price);
+  const size = formatSize(entry.size);
   const total = (
-    (entry.PRICE / 1_000_000) *
-    (entry.REMAINING_AMOUNT / SHARES_SCALE)
+    (entry.price / 1_000_000) *
+    (entry.size / SHARES_SCALE)
   ).toFixed(2);
-  const depthPct = Math.min(100, (entry.REMAINING_AMOUNT / maxSize) * 100);
+  const depthPct = Math.min(100, (entry.size / maxSize) * 100);
   return (
     <div className="relative grid grid-cols-[1fr_1fr_1fr] px-5 py-1.5 font-mono text-[13px] tabular-nums">
       <span
@@ -197,7 +191,7 @@ function Row({
             : "text-emerald-600 dark:text-emerald-400",
         )}
       >
-        ${price}
+        {price}¢
       </span>
       <span className="relative text-right">{size}</span>
       <span className="relative text-right text-muted-foreground">

@@ -1,12 +1,100 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateLevels,
+  bestAskMicro,
+  bestBidMicro,
   computeMarketBuy,
   computeMarketSell,
+  deriveNoAskMicro,
   dollarsFromShares,
+  PRICE_TICK,
   pickSellOutcome,
   sharesFromDollars,
+  SHARES_SCALE,
 } from "./orderMath";
 import type { OrderbookEntry } from "@/types/order";
+
+const mkEntry = (price: number): OrderbookEntry => ({
+  ORDER_ID: `${price}`,
+  SIDE: "BUY",
+  PRICE: price,
+  REMAINING_AMOUNT: SHARES_SCALE,
+  MAKER: "0x0",
+  CREATED_AT: 0,
+});
+
+describe("bestAskMicro", () => {
+  it("returns the lowest ask, snapped to the 0.1¢ tick like the order book", () => {
+    // Raw 184_500 (18.45¢) snaps to 185_000 (18.5¢) — matching the price the
+    // order book renders, so the ticket chip and the book agree to the cent.
+    expect(bestAskMicro([mkEntry(184_500), mkEntry(200_000)])).toBe(185_000);
+  });
+
+  it("returns null for an empty book side", () => {
+    expect(bestAskMicro([])).toBeNull();
+  });
+});
+
+describe("bestBidMicro", () => {
+  it("returns the highest bid, snapped to the 0.1¢ tick", () => {
+    // 174_500 (17.45¢) snaps to 175_000 (17.5¢).
+    expect(bestBidMicro([mkEntry(174_500), mkEntry(170_000)])).toBe(175_000);
+  });
+
+  it("returns null for an empty book side", () => {
+    expect(bestBidMicro([])).toBeNull();
+  });
+});
+
+describe("deriveNoAskMicro", () => {
+  it("uses the NO book's own best ask when present", () => {
+    expect(deriveNoAskMicro([mkEntry(825_500)], [mkEntry(174_500)])).toBe(
+      826_000,
+    );
+  });
+
+  it("falls back to the complement of the YES best bid when NO is empty", () => {
+    // NO ask mirrors a YES bid: 1.0 − 0.175 = 0.825 → 825_000 micro.
+    expect(deriveNoAskMicro([], [mkEntry(174_500), mkEntry(170_000)])).toBe(
+      825_000,
+    );
+  });
+
+  it("returns null when neither side is known", () => {
+    expect(deriveNoAskMicro([], [])).toBeNull();
+  });
+});
+
+describe("aggregateLevels", () => {
+  const entry = (price: number, shares: number): OrderbookEntry => ({
+    ORDER_ID: `${price}-${shares}`,
+    SIDE: "BUY",
+    PRICE: price,
+    REMAINING_AMOUNT: shares * SHARES_SCALE,
+    MAKER: "0x0",
+    CREATED_AT: 0,
+  });
+
+  it("merges distinct sub-cent prices into 0.1¢ levels, summing size", () => {
+    // 0.020 and 0.0201 both fall in the 0.020 level; 0.017 is its own level.
+    // Before, these rendered as three "$0.02" rows.
+    const levels = aggregateLevels([
+      entry(20000, 100),
+      entry(20100, 5),
+      entry(17000, 20),
+    ]);
+    const byPrice = new Map(levels.map((l) => [l.price, l.size]));
+    expect(levels).toHaveLength(2);
+    expect(byPrice.get(20000)).toBe(105 * SHARES_SCALE);
+    expect(byPrice.get(17000)).toBe(20 * SHARES_SCALE);
+  });
+
+  it("snaps each level to a multiple of the 0.1¢ tick", () => {
+    const [level] = aggregateLevels([entry(20600, 10)]); // 0.0206 → 0.021
+    expect(level?.price).toBe(21000);
+    expect((level?.price ?? 0) % PRICE_TICK).toBe(0);
+  });
+});
 
 describe("sharesFromDollars", () => {
   it("converts $50 at 0.65 to 76.923 shares (rounded down)", () => {
