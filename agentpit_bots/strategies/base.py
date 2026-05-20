@@ -1,4 +1,5 @@
 """Strategy abstract interface."""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -12,12 +13,12 @@ class MarketTokens:
     The runner builds this from the `markets` table (local CTF token IDs)
     plus the `polymarket_yes_token_id` upstream IDs used by the oracle.
     """
+
     market_id: int
-    yes_token_id: str       # local CTF id used in /orders
-    no_token_id: str        # local CTF id used in /orders
+    yes_token_id: str  # local CTF id used in /orders
+    no_token_id: str  # local CTF id used in /orders
 
 
 class Strategy(ABC):
     @abstractmethod
-    def compute_desired_orders(self, **kwargs) -> list[DesiredOrder]:
-        ...
+    def compute_desired_orders(self, **kwargs) -> list[DesiredOrder]: ...

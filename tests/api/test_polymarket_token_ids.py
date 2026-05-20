@@ -10,7 +10,9 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 
 # Well-known Hardhat test private key (32 bytes, not a real secret).
-_TEST_ETH_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+_TEST_ETH_PRIVATE_KEY = (
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+)
 _TEST_ETH_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 
@@ -20,7 +22,9 @@ def _make_db() -> sqlite3.Connection:
     return conn
 
 
-def _insert_user(conn: sqlite3.Connection, user_id: str = "u1", api_key: str = "ak") -> None:
+def _insert_user(
+    conn: sqlite3.Connection, user_id: str = "u1", api_key: str = "ak"
+) -> None:
     conn.execute(
         "INSERT INTO users (USER_ID, EMAIL, PASSWORD_HASH, ETH_ADDRESS, "
         "ETH_PRIVATE_KEY, API_KEY, CREATED_AT) VALUES "
@@ -99,5 +103,3 @@ def test_create_market_round_trips_upstream_token_ids():
     assert fetched is not None
     assert fetched.polymarket_yes_token_id == "111"
     assert fetched.polymarket_no_token_id == "222"
-
-

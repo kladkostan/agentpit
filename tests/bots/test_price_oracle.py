@@ -1,4 +1,5 @@
 """PriceOracle: batched + cached + tolerant of upstream failure."""
+
 import pytest
 
 from agentpit_bots.price_oracle import PriceOracle
@@ -50,7 +51,7 @@ def test_refresh_failure_keeps_previous_snapshot(fake_clob):
     oracle = PriceOracle(clob=fake_clob)
     oracle.refresh(["t1"])
     fake_clob.raise_next = True
-    snap = oracle.refresh(["t1"])   # second call raises; oracle swallows
+    snap = oracle.refresh(["t1"])  # second call raises; oracle swallows
     assert snap.midpoint("t1") == 0.5
     assert snap.is_stale("t1", stale_after_sec=10**9) is False  # within window
 

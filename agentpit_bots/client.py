@@ -3,6 +3,7 @@
 The runner instantiates one of these and shares it across bots — auth
 tokens are per-bot and passed per-call rather than stored on the client.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -60,14 +61,24 @@ class AgentpitClient:
     # --- orders ---------------------------------------------------------
 
     def place_order(
-        self, *, token: str, market_id: int, outcome: str, side: str,
-        price: str, size: int,
+        self,
+        *,
+        token: str,
+        market_id: int,
+        outcome: str,
+        side: str,
+        price: str,
+        size: int,
     ) -> dict[str, Any]:
         return self._post(
             "/orders",
             body={
-                "market_id": market_id, "outcome": outcome, "side": side,
-                "price": price, "size": size, "order_type": "GTC",
+                "market_id": market_id,
+                "outcome": outcome,
+                "side": side,
+                "price": price,
+                "size": size,
+                "order_type": "GTC",
                 "expiration": 0,
             },
             token=token,
@@ -101,7 +112,8 @@ class AgentpitClient:
     ) -> dict[str, Any]:
         return self._post(
             f"/markets/{market_id}/split_position",
-            body={"amount": amount}, token=token,
+            body={"amount": amount},
+            token=token,
         )
 
     def merge_positions(
@@ -109,7 +121,8 @@ class AgentpitClient:
     ) -> dict[str, Any]:
         return self._post(
             f"/markets/{market_id}/merge_positions",
-            body={"amount": amount}, token=token,
+            body={"amount": amount},
+            token=token,
         )
 
     # --- admin ----------------------------------------------------------
@@ -126,7 +139,9 @@ class AgentpitClient:
     # --- low-level ------------------------------------------------------
 
     def _post(self, path, *, body=None, token=None, extra_headers=None):
-        return self._call("POST", path, body=body, token=token, extra_headers=extra_headers)
+        return self._call(
+            "POST", path, body=body, token=token, extra_headers=extra_headers
+        )
 
     def _get(self, path, *, token=None):
         return self._call("GET", path, token=token)
@@ -143,8 +158,11 @@ class AgentpitClient:
         if extra_headers:
             headers.update(extra_headers)
         resp = self._session.request(
-            method, self._base + path,
-            json=body, headers=headers, timeout=self._timeout,
+            method,
+            self._base + path,
+            json=body,
+            headers=headers,
+            timeout=self._timeout,
         )
         if resp.status_code >= 400:
             raise RuntimeError(

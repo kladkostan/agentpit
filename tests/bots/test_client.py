@@ -3,6 +3,7 @@
 We don't use a real network — use a fake `requests`-like session that
 records calls.
 """
+
 import json
 
 import pytest
@@ -40,10 +41,13 @@ def session():
 
 
 def test_register_persists_and_returns_creds(session):
-    session.next_response = FakeResponse(200, {
-        "access_token": "tok-abc",
-        "user": {"eth_address": "0xDEAD"},
-    })
+    session.next_response = FakeResponse(
+        200,
+        {
+            "access_token": "tok-abc",
+            "user": {"eth_address": "0xDEAD"},
+        },
+    )
     c = AgentpitClient(base_url="http://x", session=session)
     creds = c.register(email="bot@x", password="hunter22hunter22")
     assert creds.token == "tok-abc"
@@ -55,22 +59,35 @@ def test_register_persists_and_returns_creds(session):
 
 
 def test_place_order_includes_bearer_token(session):
-    session.next_response = FakeResponse(200, {
-        "success": True, "orderID": "0x1", "status": "live",
-        "filledSize": "0", "remainingSize": "100",
-    })
+    session.next_response = FakeResponse(
+        200,
+        {
+            "success": True,
+            "orderID": "0x1",
+            "status": "live",
+            "filledSize": "0",
+            "remainingSize": "100",
+        },
+    )
     c = AgentpitClient(base_url="http://x", session=session)
     c.place_order(
         token="tok-abc",
-        market_id=1, outcome="Yes", side="BUY",
-        price="0.5", size=100_000_000,
+        market_id=1,
+        outcome="Yes",
+        side="BUY",
+        price="0.5",
+        size=100_000_000,
     )
     method, url, body, headers = session.calls[0]
     assert method == "POST"
     assert url == "http://x/orders"
     assert body == {
-        "market_id": 1, "outcome": "Yes", "side": "BUY",
-        "price": "0.5", "size": 100_000_000, "order_type": "GTC",
+        "market_id": 1,
+        "outcome": "Yes",
+        "side": "BUY",
+        "price": "0.5",
+        "size": 100_000_000,
+        "order_type": "GTC",
         "expiration": 0,
     }
     assert headers["Authorization"] == "Bearer tok-abc"

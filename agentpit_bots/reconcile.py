@@ -3,6 +3,7 @@
 Pure function — no IO. The caller turns the returned cancels and creates
 into REST calls.
 """
+
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -10,9 +11,9 @@ from typing import Iterable
 @dataclass(frozen=True)
 class LiveOrder:
     order_id: str
-    side: str            # "BUY" | "SELL"
+    side: str  # "BUY" | "SELL"
     token_id: str
-    price_int: int       # price scaled by 10^6
+    price_int: int  # price scaled by 10^6
     remaining_amount: int
 
 
@@ -40,12 +41,9 @@ def reconcile(
     """
     live_list = list(live)
     desired_list = list(desired)
-    desired_keys = {
-        _key(d.side, d.token_id, d.price_int, d.size) for d in desired_list
-    }
+    desired_keys = {_key(d.side, d.token_id, d.price_int, d.size) for d in desired_list}
     live_keys = {
-        _key(l.side, l.token_id, l.price_int, l.remaining_amount)
-        for l in live_list
+        _key(l.side, l.token_id, l.price_int, l.remaining_amount) for l in live_list
     }
     cancels = [
         l.order_id
@@ -53,7 +51,8 @@ def reconcile(
         if _key(l.side, l.token_id, l.price_int, l.remaining_amount) not in desired_keys
     ]
     creates = [
-        d for d in desired_list
+        d
+        for d in desired_list
         if _key(d.side, d.token_id, d.price_int, d.size) not in live_keys
     ]
     return cancels, creates

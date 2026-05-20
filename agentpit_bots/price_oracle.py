@@ -5,6 +5,7 @@ fetch per token in an in-memory snapshot; on upstream failure, returns
 the stale snapshot rather than raising — callers check ``is_stale`` to
 decide whether to act.
 """
+
 from __future__ import annotations
 
 import logging
@@ -69,7 +70,8 @@ class PriceOracle:
         except Exception:
             log.warning(
                 "oracle_fetch_failed tokens=%d serving_stale=%d",
-                len(token_id_list), len(self._snap.data),
+                len(token_id_list),
+                len(self._snap.data),
             )
             return self._snap
         now = self._now()

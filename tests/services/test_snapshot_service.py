@@ -76,7 +76,13 @@ def _seed_resting_order(
         conn.execute(
             "INSERT INTO orders (ORDER_ID, TOKEN_ID, SIDE, PRICE, STATUS) "
             "VALUES (?, ?, ?, ?, ?)",
-            (f"o-{token_id}-{side}-{price_micro_usd}", token_id, side, price_micro_usd, status),
+            (
+                f"o-{token_id}-{side}-{price_micro_usd}",
+                token_id,
+                side,
+                price_micro_usd,
+                status,
+            ),
         )
 
 
@@ -119,10 +125,18 @@ def test_take_snapshot_uses_midprice_of_best_bid_and_best_ask(db_session):
     market = _seed_market(db_session, question="A?", cond_id=_hex32("a"))
     yes_token = market.erc1155_tokens[0][0]
     # best bid = 480_000 (highest), best ask = 520_000 (lowest)
-    _seed_resting_order(db_session, token_id=yes_token, side="BUY", price_micro_usd=400_000)
-    _seed_resting_order(db_session, token_id=yes_token, side="BUY", price_micro_usd=480_000)
-    _seed_resting_order(db_session, token_id=yes_token, side="SELL", price_micro_usd=520_000)
-    _seed_resting_order(db_session, token_id=yes_token, side="SELL", price_micro_usd=600_000)
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="BUY", price_micro_usd=400_000
+    )
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="BUY", price_micro_usd=480_000
+    )
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="SELL", price_micro_usd=520_000
+    )
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="SELL", price_micro_usd=600_000
+    )
 
     SnapshotService(db_session).take_snapshot()
 
@@ -133,7 +147,9 @@ def test_take_snapshot_uses_midprice_of_best_bid_and_best_ask(db_session):
 def test_take_snapshot_uses_one_sided_price_when_only_asks_resting(db_session):
     market = _seed_market(db_session, question="A?", cond_id=_hex32("a"))
     yes_token = market.erc1155_tokens[0][0]
-    _seed_resting_order(db_session, token_id=yes_token, side="SELL", price_micro_usd=700_000)
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="SELL", price_micro_usd=700_000
+    )
 
     SnapshotService(db_session).take_snapshot()
 
@@ -144,7 +160,9 @@ def test_take_snapshot_uses_one_sided_price_when_only_asks_resting(db_session):
 def test_take_snapshot_uses_one_sided_price_when_only_bids_resting(db_session):
     market = _seed_market(db_session, question="A?", cond_id=_hex32("a"))
     yes_token = market.erc1155_tokens[0][0]
-    _seed_resting_order(db_session, token_id=yes_token, side="BUY", price_micro_usd=300_000)
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="BUY", price_micro_usd=300_000
+    )
 
     SnapshotService(db_session).take_snapshot()
 
@@ -166,7 +184,11 @@ def test_take_snapshot_skips_non_live_orders(db_session):
     market = _seed_market(db_session, question="A?", cond_id=_hex32("a"))
     yes_token = market.erc1155_tokens[0][0]
     _seed_resting_order(
-        db_session, token_id=yes_token, side="BUY", price_micro_usd=500_000, status="matched"
+        db_session,
+        token_id=yes_token,
+        side="BUY",
+        price_micro_usd=500_000,
+        status="matched",
     )
 
     inserted = SnapshotService(db_session).take_snapshot()
@@ -179,8 +201,12 @@ def test_take_snapshot_skips_draft_markets(db_session):
         db_session, question="A?", cond_id=_hex32("a"), state=MarketState.DRAFT
     )
     yes_token = market.erc1155_tokens[0][0]
-    _seed_resting_order(db_session, token_id=yes_token, side="BUY", price_micro_usd=500_000)
-    _seed_resting_order(db_session, token_id=yes_token, side="SELL", price_micro_usd=520_000)
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="BUY", price_micro_usd=500_000
+    )
+    _seed_resting_order(
+        db_session, token_id=yes_token, side="SELL", price_micro_usd=520_000
+    )
 
     inserted = SnapshotService(db_session).take_snapshot()
 
@@ -195,8 +221,12 @@ def test_take_snapshot_samples_yes_token_only(db_session):
         market.erc1155_tokens[1][0],
     )
     # Resting orders on the NO side only — YES book is empty.
-    _seed_resting_order(db_session, token_id=no_token, side="BUY", price_micro_usd=200_000)
-    _seed_resting_order(db_session, token_id=no_token, side="SELL", price_micro_usd=300_000)
+    _seed_resting_order(
+        db_session, token_id=no_token, side="BUY", price_micro_usd=200_000
+    )
+    _seed_resting_order(
+        db_session, token_id=no_token, side="SELL", price_micro_usd=300_000
+    )
 
     inserted = SnapshotService(db_session).take_snapshot()
 
@@ -211,13 +241,22 @@ def test_take_snapshot_writes_each_active_market_independently(db_session):
     m_a = _seed_market(db_session, question="A?", cond_id=_hex32("a"))
     m_b = _seed_market(db_session, question="B?", cond_id=_hex32("b"))
     _seed_resting_order(
-        db_session, token_id=m_a.erc1155_tokens[0][0], side="BUY", price_micro_usd=400_000
+        db_session,
+        token_id=m_a.erc1155_tokens[0][0],
+        side="BUY",
+        price_micro_usd=400_000,
     )
     _seed_resting_order(
-        db_session, token_id=m_a.erc1155_tokens[0][0], side="SELL", price_micro_usd=500_000
+        db_session,
+        token_id=m_a.erc1155_tokens[0][0],
+        side="SELL",
+        price_micro_usd=500_000,
     )
     _seed_resting_order(
-        db_session, token_id=m_b.erc1155_tokens[0][0], side="BUY", price_micro_usd=100_000
+        db_session,
+        token_id=m_b.erc1155_tokens[0][0],
+        side="BUY",
+        price_micro_usd=100_000,
     )
 
     inserted = SnapshotService(db_session).take_snapshot()
