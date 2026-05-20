@@ -11,7 +11,10 @@ Usage:
 
 Defaults:
     --days: 30
-    --mean-cents: derived from the most recent trade if any, else 50
+    --mean-cents: the live order-book mid (the value the UI legend shows) if
+                  the book has resting orders, else the most recent trade,
+                  else 50. The final sample is pinned to this value so the
+                  chart's end dot lines up with the legend.
     --points-per-day: 24 (one point/hour)
     --db: $AGENTPIT_DB_PATH (or "agentpit.db" in cwd)
 """
@@ -59,6 +62,30 @@ def _resolve_yes_token(conn: sqlite3.Connection, slug: str) -> tuple[int, str, s
     if not tokens or not tokens[0]:
         sys.exit(f"market {row['MARKET_ID']} has no ERC1155 tokens")
     return int(row["MARKET_ID"]), str(tokens[0][0]), str(row["QUESTION"])
+
+
+def _orderbook_mid_micro(conn: sqlite3.Connection, yes_token: str) -> int | None:
+    """Mid-price (micro-USDC) of the live YES book — the same number the UI
+    legend renders. Mirrors the frontend `computeMid`: the midpoint of the
+    best bid and best ask, falling back to whichever side exists.
+    """
+    bid = conn.execute(
+        "SELECT MAX(PRICE) FROM orders "
+        "WHERE TOKEN_ID = ? AND SIDE = 'BUY' AND STATUS = 'live'",
+        (yes_token,),
+    ).fetchone()[0]
+    ask = conn.execute(
+        "SELECT MIN(PRICE) FROM orders "
+        "WHERE TOKEN_ID = ? AND SIDE = 'SELL' AND STATUS = 'live'",
+        (yes_token,),
+    ).fetchone()[0]
+    if bid is not None and ask is not None:
+        return (int(bid) + int(ask)) // 2
+    if ask is not None:
+        return int(ask)
+    if bid is not None:
+        return int(bid)
+    return None
 
 
 def _generate_walk(
@@ -114,19 +141,22 @@ def main() -> int:
     conn = sqlite3.connect(args.db)
     try:
         market_id, yes_token, question = _resolve_yes_token(conn, args.slug)
-        if args.mean_cents is None:
-            # Best-effort: use the most recent trade for this token if present.
-            row = conn.execute(
-                "SELECT PRICE FROM trades WHERE ASSET_ID = ? "
-                "ORDER BY MATCH_TIME DESC LIMIT 1",
-                (yes_token,),
-            ).fetchone()
-            if row is not None:
-                args.mean_cents = round(int(row[0]) / 10_000)
-            else:
-                args.mean_cents = 50
+        if args.mean_cents is not None:
+            mean_micro = args.mean_cents * 10_000
+        else:
+            # Anchor to the live order-book mid so the walk — and crucially its
+            # final point — line up with the price the UI legend shows (the
+            # legend reads the order book; this chart reads `trades`). Fall back
+            # to the most recent trade, then a coin-flip 50¢.
+            mean_micro = _orderbook_mid_micro(conn, yes_token)
+            if mean_micro is None:
+                row = conn.execute(
+                    "SELECT PRICE FROM trades WHERE ASSET_ID = ? "
+                    "ORDER BY MATCH_TIME DESC LIMIT 1",
+                    (yes_token,),
+                ).fetchone()
+                mean_micro = int(row[0]) if row is not None else 500_000
 
-        mean_micro = args.mean_cents * 10_000
         vol_micro = args.vol_cents * 10_000
         total_points = args.days * args.points_per_day
         interval_s = (args.days * 86_400) // max(1, total_points)
@@ -140,6 +170,12 @@ def main() -> int:
             mean_micro=mean_micro,
             vol_micro=vol_micro,
         )
+        # Pin the final sample exactly to the mid so the chart's end dot equals
+        # the legend's current price — otherwise the last random shock leaves
+        # them visibly out of sync (and can even flip the ranking).
+        if walk:
+            anchor = max(_PRICE_MIN, min(_PRICE_MAX, mean_micro))
+            walk[-1] = (walk[-1][0], anchor)
 
         rows = [
             (
@@ -161,6 +197,13 @@ def main() -> int:
             for (t, p) in walk
         ]
 
+        # Idempotent re-seed: drop any prior synthetic rows for this token so
+        # repeated runs replace the walk instead of stacking duplicates.
+        conn.execute(
+            "DELETE FROM trades WHERE ASSET_ID = ? AND TRADE_ID LIKE 'fake-%'",
+            (yes_token,),
+        )
+
         conn.executemany(
             "INSERT INTO trades ("
             "  TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID, "
@@ -174,7 +217,7 @@ def main() -> int:
         print(
             f"Seeded {len(rows)} fake trades for market {market_id} "
             f"({question!r}) over {args.days} days "
-            f"around {args.mean_cents}¢ ± {args.vol_cents}¢ per step."
+            f"ending at {mean_micro / 10_000:.2f}¢ ± {args.vol_cents}¢ per step."
         )
     finally:
         conn.close()
