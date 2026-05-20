@@ -133,6 +133,9 @@ dmypy.json
 # Claude
 .claude
 
+# macOS Finder metadata
+.DS_Store
+
 # Playwright MCP
 .playwright-mcp
 
