@@ -102,13 +102,6 @@ export function EventDetailPage() {
 
   return (
     <section className="space-y-10 animate-fade-up">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        ← All events
-      </Link>
-
       <header className="space-y-5 pb-8">
         <div className="flex items-center gap-2.5 font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
           <span
