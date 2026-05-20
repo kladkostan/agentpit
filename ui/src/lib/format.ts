@@ -36,3 +36,15 @@ export function formatVolume(usd: number): string {
   if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
   return `$${Math.round(usd)}`;
 }
+
+/** Format a YES mid-price (dollars in [0, 1]) as a whole-percent probability
+ *  label, without the "%" sign. A non-zero probability below 1% renders as
+ *  "<1" rather than rounding down to a misleading "0"; a null mid renders as
+ *  an em dash. Call sites append their own "%". */
+export function formatProbabilityPct(mid: number | null): string {
+  if (mid === null) return "—";
+  const pct = mid * 100;
+  if (pct <= 0) return "0";
+  if (pct < 1) return "<1";
+  return String(Math.round(pct));
+}
