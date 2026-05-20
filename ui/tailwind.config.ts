@@ -54,11 +54,10 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        // Two-family system: Instrument Serif (display) + Instrument Sans
-        // (UI/data). Mono is intentionally aliased to the same sans family
-        // so the historic `font-mono` utility keeps working visually while
-        // we drop the third typeface — tabular alignment is handled by
-        // `tabular-nums`, not by a separate monospace font.
+        // Single-family system: Instrument Sans for everything. Mono is
+        // intentionally aliased to the same sans family so the historic
+        // `font-mono` utility keeps working visually — tabular alignment is
+        // handled by `tabular-nums`, not by a separate monospace font.
         sans: [
           '"Instrument Sans"',
           "ui-sans-serif",
@@ -72,13 +71,6 @@ export default {
           "ui-sans-serif",
           "system-ui",
           "sans-serif",
-        ],
-        display: [
-          '"Instrument Serif"',
-          "ui-serif",
-          "Georgia",
-          "Cambria",
-          "serif",
         ],
       },
       keyframes: {
