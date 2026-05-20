@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { getSparkline } from "@/api/markets";
-import { GRIDLINE_Y_PCT, MultiSparkline, PAD_Y } from "@/components/MultiSparkline";
+import { MultiSparkline, PAD_Y } from "@/components/MultiSparkline";
 import type { MultiSparklineSeries } from "@/components/MultiSparkline";
+import { niceChartScale } from "@/lib/chartGeometry";
 import { CHART_PALETTE } from "@/lib/chartPalette";
 import { pickChartSeries } from "@/lib/eventChartSeries";
 import { formatShortDate } from "@/lib/format";
@@ -14,14 +15,12 @@ interface EventChartProps {
   midByMarket: ReadonlyMap<number, number>;
 }
 
-/** Y-axis labels read top → bottom, with the interior gridlines flanked by
- *  the 0 % / 100 % chart edges. Derived from the gridlines so the two stay
- *  in sync if `GRIDLINE_Y_PCT` ever changes. */
-const Y_AXIS_LABELS = [
-  "100%",
-  ...[...GRIDLINE_Y_PCT].reverse().map((p) => `${p}%`),
-  "0%",
-];
+/** Format a domain fraction (0–1) as an axis label, dropping a trailing
+ *  ".0" so clean steps read as "25%" rather than "25.0%". */
+function formatAxisPct(fraction: number): string {
+  const pct = Math.round(fraction * 1000) / 10;
+  return `${Number.isInteger(pct) ? pct : pct.toFixed(1)}%`;
+}
 
 /** How many time markers to spread across the X axis. */
 const X_AXIS_TICKS = 5;
@@ -92,6 +91,25 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
     [hasData, series],
   );
 
+  // Zoom the Y axis onto the data: find the peak price across every series
+  // and snap it up to a clean round bound (e.g. a 22.7% peak → a 0–25%
+  // window) so low-probability outcomes aren't squashed against the floor.
+  const scale = useMemo(() => {
+    let peak = 0;
+    for (const s of series) {
+      for (const p of s.points) if (p.p > peak) peak = p.p;
+    }
+    return niceChartScale(peak / 1_000_000);
+  }, [series]);
+
+  // Domain top in micro-USDC, interior gridlines + top→bottom axis labels,
+  // all derived from the same ticks so they never drift apart.
+  const maxP = scale.max * 1_000_000;
+  const gridRatios = scale.ticks
+    .slice(1, -1)
+    .map((t) => t / scale.max);
+  const yLabels = [...scale.ticks].reverse().map(formatAxisPct);
+
   return (
     <section className="rounded-2xl border bg-card/40 px-5 py-5">
       <header className="mb-4 flex items-baseline justify-between gap-4">
@@ -138,12 +156,17 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
               style={{ paddingTop: PAD_Y, paddingBottom: PAD_Y }}
               aria-hidden
             >
-              {Y_AXIS_LABELS.map((l) => (
-                <li key={l}>{l}</li>
+              {yLabels.map((l, i) => (
+                <li key={`${l}-${i}`}>{l}</li>
               ))}
             </ol>
             <div className="flex-1">
-              <MultiSparkline series={series} height={CHART_HEIGHT} />
+              <MultiSparkline
+                series={series}
+                height={CHART_HEIGHT}
+                maxP={maxP}
+                gridRatios={gridRatios}
+              />
             </div>
           </div>
           <ol

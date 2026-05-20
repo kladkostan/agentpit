@@ -29,10 +29,68 @@ describe("smoothPath", () => {
   });
 });
 
-import { projectToViewBox } from "./chartGeometry";
+import { niceChartScale, projectToViewBox } from "./chartGeometry";
+
+describe("niceChartScale", () => {
+  it("rounds a 0–0.227 data range up to a focused 0–0.25 window", () => {
+    // The 2026 World Cup favorites top out around 22.7% — the axis should
+    // zoom from the default 0–100% down to a tight 0–25%.
+    const { max, ticks } = niceChartScale(0.227);
+    expect(max).toBeCloseTo(0.25, 6);
+    expect(ticks.map((t) => Math.round(t * 100))).toEqual([0, 5, 10, 15, 20, 25]);
+  });
+
+  it("keeps the floor at 0 and the max as the top tick", () => {
+    const { max, ticks } = niceChartScale(0.08);
+    expect(ticks[0]).toBe(0);
+    expect(ticks[ticks.length - 1]).toBeCloseTo(max, 6);
+  });
+
+  it("scales a mid-range dataset to clean round bounds", () => {
+    const { max, ticks } = niceChartScale(0.6);
+    expect(max).toBeCloseTo(0.6, 6);
+    expect(ticks.map((t) => Math.round(t * 100))).toEqual([0, 20, 40, 60]);
+  });
+
+  it("never exceeds a full 0–100% window", () => {
+    const { max, ticks } = niceChartScale(0.97);
+    expect(max).toBeCloseTo(1, 6);
+    expect(ticks[ticks.length - 1]).toBeCloseTo(1, 6);
+  });
+
+  it("falls back to a full 0–100% window for degenerate input", () => {
+    for (const bad of [0, -0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const { max, ticks } = niceChartScale(bad);
+      expect(max).toBe(1);
+      expect(ticks).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    }
+  });
+});
 
 describe("projectToViewBox", () => {
   const dims = { width: 100, height: 50, padX: 0, padY: 0 };
+
+  it("uses an explicit fixedMax to focus the vertical domain", () => {
+    // With the domain capped at 250_000 (25%), a 250_000 price sits at the
+    // top and 125_000 at the vertical center.
+    const out = projectToViewBox(
+      [
+        { t: 0, p: 0 },
+        { t: 1, p: 125_000 },
+        { t: 2, p: 250_000 },
+      ],
+      { ...dims, fixedMax: 250_000 },
+    );
+    expect(out.map(([, y]) => y)).toEqual([50, 25, 0]);
+  });
+
+  it("clamps prices above fixedMax to the top edge", () => {
+    const out = projectToViewBox(
+      [{ t: 0, p: 900_000 }],
+      { ...dims, fixedMax: 250_000 },
+    );
+    expect(out[0]![1]).toBe(0);
+  });
 
   it("returns an empty array when given no samples", () => {
     expect(projectToViewBox([], dims)).toEqual([]);

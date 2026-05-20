@@ -14,11 +14,19 @@ interface MultiSparklineProps {
   /** Logical viewBox width — actual rendered width is controlled by CSS. */
   width?: number;
   height?: number;
+  /** Upper bound of the vertical domain, in micro-USDC. Defaults to a full
+   *  0–100% axis; pass a focused value to zoom onto low-probability data. */
+  maxP?: number;
+  /** Interior gridline positions as fractions of the domain (0–1). Defaults
+   *  to the quartile lines. The 0 and top edges are intentionally omitted. */
+  gridRatios?: ReadonlyArray<number>;
   className?: string;
 }
 
 /** Interior gridline positions, in % of the chart's height. */
 export const GRIDLINE_Y_PCT = [25, 50, 75] as const;
+/** Default interior gridlines as domain fractions (0–1). */
+const DEFAULT_GRID_RATIOS = GRIDLINE_Y_PCT.map((p) => p / 100);
 /** Inner-padding around the projected data area, in viewBox units. */
 export const PAD_X = 4;
 export const PAD_Y = 6;
@@ -27,6 +35,8 @@ export function MultiSparkline({
   series,
   width = 600,
   height = 180,
+  maxP = 1_000_000,
+  gridRatios = DEFAULT_GRID_RATIOS,
   className,
 }: MultiSparklineProps) {
   const projected = useMemo(
@@ -38,9 +48,10 @@ export function MultiSparkline({
           height,
           padX: PAD_X,
           padY: PAD_Y,
+          fixedMax: maxP,
         }),
       })),
-    [series, width, height],
+    [series, width, height, maxP],
   );
 
   // Gridlines align with the padded data area, not the raw viewBox edges,
@@ -56,11 +67,11 @@ export function MultiSparkline({
       aria-hidden
     >
       {/* Gridlines */}
-      {GRIDLINE_Y_PCT.map((pct) => {
-        const y = PAD_Y + innerH - (pct / 100) * innerH;
+      {gridRatios.map((ratio) => {
+        const y = PAD_Y + innerH - ratio * innerH;
         return (
           <line
-            key={pct}
+            key={ratio}
             x1={0}
             x2={width}
             y1={y}
