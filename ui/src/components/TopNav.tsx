@@ -10,7 +10,7 @@ export function TopNav() {
     <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
       <div className="container flex h-14 items-center gap-6">
         <NavLink to="/" className="flex shrink-0 items-center gap-2">
-          <span className="inline-block size-6 rounded-full bg-primary" />
+          <AgentLogo />
           <span className="text-base font-semibold tracking-tight">
             AgentPit
           </span>
@@ -49,6 +49,22 @@ function SearchBar() {
         className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
       />
     </div>
+  );
+}
+
+function AgentLogo() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 25 25"
+      fill="currentColor"
+      className="size-6 shrink-0 text-primary"
+      aria-hidden
+    >
+      <ellipse cx="12.42" cy="22" rx="2.57" ry="2.73" />
+      <path d="M13.18,1.04l-.19-.12c-.63-.39-1.44-.16-1.81.51L.6,20.9c-.37.67-.15,1.53.48,1.92l.19.12c.63.39,1.44.16,1.81-.51L13.67,2.95c.37-.67.15-1.53-.48-1.92Z" />
+      <path d="M11.66,1.04l.19-.12c.63-.39,1.44-.16,1.81.51l10.59,19.46c.37.67.15,1.53-.48,1.92l-.19.12c-.63.39-1.44.16-1.81-.51L11.18,2.95c-.37-.67-.15-1.53.48-1.92Z" />
+    </svg>
   );
 }
 
