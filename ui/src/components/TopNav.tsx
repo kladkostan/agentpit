@@ -1,10 +1,41 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { AuthButtons } from "@/components/auth/AuthButtons";
+import { useAuth } from "@/auth/useAuth";
+import { getAvatarStyle } from "@/lib/avatarColor";
 import { useSearch } from "@/lib/searchContext";
+import { useState } from "react";
+import { Menu, MenuItem, IconButton } from "@mui/material";
+import { LogOut, User } from "lucide-react";
 
 export function TopNav() {
+  const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { user, logout } = useAuth();
   const showSearch = pathname === "/" || pathname.startsWith("/events/");
+  const avatarStyle = user
+    ? getAvatarStyle(user.eth_address || user.email)
+    : undefined;
+
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const open = Boolean(anchorEl);
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    handleMenuClose();
+    logout();
+  };
+
+  const handleProfile = () => {
+    handleMenuClose();
+    navigate("/profile");
+  };
 
   return (
     <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
@@ -16,7 +47,44 @@ export function TopNav() {
           </span>
         </NavLink>
         {showSearch ? <SearchBar /> : null}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          {user ? (
+            <>
+              <IconButton
+                aria-controls={open ? "profile-menu" : undefined}
+                aria-haspopup="true"
+                aria-expanded={open ? "true" : undefined}
+                onClick={handleMenuOpen}
+              >
+                <div
+                  className="flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
+                  style={avatarStyle}
+                >
+                  {user.email.slice(0, 1).toUpperCase()}
+                </div>
+              </IconButton>
+              <Menu
+                id="profile-menu"
+                anchorEl={anchorEl}
+                open={open}
+                onClose={handleMenuClose}
+                anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+                transformOrigin={{ vertical: "top", horizontal: "center" }}
+                slotProps={{
+                  paper: {
+                    sx: { width: 200, borderRadius: 3, mt: 1 },
+                  },
+                }}
+              >
+                <MenuItem onClick={handleProfile}>
+                  <User className="mr-2 size-4" /> Profile
+                </MenuItem>
+                <MenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 size-4" /> Logout
+                </MenuItem>
+              </Menu>
+            </>
+          ) : null}
           <AuthButtons />
         </div>
       </div>

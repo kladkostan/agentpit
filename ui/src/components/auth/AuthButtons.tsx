@@ -3,20 +3,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/auth/useAuth";
 
 export function AuthButtons() {
-  const { user, isLoading, openLogin, openSignup, logout } = useAuth();
+  const { user, isLoading, openLogin, openSignup } = useAuth();
 
   if (isLoading) {
     return <Skeleton className="h-9 w-32" />;
   }
 
   if (user) {
-    return (
-      <Button variant="ghost" size="sm" onClick={logout}>
-        Logout
-      </Button>
-    );
+    return null;
   }
-
   return (
     <div className="flex items-center gap-2">
       <Button variant="ghost" size="sm" onClick={openLogin}>
