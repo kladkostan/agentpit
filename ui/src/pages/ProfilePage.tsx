@@ -5,7 +5,6 @@ import {
     ArrowUpRight,
     Search,
     Upload,
-    Wallet,
 } from "lucide-react";
 import { usePortfolio } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
@@ -82,7 +81,8 @@ export function ProfilePage() {
     if (!user) return <Navigate to="/" replace />;
 
     return (
-        <section className="mx-auto max-w-6xl space-y-5">
+        <section className="mx-auto max-w-5xl space-y-6">
+            <h1 className="text-3xl font-semibold tracking-tight">Profile</h1>
             <div className="grid gap-3 lg:grid-cols-2">
                 <Card className="rounded-2xl border-border/80">
                     <CardContent className="p-4 sm:p-5">
@@ -120,15 +120,6 @@ export function ProfilePage() {
                             <TopMetric label="Predictions" value={positions.length.toString()} />
                         </div>
 
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                            <Button className="h-10 rounded-md">
-                                <Wallet className="mr-2 size-4" />
-                                Deposit
-                            </Button>
-                            <Button variant="secondary" className="h-10 rounded-md">
-                                Withdraw
-                            </Button>
-                        </div>
                     </CardContent>
                 </Card>
 

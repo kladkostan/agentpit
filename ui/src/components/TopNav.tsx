@@ -15,6 +15,7 @@ export function TopNav() {
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
     : undefined;
+  const avatarLabelSource = user?.handle || user?.email || "?";
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
@@ -65,7 +66,7 @@ export function TopNav() {
                   className="flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
                   style={avatarStyle}
                 >
-                  {user.email.slice(0, 1).toUpperCase()}
+                  {avatarLabelSource.slice(0, 1).toUpperCase()}
                 </div>
               </IconButton>
               <Menu
