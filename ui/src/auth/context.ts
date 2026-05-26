@@ -5,6 +5,7 @@ export type DialogMode = "login" | "signup";
 
 export type AuthValue = {
   user: UserPublic | null;
+  setUser: (user: UserPublic | null) => void;
   accessToken: string | null;
   isLoading: boolean;
   openLogin: () => void;

@@ -38,3 +38,23 @@ export function registerRequest(
 export function meRequest(): Promise<UserPublic> {
   return apiFetch<UserPublic>("/me");
 }
+
+export function updateHandleRequest(handle: string): Promise<UserPublic> {
+  return apiFetch<UserPublic>("/me", {
+    method: "PATCH",
+    body: JSON.stringify({ handle }),
+  });
+}
+
+export function changePasswordRequest(
+  currentPassword: string,
+  newPassword: string,
+): Promise<UserPublic> {
+  return apiFetch<UserPublic>("/me/password", {
+    method: "PATCH",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}

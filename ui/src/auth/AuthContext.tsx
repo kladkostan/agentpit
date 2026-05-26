@@ -142,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthValue>(
     () => ({
       user,
+      setUser,
       accessToken,
       isLoading,
       dialogOpen,
@@ -156,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [
       user,
+      setUser,
       accessToken,
       isLoading,
       dialogOpen,

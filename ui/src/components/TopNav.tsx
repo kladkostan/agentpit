@@ -5,7 +5,7 @@ import { getAvatarStyle } from "@/lib/avatarColor";
 import { useSearch } from "@/lib/searchContext";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { LogOut, User } from "lucide-react";
+import { LogOut, Settings, User } from "lucide-react";
 
 export function TopNav() {
   const navigate = useNavigate();
@@ -35,6 +35,11 @@ export function TopNav() {
   const handleProfile = () => {
     handleMenuClose();
     navigate("/profile");
+  };
+
+  const handleSettings = () => {
+    handleMenuClose();
+    navigate("/settings");
   };
 
   return (
@@ -78,6 +83,9 @@ export function TopNav() {
               >
                 <MenuItem onClick={handleProfile}>
                   <User className="mr-2 size-4" /> Profile
+                </MenuItem>
+                <MenuItem onClick={handleSettings}>
+                  <Settings className="mr-2 size-4" /> Settings
                 </MenuItem>
                 <MenuItem onClick={handleLogout}>
                   <LogOut className="mr-2 size-4" /> Logout
