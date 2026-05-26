@@ -20,7 +20,6 @@ export default function App() {
             <Route path="/markets/:id" element={<MarketDetailPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/porfile" element={<Navigate to="/profile" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
