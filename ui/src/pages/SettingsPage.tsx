@@ -4,6 +4,7 @@ import {
     KeyRound,
     Lock,
     Mail,
+    User,
     X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +15,6 @@ import {
 } from "@/api/auth";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/useAuth";
-import { getAvatarStyle } from "@/lib/avatarColor";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,6 @@ export function SettingsPage() {
                 <Card className="rounded-xl">
                     <CardContent className="p-0">
                         <UsernameRow user={user} onUpdated={setUser} />
-                        {/* Email row */}
                         <div className="flex items-center gap-4 border-b p-4">
                             <Mail className="size-5 text-muted-foreground" />
                             <div className="flex-1">
@@ -64,9 +63,7 @@ function UsernameRow({ user, onUpdated }: UsernameRowProps) {
     const [editing, setEditing] = useState(false);
     const [error, setError] = useState("");
     const [saving, setSaving] = useState(false);
-    const avatarStyle = getAvatarStyle(user.eth_address || user.email);
     const displayName = user.handle || user.user_id;
-    const avatarLabelSource = user.handle || user.email || user.user_id;
     const [value, setValue] = useState(displayName);
 
     const startEdit = () => {
@@ -119,13 +116,7 @@ function UsernameRow({ user, onUpdated }: UsernameRowProps) {
     return (
         <div className="border-b p-4">
             <div className="flex items-center gap-4">
-                <div
-                    className="flex size-9 items-center justify-center rounded-full text-xs font-semibold text-white"
-                    style={avatarStyle}
-                    aria-hidden
-                >
-                    {avatarLabelSource.slice(0, 1).toUpperCase()}
-                </div>
+                <User className="size-5 text-muted-foreground" aria-hidden />
                 <div className="flex-1 flex items-center justify-between gap-4">
                     <div>
                         <p className="text-sm font-medium">Username</p>
