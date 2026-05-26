@@ -3,9 +3,10 @@ import { AuthButtons } from "@/components/auth/AuthButtons";
 import { useAuth } from "@/auth/useAuth";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import { useSearch } from "@/lib/searchContext";
+import { getResolvedTheme, setTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { LogOut, Settings, User } from "lucide-react";
+import { LogOut, Moon, Settings, User } from "lucide-react";
 
 export function TopNav() {
   const navigate = useNavigate();
@@ -18,6 +19,9 @@ export function TopNav() {
   const avatarLabelSource = user?.handle || user?.email || "?";
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [isDarkMode, setIsDarkMode] = useState(
+    () => getResolvedTheme() === "dark",
+  );
   const open = Boolean(anchorEl);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -41,6 +45,44 @@ export function TopNav() {
   const handleSettings = () => {
     handleMenuClose();
     navigate("/settings");
+  };
+
+  const handleToggleDarkMode = () => {
+    const next = !isDarkMode;
+    setTheme(next ? "dark" : "light");
+    setIsDarkMode(next);
+  };
+
+  const menuPaperSx = {
+    width: 220,
+    borderRadius: 2.5,
+    mt: 1,
+    border: "1px solid hsl(var(--border) / 0.7)",
+    backgroundColor: "hsl(var(--popover))",
+    color: "hsl(var(--popover-foreground))",
+    boxShadow:
+      "0 16px 40px -20px hsl(var(--foreground) / 0.45), 0 2px 12px -4px hsl(var(--foreground) / 0.25)",
+    overflow: "hidden",
+  };
+
+  const menuItemSx = {
+    minHeight: 38,
+    borderRadius: 1.5,
+    px: 1.5,
+    py: 0.75,
+    fontSize: "0.875rem",
+    color: "hsl(var(--foreground))",
+    "&:hover": {
+      backgroundColor: "hsl(var(--muted))",
+    },
+  };
+
+  const logoutItemSx = {
+    ...menuItemSx,
+    color: "rgb(220 38 38)",
+    "&:hover": {
+      backgroundColor: "rgb(239 68 68 / 0.1)",
+    },
   };
 
   return (
@@ -78,17 +120,39 @@ export function TopNav() {
                 transformOrigin={{ vertical: "top", horizontal: "center" }}
                 slotProps={{
                   paper: {
-                    sx: { width: 200, borderRadius: 3, mt: 1 },
+                    sx: menuPaperSx,
+                  },
+                  list: {
+                    sx: { p: 0.75 },
                   },
                 }}
               >
-                <MenuItem onClick={handleProfile}>
+                <MenuItem onClick={handleProfile} sx={menuItemSx}>
                   <User className="mr-2 size-4" /> Profile
                 </MenuItem>
-                <MenuItem onClick={handleSettings}>
+                <MenuItem
+                  sx={menuItemSx}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleToggleDarkMode();
+                  }}
+                >
+                  <Moon className="mr-2 size-4" />
+                  <span className="mr-3">Dark mode</span>
+                  <span
+                    className={`ml-auto inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
+                    aria-hidden
+                  >
+                    <span
+                      className={`inline-block size-4 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-4" : "translate-x-0.5"}`}
+                    />
+                  </span>
+                </MenuItem>
+                <MenuItem onClick={handleSettings} sx={menuItemSx}>
                   <Settings className="mr-2 size-4" /> Settings
                 </MenuItem>
-                <MenuItem onClick={handleLogout}>
+                <MenuItem onClick={handleLogout} sx={logoutItemSx}>
                   <LogOut className="mr-2 size-4" /> Logout
                 </MenuItem>
               </Menu>

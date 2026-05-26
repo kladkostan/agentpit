@@ -84,9 +84,9 @@ export function ProfilePage() {
         <section className="mx-auto max-w-5xl space-y-6">
             <h1 className="text-3xl font-semibold tracking-tight">Profile</h1>
             <div className="grid gap-3 lg:grid-cols-2">
-                <Card className="rounded-2xl border-border/80">
-                    <CardContent className="p-4 sm:p-5">
-                        <div className="flex items-start justify-between gap-3">
+                <Card className="rounded-2xl border-border/80 h-full">
+                    <CardContent className="p-6 flex flex-col h-full justify-between">
+                        <div className="flex items-end gap-3">
                             <div className="flex min-w-0 items-center gap-3">
                                 <div
                                     className="flex size-14 shrink-0 items-center justify-center rounded-full text-lg font-semibold text-white"
@@ -105,12 +105,8 @@ export function ProfilePage() {
                                     </p>
                                 </div>
                             </div>
-                            <Button variant="ghost" size="sm" className="text-muted-foreground">
-                                <Upload className="size-4" />
-                            </Button>
                         </div>
-
-                        <div className="mt-4 grid grid-cols-3 divide-x rounded-lg border bg-muted/20">
+                        <div className="mt-6 grid grid-cols-3 divide-x rounded-lg border bg-muted/20">
                             <TopMetric
                                 label="Positions Value"
                                 value={USD.format(data?.usdc_balance ?? 0)}
@@ -119,38 +115,41 @@ export function ProfilePage() {
                             <TopMetric label="Biggest Win" value="-" />
                             <TopMetric label="Predictions" value={positions.length.toString()} />
                         </div>
-
                     </CardContent>
                 </Card>
 
-                <Card className="rounded-2xl border-border/80">
-                    <CardContent className="p-4 sm:p-5">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm text-sm text-muted-foreground">Profit/Loss</p>
-                            <div className="flex items-center gap-1 text-xs">
-                                {[
-                                    { key: "1D", active: true },
-                                    { key: "1W", active: false },
-                                    { key: "1M", active: false },
-                                    { key: "1Y", active: false },
-                                ].map((item) => (
-                                    <span
-                                        key={item.key}
-                                        className={[
-                                            "rounded-md px-2 py-1 font-medium",
-                                            item.active
-                                                ? "bg-primary text-primary-foreground"
-                                                : "text-muted-foreground",
-                                        ].join(" ")}
-                                    >
-                                        {item.key}
-                                    </span>
-                                ))}
+                <Card className="rounded-2xl border-border/80 h-full">
+                    <CardContent className="p-6 flex flex-col h-full justify-between">
+                        <div>
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm text-muted-foreground">Profit/Loss</p>
+                                <div className="flex items-center gap-1 text-xs">
+                                    {[
+                                        { key: "1D", active: true },
+                                        { key: "1W", active: false },
+                                        { key: "1M", active: false },
+                                        { key: "1Y", active: false },
+                                    ].map((item) => (
+                                        <span
+                                            key={item.key}
+                                            className={[
+                                                "rounded-md px-2 py-1 font-medium",
+                                                item.active
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "text-muted-foreground",
+                                            ].join(" ")}
+                                        >
+                                            {item.key}
+                                        </span>
+                                    ))}
+                                </div>
                             </div>
+                            <p className="mt-2 text-2xl font-semibold leading-none tracking-tight">$0.00</p>
+                            <p className="mt-1 text-sm text-muted-foreground">Past Day</p>
                         </div>
-                        <p className="mt-2 text-2xl font-semibold leading-none tracking-tight">$0.00</p>
-                        <p className="mt-1 text-sm text-muted-foreground">Past Day</p>
-                        <div className="mt-8 h-14 rounded-md bg-gradient-to-t from-blue-100 via-blue-50 to-transparent" />
+                        <div
+                            className="mt-6 h-14 rounded-md bg-gradient-to-t from-blue-100 via-blue-50 to-transparent dark:from-blue-950 dark:via-slate-900 dark:to-transparent"
+                        />
                     </CardContent>
                 </Card>
             </div>
