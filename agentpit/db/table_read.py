@@ -245,6 +245,14 @@ class TableRead:
         return row[0] if row else None
 
     @staticmethod
+    def get_password_hash_by_userid(db: sqlite3.Connection, user_id: str) -> str | None:
+        row = db.execute(
+            "SELECT PASSWORD_HASH FROM users WHERE USER_ID = ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        return row[0] if row else None
+
+    @staticmethod
     def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:
         row = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = ?",

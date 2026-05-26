@@ -38,6 +38,12 @@ class UserAlreadyExistsError(AlreadyExistsError):
         self.identifier = identifier
 
 
+class HandleAlreadyExistsError(AlreadyExistsError):
+    def __init__(self, handle: str):
+        super().__init__(f"Handle '{handle}' is already in use")
+        self.handle = handle
+
+
 class UserNotFoundError(NotFoundError):
     def __init__(self, message: str = "User not found"):
         super().__init__(message)
