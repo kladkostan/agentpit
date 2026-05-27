@@ -129,12 +129,15 @@ export function TopNav() {
                 <MenuItem onClick={handleProfile} sx={menuItemSx}>
                   <User className="mr-2 size-4" /> Profile
                 </MenuItem>
-                <MenuItem sx={menuItemSx} onClick={handleToggleDarkMode}>
-                  {isDarkMode ? (
-                    <Sun className="mr-2 size-4" />
-                  ) : (
-                    <Moon className="mr-2 size-4" />
-                  )}
+                         <MenuItem
+                  sx={menuItemSx}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleToggleDarkMode(event);
+                  }}
+                >
+                  <Moon className="mr-2 size-4" />
                   <span className="mr-3">Dark mode</span>
                   <span
                     className={`ml-auto inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
