@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "@/App";
 import { AuthProvider } from "@/auth/AuthContext";
 import { AuthDialog } from "@/components/auth/AuthDialog";
+import { initializeTheme } from "@/lib/theme";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -21,6 +22,8 @@ const rootEl = document.getElementById("root");
 if (!rootEl) {
   throw new Error("Root element #root not found");
 }
+
+initializeTheme();
 
 createRoot(rootEl).render(
   <StrictMode>

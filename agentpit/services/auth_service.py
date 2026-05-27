@@ -11,9 +11,11 @@ from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
+    BusinessRuleError,
     InvalidCredentialsError,
     OnboardingError,
     UserAlreadyExistsError,
+    UserNotFoundError,
 )
 from agentpit.onchain.admin import OnchainAdmin
 
@@ -77,6 +79,30 @@ class AuthService:
             raise InvalidCredentialsError("invalid email or password")
         self._maybe_reonboard(user)
         return self._issue(user)
+
+    def change_password(
+        self,
+        *,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        with self._db.write() as conn:
+            current_hash = TableRead.get_password_hash_by_userid(conn, user_id)
+            if current_hash is None:
+                raise UserNotFoundError()
+            if not verify_password(current_password, current_hash):
+                raise InvalidCredentialsError("invalid current password")
+            if verify_password(new_password, current_hash):
+                raise BusinessRuleError(
+                    "new password must be different from current password"
+                )
+
+            updated = TableWrite.update_user_password_hash(
+                conn, user_id, hash_password(new_password)
+            )
+            if not updated:
+                raise UserNotFoundError()
 
     # --- helpers --------------------------------------------------------
 

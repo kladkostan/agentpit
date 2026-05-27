@@ -63,6 +63,24 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_user_handle(db: sqlite3.Connection, user_id: str, handle: str) -> bool:
+        cur = db.execute(
+            "UPDATE users SET HANDLE = ? WHERE USER_ID = ?",
+            (handle, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def update_user_password_hash(
+        db: sqlite3.Connection, user_id: str, password_hash: str
+    ) -> bool:
+        cur = db.execute(
+            "UPDATE users SET PASSWORD_HASH = ? WHERE USER_ID = ?",
+            (password_hash, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def mark_user_as_bot(db: sqlite3.Connection, api_key: str) -> bool:
         cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = ?", (api_key,))
         return cur.rowcount > 0
