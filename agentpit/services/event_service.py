@@ -2,10 +2,12 @@ from agentpit.datastructures.event_with_markets import (
     EventWithMarkets,
     ListEventsResponse,
 )
+from agentpit.datastructures.gamma_market import GammaEvent
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import EventNotFoundError, InvalidPaginationError
+from agentpit.polymarket.gamma import to_gamma_event
 
 
 class EventService:
@@ -27,6 +29,25 @@ class EventService:
         return ListEventsResponse(
             events=events, total=total, limit=limit, offset=offset
         )
+
+    def list_events_gamma(self, limit: int, offset: int) -> list[GammaEvent]:
+        if limit < 1 or limit > 1000:
+            raise InvalidPaginationError("limit must be between 1 and 1000")
+        if offset < 0:
+            raise InvalidPaginationError("offset must be non-negative")
+        with self._db.read() as conn:
+            pairs, _total = TableRead.list_events_with_markets(
+                conn, limit=limit, offset=offset
+            )
+        return [to_gamma_event(event, markets) for event, markets in pairs]
+
+    def get_event_gamma(self, slug: str) -> GammaEvent:
+        with self._db.read() as conn:
+            event = TableRead.get_event_by_slug(conn, slug)
+            if event is None:
+                raise EventNotFoundError(slug)
+            markets = TableRead.list_markets_by_event_id(conn, event.event_id)
+        return to_gamma_event(event, markets)
 
     def get_event_by_slug(self, slug: str) -> EventWithMarkets:
         with self._db.read() as conn:

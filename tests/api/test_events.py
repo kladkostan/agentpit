@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -57,7 +58,7 @@ def test_list_events_returns_empty_when_no_events(client_and_db):
     resp = client.get("/events?limit=10&offset=0")
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"events": [], "total": 0, "limit": 10, "offset": 0}
+    assert body == []
 
 
 def test_list_events_returns_events_with_their_markets(client_and_db):
@@ -82,11 +83,12 @@ def test_list_events_returns_events_with_their_markets(client_and_db):
     resp = client.get("/events?limit=10&offset=0")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total"] == 1
-    assert len(body["events"]) == 1
-    summary = body["events"][0]
-    assert summary["event"]["slug"] == "wc"
-    assert {m["market_id"] for m in summary["markets"]} == {m1.market_id, m2.market_id}
+    assert isinstance(body, list)
+    assert len(body) == 1
+    ev = body[0]
+    assert ev["slug"] == "wc"
+    market_ids = {int(m["id"]) for m in ev["markets"]}
+    assert market_ids == {m1.market_id, m2.market_id}
 
 
 def test_list_events_rejects_bad_pagination(client_and_db):
@@ -125,9 +127,10 @@ def test_get_event_by_slug_returns_event_and_markets(client_and_db):
 
     resp = client.get("/events/wc")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["event"]["slug"] == "wc"
-    assert body["event"]["title"] == "2026 FIFA World Cup Winner"
-    assert body["event"]["icon_url"] == "https://i/wc.svg"
-    assert [m["market_id"] for m in body["markets"]] == [m1.market_id]
-    assert body["markets"][0]["outcome_label"] == "France"
+    ev = resp.json()
+    assert ev["slug"] == "wc"
+    assert ev["title"] == "2026 FIFA World Cup Winner"
+    assert ev["icon"] == "https://i/wc.svg"
+    assert len(ev["markets"]) == 1
+    assert int(ev["markets"][0]["id"]) == m1.market_id
+    assert json.loads(ev["markets"][0]["outcomes"]) == ["Yes", "No"]
