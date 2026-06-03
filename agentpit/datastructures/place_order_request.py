@@ -26,6 +26,15 @@ class PlaceOrderRequest(BaseModel):
     order_type: Literal["GTC", "FOK", "FAK", "GTD"] = "GTC"
     expiration: int = 0  # unix seconds, required if GTD
 
+    @field_validator("size")
+    @classmethod
+    def _min_one_base_unit(cls, v: Decimal) -> Decimal:
+        """Reject sizes below one base unit (10⁻⁶ shares) — they would scale
+        to zero in the 10⁶-unit internal representation."""
+        if v < Decimal("0.000001"):
+            raise ValueError("size must be at least 0.000001 shares (one base unit)")
+        return v
+
     @field_validator("price")
     @classmethod
     def _snap_to_tick(cls, v: Decimal) -> Decimal:

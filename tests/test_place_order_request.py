@@ -58,3 +58,23 @@ def test_size_is_share_denominated_decimal():
 def test_size_must_be_positive():
     with pytest.raises(ValidationError):
         PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size=0)
+
+
+def test_size_below_one_base_unit_rejected():
+    with pytest.raises(ValidationError):
+        PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size="0.0000001")
+
+
+def test_size_exactly_one_base_unit_ok():
+    r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size="0.000001")
+    assert r.size == Decimal("0.000001")
+
+
+def test_market_id_without_outcome_rejected():
+    with pytest.raises(ValidationError):
+        PlaceOrderRequest(market_id=1, side="BUY", price="0.5", size=100)
+
+
+def test_outcome_without_market_id_rejected():
+    with pytest.raises(ValidationError):
+        PlaceOrderRequest(outcome="Yes", side="BUY", price="0.5", size=100)
