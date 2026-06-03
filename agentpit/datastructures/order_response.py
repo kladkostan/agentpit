@@ -1,24 +1,26 @@
-from typing import Optional
-
-from pydantic import BaseModel
-
-from agentpit.common import check_state
+from pydantic import BaseModel, Field, field_validator
 
 
 class OrderResponse(BaseModel):
-    """Response returned by /orders. Field names are camelCase for client compat."""
+    """Polymarket CLOB `postOrder` response shape (§8.1).
+
+    `status` is the documented HTTP enum (lowercase): `live | matched |
+    delayed`. agentpit emits only `live` and `matched`. A settlement
+    failure is reported as `success=False` + `errorMsg` (not a status).
+    """
 
     success: bool
+    errorMsg: str = ""
     orderID: str
     status: str
-    filledSize: str
-    remainingSize: str
-    avgPrice: Optional[str] = None
-    errorMsg: Optional[str] = None
-    txHash: Optional[str] = None
+    transactionsHashes: list[str] = Field(default_factory=list)
+    takingAmount: str = ""
+    makingAmount: str = ""
+    tradeIDs: list[str] = Field(default_factory=list)
 
-    def model_post_init(self, __context):
-        check_state(len(self.orderID) > 0, "Order ID must not be empty")
-        check_state(len(self.status) > 0, "Status must not be empty")
-        check_state(len(self.filledSize) > 0, "Filled size must not be empty")
-        check_state(len(self.remainingSize) > 0, "Remaining size must not be empty")
+    @field_validator("orderID", "status")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("must not be empty")
+        return v
