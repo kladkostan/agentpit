@@ -25,7 +25,8 @@ from agentpit.domain.exceptions import (
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.order_signer import OrderData, sign_order
 from agentpit.onchain.user_wallet import send_admin_tx
-from agentpit.polymarket.format import decimal_str_to_size_micro, size_to_decimal_str
+from agentpit.datastructures.open_order import OpenOrder
+from agentpit.polymarket.format import decimal_str_to_size_micro, price_to_decimal_str, size_to_decimal_str
 from agentpit.polymarket.resolve import resolve_by_market_outcome, resolve_by_token_id
 
 log = logging.getLogger(__name__)
@@ -140,9 +141,65 @@ class OrderService:
             tradeIDs=[m["trade_id"] for m in matches],
         )
 
-    def list_live_orders(self, user: User) -> list[dict[str, Any]]:
+    def list_open_orders(
+        self,
+        user: User,
+        *,
+        market: str | None = None,
+        asset_id: str | None = None,
+        order_id: str | None = None,
+    ) -> list[OpenOrder]:
+        """Return the caller's live orders as Polymarket OpenOrder[] (§8.3)."""
+        clauses = ["API_KEY = ?", "STATUS = 'live'"]
+        params: list = [user.api_key]
+        if asset_id is not None:
+            clauses.append("TOKEN_ID = ?")
+            params.append(asset_id)
+        if order_id is not None:
+            clauses.append("ORDER_ID = ?")
+            params.append(order_id)
         with self._db.read() as conn:
-            return TableRead.list_live_orders_for_api_key(conn, user.api_key)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT ORDER_ID, TOKEN_ID, SIDE, PRICE, REMAINING_AMOUNT, MAKER, "
+                "MAKER_AMOUNT, TAKER_AMOUNT, CREATED_AT, EXPIRATION, ORDER_TYPE "
+                f"FROM orders WHERE {' AND '.join(clauses)} "
+                "ORDER BY CREATED_AT DESC",
+                params,
+            ).fetchall()
+            out: list[OpenOrder] = []
+            for r in rows:
+                resolved = resolve_by_token_id(conn, r["TOKEN_ID"])
+                if resolved is None:
+                    continue
+                if market is not None and resolved.condition_id != market:
+                    continue
+                # Original outcome-token size: BUY → takerAmount, SELL → makerAmount.
+                original = int(
+                    r["TAKER_AMOUNT"] if r["SIDE"] == "BUY" else r["MAKER_AMOUNT"]
+                )
+                matched = original - int(r["REMAINING_AMOUNT"])
+                outcome_label = resolved.market.erc1155_tokens[
+                    resolved.outcome_index
+                ][1]
+                out.append(
+                    OpenOrder(
+                        id=r["ORDER_ID"],
+                        owner=user.user_id,
+                        maker_address=r["MAKER"],
+                        market=resolved.condition_id,
+                        asset_id=r["TOKEN_ID"],
+                        side=r["SIDE"],
+                        original_size=size_to_decimal_str(original),
+                        size_matched=size_to_decimal_str(matched),
+                        price=price_to_decimal_str(int(r["PRICE"])),
+                        outcome=outcome_label,
+                        created_at=int(r["CREATED_AT"]),
+                        expiration=str(r["EXPIRATION"]),
+                        order_type=r["ORDER_TYPE"],
+                    )
+                )
+        return out
 
     def cancel_orders(self, user: User, order_ids: list[str]) -> CancelOrdersResponse:
         """Cancel a set of the caller's live orders by id (§8.2)."""

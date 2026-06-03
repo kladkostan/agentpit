@@ -6,6 +6,7 @@ from agentpit.datastructures.cancel_requests import (
     CancelMarketOrdersRequest,
     CancelOrderRequest,
 )
+from agentpit.datastructures.open_order import OpenOrder
 from agentpit.datastructures.order_response import OrderResponse
 from agentpit.datastructures.place_order_request import PlaceOrderRequest
 
@@ -56,12 +57,17 @@ def cancel_market_orders(
     return service.cancel_market_orders(user, payload.market, payload.asset_id)
 
 
-@router.get("/orders/mine")
-def list_my_orders(
+@router.get("/data/orders", response_model=list[OpenOrder])
+def list_open_orders(
     user: CurrentUserDep,
     service: OrderServiceDep,
-) -> dict:
-    return {"orders": service.list_live_orders(user)}
+    market: str | None = None,
+    asset_id: str | None = None,
+    id: str | None = None,
+) -> list[OpenOrder]:
+    return service.list_open_orders(
+        user, market=market, asset_id=asset_id, order_id=id
+    )
 
 
 @router.get("/orderbook/{market_id}/{outcome}")
