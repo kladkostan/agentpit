@@ -144,7 +144,12 @@ export function OrderTicket({
         toast.error(`Order failed: ${res.errorMsg || "unknown"}`);
         return;
       }
-      const filled = Number(res.takingAmount || "0");
+      // postOrder amounts are taker-perspective: BUY receives shares
+      // (takingAmount), SELL gives shares (makingAmount).
+      const filled =
+        side === "BUY"
+          ? Number(res.takingAmount || "0")
+          : Number(res.makingAmount || "0");
       const isLive = res.status === "live";
       toast.success(
         isLive
