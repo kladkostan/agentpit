@@ -95,33 +95,35 @@ def test_match_settles_on_chain():
     b_pre_yes = admin.ctf_balance(eb, yes_id)
 
     pa = client.post(
-        "/orders",
+        "/order",
         headers=_hdr(ta),
         json={
             "market_id": market["market_id"],
             "outcome": "YES",
             "side": "BUY",
             "price": "0.6",
-            "size": 100_000_000,
+            "size": 100,
         },
     ).json()
     assert pa["success"] and pa["status"] == "live"
 
     pb = client.post(
-        "/orders",
+        "/order",
         headers=_hdr(tb),
         json={
             "market_id": market["market_id"],
             "outcome": "YES",
             "side": "SELL",
             "price": "0.6",
-            "size": 100_000_000,
+            "size": 100,
         },
     ).json()
     assert pb["success"], pb
     assert pb["status"] == "matched"
-    assert pb["filledSize"] == "100000000"
-    assert pb["txHash"]
+    assert pb["makingAmount"] == "100"          # SELL taker gave 100 shares
+    assert pb["takingAmount"] == "60"           # received 60 apUSD (100 @ 0.6)
+    assert pb["transactionsHashes"]             # non-empty list
+    assert "filledSize" not in pb
 
     # Verify on-chain settlement: A paid 60M apUSD, received 100M YES tokens.
     assert admin.usd_balance(ea) == a_pre_usd - 60_000_000
@@ -177,36 +179,36 @@ def test_complementary_buys_mint_via_split():
     a_pre_usd = admin.usd_balance(ea)
     b_pre_usd = admin.usd_balance(eb)
 
-    # A: resting BUY YES @ 0.30, size 100M outcome-token units.
+    # A: resting BUY YES @ 0.30, size 100 shares.
     pa = client.post(
-        "/orders",
+        "/order",
         headers=_hdr(ta),
         json={
             "market_id": market["market_id"],
             "outcome": "YES",
             "side": "BUY",
             "price": "0.3",
-            "size": 100_000_000,
+            "size": 100,
         },
     ).json()
     assert pa["success"] and pa["status"] == "live", pa
 
-    # B: incoming BUY NO @ 0.70, size 50M. Sum is 1.00 → should mint 50M.
+    # B: incoming BUY NO @ 0.70, size 50 shares. Sum is 1.00 → should mint 50M.
     pb = client.post(
-        "/orders",
+        "/order",
         headers=_hdr(tb),
         json={
             "market_id": market["market_id"],
             "outcome": "NO",
             "side": "BUY",
             "price": "0.7",
-            "size": 50_000_000,
+            "size": 50,
         },
     ).json()
     assert pb["success"], pb
     assert pb["status"] == "matched", pb
-    assert pb["filledSize"] == "50000000", pb
-    assert pb["txHash"], pb
+    assert pb["makingAmount"] == "35"           # NO buyer paid 50 @ 0.70
+    assert pb["transactionsHashes"], pb
 
     # A paid 50M * 0.30 = 15M apUSD; B paid 50M * 0.70 = 35M apUSD.
     assert admin.usd_balance(ea) == a_pre_usd - 15_000_000

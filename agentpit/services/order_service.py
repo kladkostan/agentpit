@@ -118,10 +118,12 @@ class OrderService:
             row = self._get_order_row(conn, order_id)
         # takingAmount/makingAmount come from the immediate match (taker's
         # perspective), in decimal strings (§4); "" when nothing filled.
+        # The taker transacts at its OWN limit price for every fill (see
+        # _taker_fill_amount) — true for NORMAL fills and for MINT/MERGE,
+        # where taker and maker pay different prices summing to 1 — so the
+        # taker's collateral is taker_price × filled, not the maker's price.
         filled_micro = sum(int(m["trade_size"]) for m in matches)
-        collateral_micro = sum(
-            (int(m["price"]) * int(m["trade_size"])) // _PRICE_ONE for m in matches
-        )
+        collateral_micro = (price_int * filled_micro) // _PRICE_ONE
         if matches and payload.side == "BUY":
             making_amount = size_to_decimal_str(collateral_micro)  # USDC given
             taking_amount = size_to_decimal_str(filled_micro)      # shares received
