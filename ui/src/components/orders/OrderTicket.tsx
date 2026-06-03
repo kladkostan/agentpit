@@ -101,6 +101,8 @@ export function OrderTicket({
 
   const heldOfCurrent = heldByOutcome.get(outcome) ?? 0;
 
+  const tokenId = tokens.find(([, label]) => label === outcome)?.[0] ?? "";
+
   function selectSide(next: OrderSide) {
     setSide(next);
     if (next === "SELL" && onOutcomeChange) {
@@ -130,26 +132,23 @@ export function OrderTicket({
       const price = parseDecimal(limitPrice);
       const shares = parseDecimal(limitShares);
       return placeOrder({
-        market_id: marketId,
-        outcome,
+        token_id: tokenId,
         side,
         price,
-        size: Math.floor(shares * SHARES_SCALE),
+        size: shares,
         order_type: "GTC",
       });
     },
     onSuccess: (res) => {
       if (!res.success) {
-        toast.error(`Order failed: ${res.errorMsg ?? "unknown"}`);
+        toast.error(`Order failed: ${res.errorMsg || "unknown"}`);
         return;
       }
-      const filled = Number(res.filledSize) / SHARES_SCALE;
-      const remaining = Number(res.remainingSize) / SHARES_SCALE;
+      const filled = Number(res.takingAmount || "0");
+      const isLive = res.status === "live";
       toast.success(
-        remaining > 0
-          ? `Order placed: ${filled.toFixed(2)} filled, ${remaining.toFixed(
-              2,
-            )} resting`
+        isLive
+          ? `Order placed: ${filled.toFixed(2)} filled, resting`
           : `Order filled: ${filled.toFixed(2)} shares`,
       );
       setLimitShares("");
@@ -165,8 +164,7 @@ export function OrderTicket({
       if (!book) throw new Error("Orderbook not loaded yet");
       const amount = parseDecimal(side === "BUY" ? marketAmount : limitShares);
       return placeMarketOrder({
-        marketId,
-        outcome,
+        tokenId,
         side,
         amount,
         book,

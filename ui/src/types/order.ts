@@ -2,24 +2,23 @@ export type OrderSide = "BUY" | "SELL";
 export type OrderType = "GTC" | "FOK" | "FAK" | "GTD";
 
 export interface PlaceOrderRequest {
-  market_id: number;
-  outcome: string;       // label, e.g. "Yes" / "No"
+  token_id: string;
   side: OrderSide;
   price: number;         // 0 < price < 1
-  size: number;          // integer micro-shares (display × 1e6)
+  size: number;          // whole shares (NOT micro)
   order_type?: OrderType;
   expiration?: number;
 }
 
 export interface OrderResponse {
   success: boolean;
+  errorMsg: string;
   orderID: string;
-  status: string;        // "live" | "matched" | "cancelled" | "failed"
-  filledSize: string;    // micro-shares as decimal string
-  remainingSize: string; // micro-shares as decimal string
-  avgPrice?: string | null;
-  errorMsg?: string | null;
-  txHash?: string | null;
+  status: string;                 // "live" | "matched"
+  transactionsHashes: string[];
+  takingAmount: string;           // decimal string; "" when unfilled
+  makingAmount: string;           // decimal string; "" when unfilled
+  tradeIDs: string[];
 }
 
 export interface OrderbookEntry {
