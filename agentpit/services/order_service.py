@@ -23,6 +23,8 @@ from agentpit.domain.exceptions import (
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.order_signer import OrderData, sign_order
 from agentpit.onchain.user_wallet import send_admin_tx
+from agentpit.polymarket.format import decimal_str_to_size_micro, size_to_decimal_str
+from agentpit.polymarket.resolve import resolve_by_market_outcome, resolve_by_token_id
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +49,10 @@ class OrderService:
     # --- public API -----------------------------------------------------
 
     def place_order(self, user: User, payload: PlaceOrderRequest) -> OrderResponse:
-        _, token_id_int, _ = self._resolve_market(payload)
+        token_id_int, _token_id_str = self._resolve_token(payload)
+        size_micro = decimal_str_to_size_micro(str(payload.size))
         maker_amount, taker_amount = self._amounts_from_price_size(
-            payload.side, payload.price, payload.size
+            payload.side, payload.price, size_micro
         )
 
         # Pre-flight balance check — reject obvious losers before signing.
@@ -87,45 +90,52 @@ class OrderService:
             taker_row = self._get_order_row(conn, order_id)
             matches = self._match(conn, taker_row, dry_run=False)
 
-        tx_hash: str | None = None
+        tx_hashes: list[str] = []
         if matches:
             try:
                 hashes = self._settle_on_chain(order, signature, matches)
-                tx_hash = ",".join(h.hex() for h in hashes)
+                tx_hashes = ["0x" + h.hex() for h in hashes]
             except Exception as exc:
                 log.exception("on-chain settlement failed for order %s", order_id)
-                # Mark trades + orders as failed so the off-chain book reflects it
                 with self._db.write() as conn:
                     conn.execute(
                         "UPDATE trades SET STATUS = 'FAILED' "
                         "WHERE TAKER_ORDER_ID = ?",
                         (order_id,),
                     )
+                failed_row = self._safe_row(order_id)
                 return OrderResponse(
                     success=False,
                     orderID=order_id,
-                    status="failed",
-                    filledSize=str(0),
-                    remainingSize=str(maker_amount),
-                    avgPrice=None,
+                    status=failed_row["STATUS"] if failed_row else "live",
                     errorMsg=f"settlement failed: {exc}",
                 )
 
         with self._db.read() as conn:
             row = self._get_order_row(conn, order_id)
-        remaining = int(row["REMAINING_AMOUNT"])
-        # filled is in outcome-token units to match the request's `size`.
-        filled = int(payload.size) - remaining
-        avg_price = self._avg_price(matches, filled)
+        # takingAmount/makingAmount come from the immediate match (taker's
+        # perspective), in decimal strings (§4); "" when nothing filled.
+        filled_micro = sum(int(m["trade_size"]) for m in matches)
+        collateral_micro = sum(
+            (int(m["price"]) * int(m["trade_size"])) // _PRICE_ONE for m in matches
+        )
+        if matches and payload.side == "BUY":
+            making_amount = size_to_decimal_str(collateral_micro)  # USDC given
+            taking_amount = size_to_decimal_str(filled_micro)      # shares received
+        elif matches:  # SELL taker
+            making_amount = size_to_decimal_str(filled_micro)      # shares given
+            taking_amount = size_to_decimal_str(collateral_micro)  # USDC received
+        else:
+            making_amount = taking_amount = ""
 
         return OrderResponse(
             success=True,
             orderID=order_id,
             status=row["STATUS"],
-            filledSize=str(filled),
-            remainingSize=str(remaining),
-            avgPrice=avg_price,
-            txHash=tx_hash,
+            transactionsHashes=tx_hashes,
+            takingAmount=taking_amount,
+            makingAmount=making_amount,
+            tradeIDs=[m["trade_id"] for m in matches],
         )
 
     def list_live_orders(self, user: User) -> list[dict[str, Any]]:
@@ -211,8 +221,38 @@ class OrderService:
 
     # --- internals ------------------------------------------------------
 
-    def _resolve_market(self, payload: PlaceOrderRequest):
-        return self._resolve_market_lookup(payload.market_id, payload.outcome)
+    def _resolve_token(self, payload: PlaceOrderRequest) -> tuple[int, str]:
+        """Resolve the order's outcome to (token_id_int, token_id_str).
+
+        `token_id` wins when present; `market_id`+`outcome` is the
+        transitional fallback. If both are supplied and disagree, that's a
+        conflicting request (400, via MarketStateError → BusinessRuleError).
+        """
+        with self._db.read() as conn:
+            if payload.token_id is not None:
+                resolved = resolve_by_token_id(conn, payload.token_id)
+                if resolved is None:
+                    raise MarketStateError(f"unknown token_id '{payload.token_id}'")
+                if payload.market_id is not None and payload.outcome is not None:
+                    alt = resolve_by_market_outcome(
+                        conn, payload.market_id, payload.outcome
+                    )
+                    if alt.token_id != resolved.token_id:
+                        raise MarketStateError(
+                            "token_id conflicts with market_id/outcome"
+                        )
+                return int(resolved.token_id), resolved.token_id
+            resolved = resolve_by_market_outcome(
+                conn, payload.market_id, payload.outcome
+            )
+            return int(resolved.token_id), resolved.token_id
+
+    def _safe_row(self, order_id: str):
+        with self._db.read() as conn:
+            try:
+                return self._get_order_row(conn, order_id)
+            except RuntimeError:
+                return None
 
     def _resolve_market_lookup(self, market_id: int, outcome: str):
         with self._db.read() as conn:
@@ -344,13 +384,6 @@ class OrderService:
         else:
             price = taker / maker
         return int((price * _USDC_SCALE).to_integral_value(rounding=ROUND_HALF_UP))
-
-    @staticmethod
-    def _avg_price(matches: list[dict], filled: int) -> str | None:
-        if not matches or filled <= 0:
-            return None
-        total_collateral = sum(int(m["price"]) * int(m["trade_size"]) for m in matches)
-        return str(Decimal(total_collateral) / Decimal(filled))
 
     @staticmethod
     def _complement_token_id(conn: sqlite3.Connection, token_id: str) -> str | None:
@@ -487,7 +520,7 @@ class OrderService:
                 "UPDATE orders SET REMAINING_AMOUNT=?, STATUS=? WHERE ORDER_ID=?",
                 (new_maker_remaining, new_status, m["maker_order_id"]),
             )
-            self._insert_trade(conn, taker_row, m)
+            m["trade_id"] = self._insert_trade(conn, taker_row, m)
 
         new_taker_status = "matched" if taker_remaining == 0 else "live"
         conn.execute(
@@ -499,7 +532,7 @@ class OrderService:
     @staticmethod
     def _insert_trade(
         conn: sqlite3.Connection, taker_row: sqlite3.Row, match: dict
-    ) -> None:
+    ) -> str:
         trade_id = "{}-{}-{}".format(
             taker_row["ORDER_ID"], match["maker_order_id"], secrets.token_hex(8)
         )
@@ -535,6 +568,7 @@ class OrderService:
                 int(taker_row["FEE_RATE_BPS"]),
             ),
         )
+        return trade_id
 
     # --- on-chain settlement -------------------------------------------
 
