@@ -7,7 +7,7 @@ from agentpit.datastructures.place_order_request import PlaceOrderRequest
 router = APIRouter(tags=["orders"])
 
 
-@router.post("/orders", response_model=OrderResponse)
+@router.post("/order", response_model=OrderResponse)
 def place_order(
     payload: PlaceOrderRequest,
     user: CurrentUserDep,
