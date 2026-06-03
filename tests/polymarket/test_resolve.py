@@ -64,3 +64,34 @@ def test_resolve_by_market_outcome_unknown_outcome_raises(seeded):
     with session.read() as conn:
         with pytest.raises(MarketStateError):
             resolve_by_market_outcome(conn, market.market_id, "Maybe")
+
+
+def test_resolve_by_token_id_first_outcome(seeded):
+    from agentpit.polymarket.resolve import resolve_by_token_id
+
+    session, market = seeded
+    with session.read() as conn:
+        r = resolve_by_token_id(conn, "111")
+    assert r is not None
+    assert r.token_id == "111"
+    assert r.outcome_index == 0
+    assert r.market.market_id == market.market_id
+    assert r.condition_id == market.condition_id.value
+
+
+def test_resolve_by_token_id_second_outcome(seeded):
+    from agentpit.polymarket.resolve import resolve_by_token_id
+
+    session, _ = seeded
+    with session.read() as conn:
+        r = resolve_by_token_id(conn, "222")
+    assert r is not None
+    assert r.outcome_index == 1
+
+
+def test_resolve_by_token_id_unknown_returns_none(seeded):
+    from agentpit.polymarket.resolve import resolve_by_token_id
+
+    session, _ = seeded
+    with session.read() as conn:
+        assert resolve_by_token_id(conn, "999") is None
