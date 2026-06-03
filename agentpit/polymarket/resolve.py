@@ -55,11 +55,14 @@ def resolve_by_token_id(
     The markets table stores ERC1155_TOKENS as a JSON array of
     [token_id, label] pairs, so we find the containing market with a
     quote-anchored LIKE (the surrounding quotes prevent "11" matching "111").
+    LIKE wildcards in token_id are escaped; token ids are globally unique by
+    CTF construction, so LIMIT 1 is safe.
     """
+    escaped = token_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     row = conn.execute(
         "SELECT MARKET_ID, ERC1155_TOKENS FROM markets "
-        "WHERE ERC1155_TOKENS LIKE ? LIMIT 1",
-        (f'%"{token_id}"%',),
+        "WHERE ERC1155_TOKENS LIKE ? ESCAPE '\\' LIMIT 1",
+        (f'%"{escaped}"%',),
     ).fetchone()
     if row is None:
         return None

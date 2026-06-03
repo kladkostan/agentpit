@@ -7,7 +7,7 @@ from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import MarketNotFoundError, MarketStateError
-from agentpit.polymarket.resolve import resolve_by_market_outcome
+from agentpit.polymarket.resolve import resolve_by_market_outcome, resolve_by_token_id
 
 
 def _hex32(seed: str) -> str:
@@ -67,8 +67,6 @@ def test_resolve_by_market_outcome_unknown_outcome_raises(seeded):
 
 
 def test_resolve_by_token_id_first_outcome(seeded):
-    from agentpit.polymarket.resolve import resolve_by_token_id
-
     session, market = seeded
     with session.read() as conn:
         r = resolve_by_token_id(conn, "111")
@@ -80,8 +78,6 @@ def test_resolve_by_token_id_first_outcome(seeded):
 
 
 def test_resolve_by_token_id_second_outcome(seeded):
-    from agentpit.polymarket.resolve import resolve_by_token_id
-
     session, _ = seeded
     with session.read() as conn:
         r = resolve_by_token_id(conn, "222")
@@ -90,8 +86,6 @@ def test_resolve_by_token_id_second_outcome(seeded):
 
 
 def test_resolve_by_token_id_unknown_returns_none(seeded):
-    from agentpit.polymarket.resolve import resolve_by_token_id
-
     session, _ = seeded
     with session.read() as conn:
         assert resolve_by_token_id(conn, "999") is None

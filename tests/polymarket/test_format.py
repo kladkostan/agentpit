@@ -1,3 +1,5 @@
+import pytest
+
 from agentpit.polymarket.format import (
     price_to_decimal_str,
     price_to_float,
@@ -22,12 +24,12 @@ def test_size_to_decimal_str_whole_and_fractional():
 
 
 def test_price_to_float():
-    assert price_to_float(360000) == 0.36
-    assert price_to_float(1000000) == 1.0
+    assert price_to_float(360000) == pytest.approx(0.36)
+    assert price_to_float(1000000) == pytest.approx(1.0)
 
 
 def test_size_to_float():
-    assert size_to_float(30000000) == 30.0
+    assert size_to_float(30000000) == pytest.approx(30.0)
 
 
 def test_inverses_round_trip():
@@ -35,3 +37,12 @@ def test_inverses_round_trip():
     assert decimal_str_to_price_int("0.5") == 500000
     assert decimal_str_to_size_micro("30") == 30000000
     assert decimal_str_to_size_micro("30.5") == 30500000
+
+
+def test_negative_inputs_raise():
+    with pytest.raises(ValueError):
+        price_to_decimal_str(-1)
+    with pytest.raises(ValueError):
+        size_to_float(-1)
+    with pytest.raises(ValueError):
+        decimal_str_to_price_int("-0.5")
