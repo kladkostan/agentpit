@@ -10,6 +10,8 @@ from typing import Any
 from eth_utils.crypto import keccak
 from web3 import Web3
 
+from agentpit.datastructures.cancel_orders_response import CancelOrdersResponse
+from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.order_response import OrderResponse
 from agentpit.datastructures.place_order_request import PlaceOrderRequest
 from agentpit.datastructures.user import User
@@ -142,14 +144,66 @@ class OrderService:
         with self._db.read() as conn:
             return TableRead.list_live_orders_for_api_key(conn, user.api_key)
 
-    def cancel_order(self, user: User, order_id: str) -> bool:
+    def cancel_orders(self, user: User, order_ids: list[str]) -> CancelOrdersResponse:
+        """Cancel a set of the caller's live orders by id (§8.2)."""
+        result = CancelOrdersResponse()
         with self._db.write() as conn:
-            cur = conn.execute(
-                "UPDATE orders SET STATUS = 'cancelled' "
-                "WHERE ORDER_ID = ? AND API_KEY = ? AND STATUS = 'live'",
-                (order_id, user.api_key),
-            )
-            return cur.rowcount > 0
+            for order_id in order_ids:
+                cur = conn.execute(
+                    "UPDATE orders SET STATUS = 'cancelled' "
+                    "WHERE ORDER_ID = ? AND API_KEY = ? AND STATUS = 'live'",
+                    (order_id, user.api_key),
+                )
+                if cur.rowcount > 0:
+                    result.canceled.append(order_id)
+                else:
+                    result.not_canceled[order_id] = (
+                        "order not found, not yours, or not live"
+                    )
+        return result
+
+    def cancel_all(self, user: User) -> CancelOrdersResponse:
+        """Cancel every live order owned by the caller."""
+        with self._db.read() as conn:
+            conn.row_factory = sqlite3.Row
+            ids = [
+                r["ORDER_ID"]
+                for r in conn.execute(
+                    "SELECT ORDER_ID FROM orders "
+                    "WHERE API_KEY = ? AND STATUS = 'live'",
+                    (user.api_key,),
+                ).fetchall()
+            ]
+        return self.cancel_orders(user, ids)
+
+    def cancel_market_orders(
+        self, user: User, market: str | None, asset_id: str | None
+    ) -> CancelOrdersResponse:
+        """Cancel the caller's live orders filtered by condition_id (`market`)
+        and/or token_id (`asset_id`). With neither filter, cancels all."""
+        clauses = ["API_KEY = ?", "STATUS = 'live'"]
+        params: list = [user.api_key]
+        if asset_id is not None:
+            clauses.append("TOKEN_ID = ?")
+            params.append(asset_id)
+        if market is not None:
+            # `market` is a condition_id; resolve it to the market's token ids.
+            with self._db.read() as conn:
+                m = TableRead.read_market_by_condition_id(conn, ConditionId(market))
+            token_ids = [t for t, _label in m.erc1155_tokens] if m else ["\x00"]
+            placeholders = ",".join("?" for _ in token_ids)
+            clauses.append(f"TOKEN_ID IN ({placeholders})")
+            params.extend(token_ids)
+        with self._db.read() as conn:
+            conn.row_factory = sqlite3.Row
+            ids = [
+                r["ORDER_ID"]
+                for r in conn.execute(
+                    f"SELECT ORDER_ID FROM orders WHERE {' AND '.join(clauses)}",
+                    params,
+                ).fetchall()
+            ]
+        return self.cancel_orders(user, ids)
 
     def get_orderbook(self, market_id: int, outcome: str) -> dict[str, Any]:
         _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
