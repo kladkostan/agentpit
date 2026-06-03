@@ -31,3 +31,30 @@ def test_rejects_when_snapped_out_of_range():
     for p in ("0.0004", "0.9997"):
         with pytest.raises(ValidationError):
             _req(p)
+
+
+def test_token_id_only_is_valid():
+    r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size=100)
+    assert r.token_id == "123"
+    assert r.market_id is None and r.outcome is None
+
+
+def test_market_outcome_fallback_is_valid():
+    r = PlaceOrderRequest(market_id=1, outcome="Yes", side="BUY", price="0.5", size=100)
+    assert r.token_id is None
+    assert r.market_id == 1 and r.outcome == "Yes"
+
+
+def test_requires_an_identifier():
+    with pytest.raises(ValidationError):
+        PlaceOrderRequest(side="BUY", price="0.5", size=100)
+
+
+def test_size_is_share_denominated_decimal():
+    r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size="2.5")
+    assert r.size == Decimal("2.5")
+
+
+def test_size_must_be_positive():
+    with pytest.raises(ValidationError):
+        PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size=0)
