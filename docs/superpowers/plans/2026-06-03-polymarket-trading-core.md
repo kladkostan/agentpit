@@ -363,10 +363,12 @@ Replace the whole current `place_order` (everything from `def place_order` throu
             row = self._get_order_row(conn, order_id)
         # takingAmount/makingAmount come from the immediate match (taker's
         # perspective), in decimal strings (§4); "" when nothing filled.
+        # The taker transacts at its OWN limit price for every fill (see
+        # _taker_fill_amount) — true for NORMAL and for MINT/MERGE, where
+        # taker and maker pay different prices summing to 1 — so collateral
+        # is taker_price × filled, NOT the maker's per-match price.
         filled_micro = sum(int(m["trade_size"]) for m in matches)
-        collateral_micro = sum(
-            (int(m["price"]) * int(m["trade_size"])) // _PRICE_ONE for m in matches
-        )
+        collateral_micro = (price_int * filled_micro) // _PRICE_ONE
         if matches and payload.side == "BUY":
             making_amount = size_to_decimal_str(collateral_micro)  # USDC given
             taking_amount = size_to_decimal_str(filled_micro)      # shares received
@@ -1142,7 +1144,7 @@ The `/orderbook/.../YES` assertion stays (`REMAINING_AMOUNT == 50_000_000`) — 
 - [ ] **Step 3: Run to verify pass**
 
 Run: `.venv/bin/python -m pytest tests/onchain/test_trade_flow.py -v`
-Expected: PASS (3 passed). If `makingAmount`/`takingAmount` differ, cross-check the §8.1 derivation against the live Polymarket OpenAPI via the docs MCP (`docs.polymarket.com/mcp`, search `postOrder makingAmount`) and adjust the assertion to the verified semantics — do not weaken the round-trip.
+Expected: PASS (3 passed). These values are confirmed against on-chain settlement: a BUY/SELL taker transacts at its own limit price, so collateral = `taker_price × filled` (Task 3 computes this from `price_int`). The MINT case (`makingAmount == "35"` for a BUY-NO taker @0.70 × 50) verifies the maker-vs-taker-price distinction — do not weaken it.
 
 - [ ] **Step 4: Commit**
 
