@@ -27,7 +27,7 @@ from agentpit.onchain.order_signer import OrderData, sign_order
 from agentpit.onchain.user_wallet import send_admin_tx
 from agentpit.datastructures.open_order import OpenOrder
 from agentpit.polymarket.format import decimal_str_to_size_micro, price_to_decimal_str, size_to_decimal_str
-from agentpit.polymarket.resolve import resolve_by_market_outcome, resolve_by_token_id
+from agentpit.polymarket.resolve import resolve_by_token_id
 
 log = logging.getLogger(__name__)
 
@@ -336,30 +336,12 @@ class OrderService:
     # --- internals ------------------------------------------------------
 
     def _resolve_token(self, payload: PlaceOrderRequest) -> tuple[int, str]:
-        """Resolve the order's outcome to (token_id_int, token_id_str).
-
-        `token_id` wins when present; `market_id`+`outcome` is the
-        transitional fallback. If both are supplied and disagree, that's a
-        conflicting request (400, via MarketStateError → BusinessRuleError).
-        """
+        """Resolve the order's canonical token_id to (token_id_int, token_id_str)."""
         with self._db.read() as conn:
-            if payload.token_id is not None:
-                resolved = resolve_by_token_id(conn, payload.token_id)
-                if resolved is None:
-                    raise MarketStateError(f"unknown token_id '{payload.token_id}'")
-                if payload.market_id is not None and payload.outcome is not None:
-                    alt = resolve_by_market_outcome(
-                        conn, payload.market_id, payload.outcome
-                    )
-                    if alt.token_id != resolved.token_id:
-                        raise MarketStateError(
-                            "token_id conflicts with market_id/outcome"
-                        )
-                return int(resolved.token_id), resolved.token_id
-            resolved = resolve_by_market_outcome(
-                conn, payload.market_id, payload.outcome
-            )
-            return int(resolved.token_id), resolved.token_id
+            resolved = resolve_by_token_id(conn, payload.token_id)
+        if resolved is None:
+            raise MarketStateError(f"unknown token_id '{payload.token_id}'")
+        return int(resolved.token_id), resolved.token_id
 
     def _safe_row(self, order_id: str):
         with self._db.read() as conn:

@@ -98,8 +98,7 @@ def test_match_settles_on_chain():
         "/order",
         headers=_hdr(ta),
         json={
-            "market_id": market["market_id"],
-            "outcome": "YES",
+            "token_id": market["erc1155_tokens"][0][0],
             "side": "BUY",
             "price": "0.6",
             "size": 100,
@@ -111,8 +110,7 @@ def test_match_settles_on_chain():
         "/order",
         headers=_hdr(tb),
         json={
-            "market_id": market["market_id"],
-            "outcome": "YES",
+            "token_id": market["erc1155_tokens"][0][0],
             "side": "SELL",
             "price": "0.6",
             "size": 100,
@@ -184,8 +182,7 @@ def test_complementary_buys_mint_via_split():
         "/order",
         headers=_hdr(ta),
         json={
-            "market_id": market["market_id"],
-            "outcome": "YES",
+            "token_id": market["erc1155_tokens"][0][0],
             "side": "BUY",
             "price": "0.3",
             "size": 100,
@@ -198,8 +195,7 @@ def test_complementary_buys_mint_via_split():
         "/order",
         headers=_hdr(tb),
         json={
-            "market_id": market["market_id"],
-            "outcome": "NO",
+            "token_id": market["erc1155_tokens"][1][0],
             "side": "BUY",
             "price": "0.7",
             "size": 50,

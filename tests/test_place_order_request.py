@@ -1,4 +1,6 @@
-"""PlaceOrderRequest enforces the 0.1¢ price tick (minimum increment)."""
+"""PlaceOrderRequest: token_id is the canonical (now required) order
+identifier; price snaps to the 0.1¢ tick; size is share-denominated with a
+one-base-unit floor."""
 
 from decimal import Decimal
 
@@ -9,14 +11,10 @@ from agentpit.datastructures.place_order_request import PlaceOrderRequest
 
 
 def _req(price: str) -> PlaceOrderRequest:
-    return PlaceOrderRequest(
-        market_id=1, outcome="Yes", side="BUY", price=price, size=100
-    )
+    return PlaceOrderRequest(token_id="123", side="BUY", price=price, size=100)
 
 
 def test_price_snaps_to_tenth_cent_tick():
-    """Finer-than-0.1¢ precision is impossible: a 0.0125 submission is snapped
-    onto the 0.001 grid rather than resting at sub-tick precision."""
     assert _req("0.0125").price == Decimal("0.012")  # round-half-to-even
     assert _req("0.1239").price == Decimal("0.124")
 
@@ -27,25 +25,12 @@ def test_on_tick_prices_pass_through_unchanged():
 
 
 def test_rejects_when_snapped_out_of_range():
-    # Snaps to 0.000 / 1.000 → no longer a valid (0, 1) probability.
     for p in ("0.0004", "0.9997"):
         with pytest.raises(ValidationError):
             _req(p)
 
 
-def test_token_id_only_is_valid():
-    r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size=100)
-    assert r.token_id == "123"
-    assert r.market_id is None and r.outcome is None
-
-
-def test_market_outcome_fallback_is_valid():
-    r = PlaceOrderRequest(market_id=1, outcome="Yes", side="BUY", price="0.5", size=100)
-    assert r.token_id is None
-    assert r.market_id == 1 and r.outcome == "Yes"
-
-
-def test_requires_an_identifier():
+def test_token_id_required():
     with pytest.raises(ValidationError):
         PlaceOrderRequest(side="BUY", price="0.5", size=100)
 
@@ -68,13 +53,3 @@ def test_size_below_one_base_unit_rejected():
 def test_size_exactly_one_base_unit_ok():
     r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size="0.000001")
     assert r.size == Decimal("0.000001")
-
-
-def test_market_id_without_outcome_rejected():
-    with pytest.raises(ValidationError):
-        PlaceOrderRequest(market_id=1, side="BUY", price="0.5", size=100)
-
-
-def test_outcome_without_market_id_rejected():
-    with pytest.raises(ValidationError):
-        PlaceOrderRequest(outcome="Yes", side="BUY", price="0.5", size=100)
