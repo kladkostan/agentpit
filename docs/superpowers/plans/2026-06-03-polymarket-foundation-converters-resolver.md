@@ -404,8 +404,8 @@ This plan is purely additive (new modules + tests, no edits to existing code), s
 
 - [ ] **Step 1: Run the whole suite**
 
-Run: `pytest -q`
-Expected: PASS — all pre-existing tests plus the 13 new ones (6 format + 7 resolve). No failures, no new warnings in the new files.
+Run: `.venv/bin/python -m pytest -q`
+Expected: the 12 new tests (5 format + 7 resolve) pass. Pre-existing on-chain integration tests that require a deployed exchange on a local anvil node may fail in environments without one — that is unrelated to this additive change.
 
 - [ ] **Step 2: (no commit — verification only)**
 
@@ -415,7 +415,7 @@ If anything fails, it indicates an import cycle or a name clash introduced by th
 
 ## Verification
 
-After all tasks: `pytest tests/polymarket/ -v` is green (13 tests), `pytest -q` is green overall, and `agentpit/polymarket/format.py` + `agentpit/polymarket/resolve.py` exist with the exact public functions consumed by later plans: `price_to_decimal_str`, `price_to_float`, `size_to_decimal_str`, `size_to_float`, `decimal_str_to_price_int`, `decimal_str_to_size_micro`, `resolve_by_market_outcome`, `resolve_by_token_id`, and the `ResolvedOutcome` dataclass.
+After all tasks: `.venv/bin/python -m pytest tests/polymarket/test_format.py tests/polymarket/test_resolve.py -v` is green (12 tests), and `agentpit/polymarket/format.py` + `agentpit/polymarket/resolve.py` exist with the exact public functions consumed by later plans: `price_to_decimal_str`, `price_to_float`, `size_to_decimal_str`, `size_to_float`, `decimal_str_to_price_int`, `decimal_str_to_size_micro`, `resolve_by_market_outcome`, `resolve_by_token_id`, and the `ResolvedOutcome` dataclass.
 
 ## Next plans (not in scope here)
 
