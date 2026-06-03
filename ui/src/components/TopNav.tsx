@@ -3,51 +3,15 @@ import { AuthButtons } from "@/components/auth/AuthButtons";
 import { useAuth } from "@/auth/useAuth";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import { useSearch } from "@/lib/searchContext";
-import { useTheme } from "@/lib/theme";
+import { getResolvedTheme, setTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { LogOut, Moon, Settings, Sun, User } from "lucide-react";
-
-const menuPaperSx = {
-  width: 220,
-  borderRadius: 2.5,
-  mt: 1,
-  border: "1px solid hsl(var(--border) / 0.7)",
-  backgroundColor: "hsl(var(--popover))",
-  color: "hsl(var(--popover-foreground))",
-  boxShadow:
-    "0 16px 40px -20px hsl(var(--foreground) / 0.45), 0 2px 12px -4px hsl(var(--foreground) / 0.25)",
-  overflow: "hidden",
-};
-
-const menuListSx = { p: 0.75 };
-
-const menuItemSx = {
-  minHeight: 38,
-  borderRadius: 1.5,
-  px: 1.5,
-  py: 0.75,
-  fontSize: "0.875rem",
-  color: "hsl(var(--foreground))",
-  "&:hover": {
-    backgroundColor: "hsl(var(--muted))",
-  },
-};
-
-const logoutItemSx = {
-  ...menuItemSx,
-  color: "rgb(220 38 38)",
-  "&:hover": {
-    backgroundColor: "rgb(239 68 68 / 0.1)",
-  },
-};
+import { LogOut, Moon, Settings, User } from "lucide-react";
 
 export function TopNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  const isDarkMode = theme === "dark";
   const showSearch = pathname === "/" || pathname.startsWith("/events/");
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
@@ -55,6 +19,9 @@ export function TopNav() {
   const avatarLabelSource = user?.handle || user?.email || "?";
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [isDarkMode, setIsDarkMode] = useState(
+    () => getResolvedTheme() === "dark",
+  );
   const open = Boolean(anchorEl);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -80,12 +47,45 @@ export function TopNav() {
     navigate("/settings");
   };
 
-  const handleToggleDarkMode = (
-    event: React.MouseEvent<HTMLLIElement>,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleTheme();
+  const handleToggleDarkMode = () => {
+    const next = !isDarkMode;
+    setTheme(next ? "dark" : "light");
+    setIsDarkMode(next);
+  };
+
+  const menuPaperSx = {
+    width: 220,
+    borderRadius: "1rem", // match menu item rounded-xl
+    mt: 1,
+    border: "1px solid hsl(var(--border) / 0.7)",
+    backgroundColor: "hsl(var(--popover)",
+    color: "hsl(var(--popover-foreground))",
+    boxShadow:
+      "0 16px 40px -20px hsl(var(--foreground) / 0.45), 0 2px 12px -4px hsl(var(--foreground) / 0.25)",
+    overflow: "hidden",
+  };
+
+  const menuItemSx = {
+    minHeight: 38,
+    px: 1.5,
+    py: 0.75,
+    fontSize: "0.875rem",
+    color: "hsl(var(--foreground))",
+    borderRadius: "0.5rem",
+    transition: "background-color 0.15s, border-radius 0.15s",
+    "&:hover": {
+      backgroundColor: "hsl(var(--muted))",
+      borderRadius: "1rem",
+    },
+  };
+
+  const logoutItemSx = {
+    ...menuItemSx,
+    color: "rgb(220 38 38)",
+    "&:hover": {
+      backgroundColor: "rgb(239 68 68 / 0.1)",
+      borderRadius: "1rem",
+    },
   };
 
   return (
@@ -122,19 +122,23 @@ export function TopNav() {
                 anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
                 transformOrigin={{ vertical: "top", horizontal: "center" }}
                 slotProps={{
-                  paper: { sx: menuPaperSx },
-                  list: { sx: menuListSx },
+                  paper: {
+                    sx: menuPaperSx,
+                  },
+                  list: {
+                    sx: { p: 0.75 },
+                  },
                 }}
               >
                 <MenuItem onClick={handleProfile} sx={menuItemSx}>
                   <User className="mr-2 size-4" /> Profile
                 </MenuItem>
-                         <MenuItem
+                <MenuItem
                   sx={menuItemSx}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    handleToggleDarkMode(event);
+                    handleToggleDarkMode();
                   }}
                 >
                   <Moon className="mr-2 size-4" />
