@@ -3,6 +3,7 @@ import { apiFetch } from "@/api/client";
 import type { GammaEvent } from "@/types/gamma";
 import type { Event, EventWithMarkets, ListEventsResponse } from "@/types/event";
 import { gammaToMarket } from "@/api/markets";
+import { isoToUnix } from "@/api/gamma-utils";
 
 export const EVENTS_PAGE_SIZE = 20;
 
@@ -10,9 +11,6 @@ export interface ListEventsParams {
   limit: number;
   offset: number;
 }
-
-const _isoToUnix = (iso: string | null): number | null =>
-  iso ? Math.floor(Date.parse(iso) / 1000) : null;
 
 function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
   const event: Event = {
@@ -22,8 +20,8 @@ function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
     description: g.description,
     icon_url: g.icon,
     category: g.category,
-    start_date: _isoToUnix(g.startDate),
-    end_date: _isoToUnix(g.endDate),
+    start_date: isoToUnix(g.startDate),
+    end_date: isoToUnix(g.endDate),
     polymarket_event_id: null,
   };
   return { event, markets: g.markets.map(gammaToMarket) };

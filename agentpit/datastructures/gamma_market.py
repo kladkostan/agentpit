@@ -5,8 +5,6 @@ Field names + casing match Gamma exactly. `outcomes`, `outcomePrices`, and
 wire format, replicated here so a bot parses agentpit identically to Polymarket.
 """
 
-from typing import List, Optional
-
 from pydantic import BaseModel
 
 
@@ -22,11 +20,11 @@ class GammaMarket(BaseModel):
     active: bool
     closed: bool
     acceptingOrders: bool
-    startDate: Optional[str]
-    endDate: Optional[str]
-    endDateIso: Optional[str]
-    icon: Optional[str]
-    image: Optional[str]
+    startDate: str | None
+    endDate: str | None
+    endDateIso: str | None
+    icon: str | None
+    image: str | None
     volume: str
     liquidity: str
     bestBid: float
@@ -40,8 +38,8 @@ class GammaEvent(BaseModel):
     slug: str
     title: str
     description: str
-    icon: Optional[str]
-    category: Optional[str]
-    startDate: Optional[str]
-    endDate: Optional[str]
-    markets: List[GammaMarket]
+    icon: str | None
+    category: str | None
+    startDate: str | None
+    endDate: str | None
+    markets: list[GammaMarket]

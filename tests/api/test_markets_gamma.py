@@ -70,3 +70,21 @@ def test_filter_by_clob_token_ids(client_and_market):
     body = resp.json()
     assert len(body) == 1
     assert json.loads(body[0]["clobTokenIds"]) == ["111", "222"]
+
+
+def test_filter_by_id(client_and_market):
+    client, market = client_and_market
+    resp = client.get(f"/markets?id={market.market_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == str(market.market_id)
+
+
+def test_filter_by_slug(client_and_market):
+    client, market = client_and_market
+    resp = client.get(f"/markets?slug={market.slug}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["slug"] == market.slug

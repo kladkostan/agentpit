@@ -2,9 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { GammaMarket } from "@/types/gamma";
 import type { Market, MarketState, SparklineResponse } from "@/types/market";
-
-const _isoToUnix = (iso: string | null): number | null =>
-  iso ? Math.floor(Date.parse(iso) / 1000) : null;
+import { isoToUnix } from "@/api/gamma-utils";
 
 const _stateOf = (g: GammaMarket): MarketState =>
   g.active ? "ACTIVE" : g.closed ? "CLOSED" : "DRAFT";
@@ -19,8 +17,8 @@ export function gammaToMarket(g: GammaMarket): Market {
     slug: g.slug,
     description: g.description,
     erc1155_tokens: tokenIds.map((t, i) => [t, labels[i] ?? ""] as const),
-    start_date: _isoToUnix(g.startDate),
-    end_date: _isoToUnix(g.endDate),
+    start_date: isoToUnix(g.startDate),
+    end_date: isoToUnix(g.endDate),
     market_state: _stateOf(g),
     resolved_outcome: null,
     polymarket_id: null,

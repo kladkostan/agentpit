@@ -44,9 +44,11 @@ def test_list_events_returns_bare_gamma_array(client_and_event):
     assert ev["markets"][0]["conditionId"]
 
 
-def test_list_events_empty_is_empty_array(client_and_event):
-    # (no markets seeded variant) — a fresh client returns []
-    pass
+def test_list_events_empty_is_empty_array():
+    with TestClient(app) as client:
+        resp = client.get("/events?limit=10&offset=0")
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 def test_get_event_by_slug_returns_single_gamma(client_and_event):
