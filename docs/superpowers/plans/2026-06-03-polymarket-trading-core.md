@@ -1262,5 +1262,5 @@ Expected: no hits in `agentpit/` (non-bot) or `ui/src/`. (`agentpit_bots/` hits 
 - **Run Python via `.venv/bin/python`.** On-chain tests (`tests/onchain/`) require the forked anvil + deployed stack already running (`scripts/run_node.sh`, `scripts/deploy_exchange.sh`); the env is up as of this plan's baseline.
 - **Cross-check shapes against the live Polymarket OpenAPI** via the docs MCP (`docs.polymarket.com/mcp`) when a wire detail is ambiguous — especially `postOrder` `makingAmount`/`takingAmount` units (Task 3/9) and the `OpenOrder` field set (Task 8).
 - **Secret-safety (§13):** `owner` on `OpenOrder` is the `USER_ID`, never the api_key. The `tests/onchain/test_data_orders.py` owner assertion guards this — keep it.
-- **`agentpit_bots` is out of scope** (Phase 5). Do not edit `agentpit_bots/` or `tests/bots/`.
+- **Internal consumers are out of scope** (Phase 5): do not edit `agentpit_bots/`, `tests/bots/`, or `scripts/seed_market_orders.py`. They call the old order shapes (e.g. `res["filledSize"]`, `POST /orders`) and will break against the new API until the final pass; the suite stays green because the bot tests mock the server and the seed script is standalone (never imported by tests).
 - After editing, report any new LSP diagnostics in changed files and fix them.
