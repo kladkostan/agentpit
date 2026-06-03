@@ -1,12 +1,32 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { EventWithMarkets, ListEventsResponse } from "@/types/event";
+import type { GammaEvent } from "@/types/gamma";
+import type { Event, EventWithMarkets, ListEventsResponse } from "@/types/event";
+import { gammaToMarket } from "@/api/markets";
 
 export const EVENTS_PAGE_SIZE = 20;
 
 export interface ListEventsParams {
   limit: number;
   offset: number;
+}
+
+const _isoToUnix = (iso: string | null): number | null =>
+  iso ? Math.floor(Date.parse(iso) / 1000) : null;
+
+function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
+  const event: Event = {
+    event_id: Number(g.id),
+    slug: g.slug,
+    title: g.title,
+    description: g.description,
+    icon_url: g.icon,
+    category: g.category,
+    start_date: _isoToUnix(g.startDate),
+    end_date: _isoToUnix(g.endDate),
+    polymarket_event_id: null,
+  };
+  return { event, markets: g.markets.map(gammaToMarket) };
 }
 
 export async function listEvents(
@@ -16,11 +36,18 @@ export async function listEvents(
     limit: String(params.limit),
     offset: String(params.offset),
   });
-  return apiFetch<ListEventsResponse>(`/events?${search.toString()}`);
+  const wire = await apiFetch<GammaEvent[]>(`/events?${search.toString()}`);
+  const events = wire.map(gammaToEventWithMarkets);
+  // Gamma returns a bare array with no total; derive a total that keeps the
+  // infinite query paging while pages come back full, stopping on a short page.
+  const total =
+    params.offset + events.length + (events.length === params.limit ? 1 : 0);
+  return { events, total, limit: params.limit, offset: params.offset };
 }
 
 export async function getEvent(slug: string): Promise<EventWithMarkets> {
-  return apiFetch<EventWithMarkets>(`/events/${encodeURIComponent(slug)}`);
+  const g = await apiFetch<GammaEvent>(`/events/${encodeURIComponent(slug)}`);
+  return gammaToEventWithMarkets(g);
 }
 
 export function useEventsInfinite() {
