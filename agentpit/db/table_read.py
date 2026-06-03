@@ -446,23 +446,6 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def list_live_orders_for_api_key(
-        db: sqlite3.Connection, api_key: str
-    ) -> list[dict]:
-        db.row_factory = sqlite3.Row
-        cur = db.execute(
-            """
-            SELECT ORDER_ID, TOKEN_ID, SIDE, PRICE, REMAINING_AMOUNT,
-                   MAKER, CREATED_AT, STATUS, ORDER_TYPE, EXPIRATION
-            FROM orders
-            WHERE API_KEY = ? AND STATUS = 'live'
-            ORDER BY CREATED_AT DESC
-            """,
-            (api_key,),
-        )
-        return [dict(r) for r in cur.fetchall()]
-
-    @staticmethod
     def get_transaction_history(db: sqlite3.Connection, api_key: str) -> list:
         """
         Fetch the transaction history for a given API key.
