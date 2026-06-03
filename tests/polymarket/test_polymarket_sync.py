@@ -54,10 +54,11 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     assert total == len(created_markets)
     assert len(db_markets) == len(created_markets)
 
+    # list_markets returns newest-first (MARKET_ID DESC), which need not match
+    # creation order, so match the synced row by id rather than by position.
     first_synced = created_markets[0]
-    first_db = db_markets[0]
+    first_db = next(m for m in db_markets if m.market_id == first_synced.market_id)
 
-    assert first_db.market_id == first_synced.market_id
     assert first_db.question == first_synced.question
     assert first_db.description == first_synced.description
     assert len(first_db.erc1155_tokens) > 0

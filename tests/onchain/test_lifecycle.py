@@ -15,11 +15,17 @@ def test_market_lifecycle_happy_path():
 
     activate = client.post(f"/markets/{mid}/activate").json()
     assert activate["market_state"] == "ACTIVE"
-    assert client.get(f"/markets/{mid}").json()["market_state"] == "ACTIVE"
+    # GET /markets/{id} returns the Gamma shape (no market_state string);
+    # ACTIVE surfaces as active=true / acceptingOrders=true / closed=false.
+    fetched = client.get(f"/markets/{mid}").json()
+    assert fetched["active"] is True and fetched["acceptingOrders"] is True
+    assert fetched["closed"] is False
 
     close = client.post(f"/markets/{mid}/close").json()
     assert close["market_state"] == "CLOSED"
-    assert client.get(f"/markets/{mid}").json()["market_state"] == "CLOSED"
+    # CLOSED surfaces in Gamma as closed=true / active=false.
+    fetched = client.get(f"/markets/{mid}").json()
+    assert fetched["closed"] is True and fetched["active"] is False
 
     resolve = client.post(
         f"/markets/{mid}/resolve", json={"winning_outcome_index": 0}
@@ -36,7 +42,8 @@ def test_cancel_market_from_draft():
     # On-chain CTF positions: refund flows are now off-loaded to merge/redeem
     # by users themselves, so the backend-side counter is always 0.
     assert cancel["refunds_processed"] == 0
-    assert client.get(f"/markets/{mid}").json()["market_state"] == "CANCELLED"
+    # CANCELLED also surfaces as closed=true in the Gamma shape.
+    assert client.get(f"/markets/{mid}").json()["closed"] is True
 
 
 def test_invalid_state_transitions():

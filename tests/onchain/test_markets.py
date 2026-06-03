@@ -3,6 +3,8 @@
 Live-chain because POST /markets calls prepareCondition + registerToken.
 """
 
+import json
+
 from tests.onchain._helpers import create_market, fresh_client, unique_question
 
 
@@ -19,10 +21,13 @@ def test_create_and_get_market_round_trip():
     assert yes_label == "YES" and no_label == "NO"
     assert int(yes_id) > 0 and int(no_id) > 0
 
+    # GET /markets/{id} returns the Gamma shape: numeric id as a string,
+    # conditionId as a bare string, outcomes/clobTokenIds as JSON strings.
     fetched = client.get(f"/markets/{created['market_id']}").json()
-    assert fetched["market_id"] == created["market_id"]
-    assert fetched["condition_id"] == created["condition_id"]
-    assert fetched["erc1155_tokens"] == created["erc1155_tokens"]
+    assert fetched["id"] == str(created["market_id"])
+    assert fetched["conditionId"] == created["condition_id"]["value"]
+    assert json.loads(fetched["outcomes"]) == [yes_label, no_label]
+    assert json.loads(fetched["clobTokenIds"]) == [yes_id, no_id]
 
 
 def test_get_unknown_market_returns_404():
@@ -37,14 +42,14 @@ def test_list_markets_paginates():
     for _ in range(3):
         ids.append(create_market(client)["market_id"])
 
+    # GET /markets returns a bare Gamma array; ids surface as strings.
     body = client.get("/markets?limit=100&offset=0").json()
-    assert body["total"] >= 3
-    fetched_ids = {m["market_id"] for m in body["markets"]}
-    assert set(ids).issubset(fetched_ids)
+    assert len(body) >= 3
+    fetched_ids = {m["id"] for m in body}
+    assert {str(i) for i in ids}.issubset(fetched_ids)
 
     page = client.get("/markets?limit=2&offset=0").json()
-    assert page["limit"] == 2
-    assert len(page["markets"]) == 2
+    assert len(page) == 2
 
     bad = client.get("/markets?limit=2000")
     assert bad.status_code == 400
