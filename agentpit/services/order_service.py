@@ -146,6 +146,7 @@ class OrderService:
 
     def cancel_orders(self, user: User, order_ids: list[str]) -> CancelOrdersResponse:
         """Cancel a set of the caller's live orders by id (§8.2)."""
+        order_ids = list(dict.fromkeys(order_ids))  # dedup, preserve order (Polymarket ignores dupes)
         result = CancelOrdersResponse()
         with self._db.write() as conn:
             for order_id in order_ids:

@@ -1,6 +1,11 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 
 from agentpit.api.deps import CurrentUserDep, OrderServiceDep
+from agentpit.datastructures.cancel_orders_response import CancelOrdersResponse
+from agentpit.datastructures.cancel_requests import (
+    CancelMarketOrdersRequest,
+    CancelOrderRequest,
+)
 from agentpit.datastructures.order_response import OrderResponse
 from agentpit.datastructures.place_order_request import PlaceOrderRequest
 
@@ -16,19 +21,39 @@ def place_order(
     return service.place_order(user, payload)
 
 
-@router.delete("/orders/{order_id}")
+@router.delete("/order", response_model=CancelOrdersResponse)
 def cancel_order(
-    order_id: str,
+    payload: CancelOrderRequest,
     user: CurrentUserDep,
     service: OrderServiceDep,
-) -> dict:
-    cancelled = service.cancel_order(user, order_id)
-    if not cancelled:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="order not found, not yours, or already settled",
-        )
-    return {"order_id": order_id, "status": "cancelled"}
+) -> CancelOrdersResponse:
+    return service.cancel_orders(user, [payload.orderID])
+
+
+@router.delete("/orders", response_model=CancelOrdersResponse)
+def cancel_orders(
+    order_ids: list[str],
+    user: CurrentUserDep,
+    service: OrderServiceDep,
+) -> CancelOrdersResponse:
+    return service.cancel_orders(user, order_ids)
+
+
+@router.delete("/cancel-all", response_model=CancelOrdersResponse)
+def cancel_all(
+    user: CurrentUserDep,
+    service: OrderServiceDep,
+) -> CancelOrdersResponse:
+    return service.cancel_all(user)
+
+
+@router.delete("/cancel-market-orders", response_model=CancelOrdersResponse)
+def cancel_market_orders(
+    payload: CancelMarketOrdersRequest,
+    user: CurrentUserDep,
+    service: OrderServiceDep,
+) -> CancelOrdersResponse:
+    return service.cancel_market_orders(user, payload.market, payload.asset_id)
 
 
 @router.get("/orders/mine")
