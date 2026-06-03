@@ -6,9 +6,11 @@ from web3 import Web3
 from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
+from agentpit.datastructures.gamma_market import GammaMarket
 from agentpit.datastructures.list_markets_response import ListMarketsResponse
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
+from agentpit.polymarket.gamma import to_gamma_market
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
@@ -47,6 +49,37 @@ class MarketService:
         if market is None:
             raise MarketNotFoundError(market_id)
         return market
+
+    def list_markets_gamma(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        market_id: int | None,
+        slug: str | None,
+        condition_ids: list[str] | None,
+        clob_token_ids: list[str] | None,
+        polymarket_condition_id: str | None,
+    ) -> list[GammaMarket]:
+        if limit < 1 or limit > 1000:
+            raise InvalidPaginationError("limit must be between 1 and 1000")
+        if offset < 0:
+            raise InvalidPaginationError("offset must be non-negative")
+        with self._db.read() as conn:
+            markets = TableRead.list_markets_filtered(
+                conn,
+                limit=limit,
+                offset=offset,
+                market_id=market_id,
+                slug=slug,
+                condition_ids=condition_ids,
+                clob_token_ids=clob_token_ids,
+                polymarket_condition_id=polymarket_condition_id,
+            )
+        return [to_gamma_market(m) for m in markets]
+
+    def get_market_gamma(self, market_id: int) -> GammaMarket:
+        return to_gamma_market(self.get_market(market_id))
 
     def create_market(self, payload: CreateMarketRequest) -> Market:
         # Local creation runs on-chain prepareCondition + registerToken so that

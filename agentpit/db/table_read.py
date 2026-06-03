@@ -389,6 +389,54 @@ class TableRead:
         return [(ev, by_event[ev.event_id]) for ev in events], total
 
     @staticmethod
+    def list_markets_filtered(
+        db: sqlite3.Connection,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        market_id: int | None = None,
+        slug: str | None = None,
+        condition_ids: list[str] | None = None,
+        clob_token_ids: list[str] | None = None,
+        polymarket_condition_id: str | None = None,
+    ) -> list[Market]:
+        clauses: list[str] = []
+        params: list = []
+        if market_id is not None:
+            clauses.append("MARKET_ID = ?")
+            params.append(market_id)
+        if slug is not None:
+            clauses.append("SLUG = ?")
+            params.append(slug)
+        if condition_ids:
+            placeholders = ",".join("?" for _ in condition_ids)
+            clauses.append(f"CONDITION_ID IN ({placeholders})")
+            params.extend(condition_ids)
+        if polymarket_condition_id is not None:
+            clauses.append("POLYMARKET_CONDITION_ID = ?")
+            params.append(polymarket_condition_id)
+        if clob_token_ids:
+            # Match markets whose ERC1155_TOKENS JSON contains any given token id.
+            # Quote-anchored, wildcards escaped (see resolve.resolve_by_token_id).
+            ors = []
+            for token_id in clob_token_ids:
+                escaped = (
+                    token_id.replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                )
+                ors.append("ERC1155_TOKENS LIKE ? ESCAPE '\\'")
+                params.append(f'%"{escaped}"%')
+            clauses.append("(" + " OR ".join(ors) + ")")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        cur = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets {where} "
+            "ORDER BY MARKET_ID DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        )
+        return [_row_to_market(row) for row in cur.fetchall()]
+
+    @staticmethod
     def list_orphan_markets(db: sqlite3.Connection) -> list[Market]:
         """Markets with no EVENT_ID — used by the auto-wrap singleton helper."""
         cur = db.execute(
