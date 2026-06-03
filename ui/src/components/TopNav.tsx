@@ -6,7 +6,7 @@ import { useSearch } from "@/lib/searchContext";
 import { useTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { LogOut, Moon, Settings, Sun, User } from "lucide-react";
+import { LogOut, Moon, Settings, User } from "lucide-react";
 
 const menuPaperSx = {
   width: 220,
