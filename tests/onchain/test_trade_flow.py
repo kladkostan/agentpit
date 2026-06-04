@@ -212,6 +212,7 @@ def test_complementary_buys_mint_via_split():
     # MINT delivered 50M of each token to the respective buyer.
     assert admin.ctf_balance(ea, yes_id) == 50_000_000
     assert admin.ctf_balance(eb, no_id) == 50_000_000
-    # A's order remains live with 50M outstanding.
-    book = client.get(f"/orderbook/{market['market_id']}/YES").json()
-    assert any(int(b["REMAINING_AMOUNT"]) == 50_000_000 for b in book["bids"]), book
+    # A's order remains live with 50 shares (50M base units) outstanding.
+    yes_token = market["erc1155_tokens"][0][0]
+    book = client.get(f"/book?token_id={yes_token}").json()
+    assert any(lvl["size"] == "50" for lvl in book["bids"]), book
