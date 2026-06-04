@@ -1,11 +1,11 @@
 /** A point in the chart's local coordinate space (post-projection). */
 export type ChartCoord = readonly [x: number, y: number];
 
-/** A raw price sample as returned by `/sparkline`. */
+/** A raw price sample as returned by `/prices-history`. */
 export interface SparklineSample {
   /** Unix seconds. */
   t: number;
-  /** Price in micro-USDC (0–1_000_000). */
+  /** Probability in [0, 1]. */
   p: number;
 }
 
@@ -37,12 +37,12 @@ export function smoothPath(coords: ReadonlyArray<ChartCoord>): string {
 
 /** Y-axis projection mode.
  *
- *  - `"fixed"` (default) — price 0 maps to the bottom, 1_000_000 to the top.
+ *  - `"fixed"` (default) — probability 0 maps to the bottom, 1 to the top.
  *    Use when multiple charts need directly-comparable axes (e.g. the
  *    multi-line chart on the event detail page).
  *  - `"relative"` — the input's own min/max stretches across the full
  *    height. Use when a single sparkline should look dynamic regardless
- *    of where the price sits in [0, 1] (e.g. home-page market cards).
+ *    of where the probability sits in [0, 1] (e.g. home-page market cards).
  *    Constant-price series collapse to the vertical center.
  */
 export type ScaleMode = "fixed" | "relative";
@@ -54,7 +54,7 @@ export interface ProjectionDims {
   padY?: number;
   scaleMode?: ScaleMode;
   /** Upper bound of the fixed-mode domain, in micro-USDC. Defaults to
-   *  1_000_000 (a full 0–100% axis). Pass a tighter value (see
+   *  1 (a full 0–100% probability axis). Pass a tighter value (see
    *  {@link niceChartScale}) to zoom the chart onto low-probability data.
    *  Ignored in `"relative"` mode. */
   fixedMax?: number;
@@ -108,13 +108,13 @@ export function niceChartScale(maxFraction: number): ChartScale {
 
 /** Project sparkline samples into chart-local SVG coords.
  *
- *  Y-axis convention: higher price → higher in the chart (smaller y).
- *  In `"fixed"` mode the axis spans 0 → 1_000_000 (i.e. 0% → 100%) so
- *  multiple charts have directly-comparable elevations. In `"relative"`
- *  mode the input's own min/max stretches across the full height.
+ *  Y-axis convention: higher probability → higher in the chart (smaller y).
+ *  In `"fixed"` mode the axis spans 0 → 1 (i.e. 0% → 100%) so multiple
+ *  charts have directly-comparable elevations. In `"relative"` mode the
+ *  input's own min/max stretches across the full height.
  *
- *  Out-of-range prices in fixed mode are clamped to the chart edges to
- *  defend against bad upstream data.
+ *  Out-of-range probabilities in fixed mode are clamped to the chart edges
+ *  to defend against bad upstream data.
  *
  *  X-axis is by sample index, not by timestamp — sparse trade streams stay
  *  comfortably spaced rather than clumping near recent activity.
@@ -127,7 +127,7 @@ export function projectToViewBox(
     padX = 0,
     padY = 0,
     scaleMode = "fixed",
-    fixedMax = 1_000_000,
+    fixedMax = 1,
   }: ProjectionDims,
 ): ChartCoord[] {
   if (samples.length === 0) return [];

@@ -14,8 +14,9 @@ interface MultiSparklineProps {
   /** Logical viewBox width — actual rendered width is controlled by CSS. */
   width?: number;
   height?: number;
-  /** Upper bound of the vertical domain, in micro-USDC. Defaults to a full
-   *  0–100% axis; pass a focused value to zoom onto low-probability data. */
+  /** Upper bound of the vertical domain as a probability fraction [0, 1].
+   *  Defaults to a full 0–100% axis; pass a focused value to zoom onto
+   *  low-probability data. */
   maxP?: number;
   /** Interior gridline positions as fractions of the domain (0–1). Defaults
    *  to the quartile lines. The 0 and top edges are intentionally omitted. */
@@ -35,7 +36,7 @@ export function MultiSparkline({
   series,
   width = 600,
   height = 180,
-  maxP = 1_000_000,
+  maxP = 1,
   gridRatios = DEFAULT_GRID_RATIOS,
   className,
 }: MultiSparklineProps) {

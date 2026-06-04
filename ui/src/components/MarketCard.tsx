@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
-import { useSparkline } from "@/api/markets";
+import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
-import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
+import { formatProbabilityPct, formatShortDate } from "@/lib/format";
 import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
@@ -27,9 +27,8 @@ const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
 
 export function MarketCard({ market, eventSlug }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
-  const yesLabel = market.erc1155_tokens[0]?.[1];
   const { mid: yesMid } = useOutcomeMid(yesTokenId);
-  const { data: spark } = useSparkline(market.market_id, yesLabel);
+  const { data: spark } = usePricesHistory(yesTokenId);
   const yesPctLabel = formatProbabilityPct(yesMid);
   const tone = STATE_TONE[market.market_state];
   const closes = formatShortDate(market.end_date);
@@ -37,17 +36,15 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;
 
-  const points = spark?.points ?? [];
+  const points = spark?.history ?? [];
   // Change is expressed in percentage points of probability (Δcents).
-  // Sparkline prices are micro-USDC ∈ [0, 1_000_000] → divide by 10_000 to
-  // get cents, then round to an integer delta.
+  // Prices are probabilities in [0, 1] → multiply by 100 to get cents.
   const change =
     points.length >= 2
       ? Math.round(
-          (points[points.length - 1]!.p - points[0]!.p) / 10_000,
+          (points[points.length - 1]!.p - points[0]!.p) * 100,
         )
       : null;
-  const volumeUsd = spark ? spark.volume_total_micro_usd / 1_000_000 : 0;
 
   return (
     <Link
@@ -108,11 +105,6 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
           </div>
         </div>
 
-        {volumeUsd > 0 ? (
-          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground/80 tabular-nums">
-            {formatVolume(volumeUsd)} <span className="text-foreground/40">vol</span>
-          </div>
-        ) : null}
       </article>
     </Link>
   );

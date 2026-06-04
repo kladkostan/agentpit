@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { getSparkline } from "@/api/markets";
+import { getPricesHistory } from "@/api/markets";
 import { MultiSparkline, PAD_Y } from "@/components/MultiSparkline";
 import type { MultiSparklineSeries } from "@/components/MultiSparkline";
 import { niceChartScale } from "@/lib/chartGeometry";
@@ -24,8 +24,6 @@ function formatAxisPct(fraction: number): string {
 
 /** How many time markers to spread across the X axis. */
 const X_AXIS_TICKS = 5;
-/** Window of price history shown on the event detail chart. */
-const WINDOW_HOURS = 30 * 24;
 /** Chart canvas height in viewBox + CSS pixels. */
 const CHART_HEIGHT = 260;
 
@@ -57,10 +55,10 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
 
   const queries = useQueries({
     queries: picked.map((s) => {
-      const outcome = s.market.erc1155_tokens[0]?.[1] ?? "Yes";
+      const tokenId = s.market.erc1155_tokens[0]?.[0] ?? "";
       return {
-        queryKey: ["sparkline", s.market.market_id, outcome, WINDOW_HOURS],
-        queryFn: () => getSparkline(s.market.market_id, outcome, WINDOW_HOURS),
+        queryKey: ["prices-history", tokenId],
+        queryFn: () => getPricesHistory(tokenId),
         staleTime: 30_000,
         refetchInterval: 60_000,
         refetchOnWindowFocus: false,
@@ -78,7 +76,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
       picked.map((s, i) => ({
         id: s.market.market_id,
         color: s.color,
-        points: queryData[i]?.points ?? [],
+        points: queryData[i]?.history ?? [],
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [picked, ...queryData],
@@ -91,20 +89,20 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
     [hasData, series],
   );
 
-  // Zoom the Y axis onto the data: find the peak price across every series
-  // and snap it up to a clean round bound (e.g. a 22.7% peak → a 0–25%
-  // window) so low-probability outcomes aren't squashed against the floor.
+  // Zoom the Y axis onto the data: find the peak probability across every
+  // series and snap it up to a clean round bound (e.g. a 0.227 peak → a
+  // 0–0.25 window) so low-probability outcomes aren't squashed against the floor.
   const scale = useMemo(() => {
     let peak = 0;
     for (const s of series) {
       for (const p of s.points) if (p.p > peak) peak = p.p;
     }
-    return niceChartScale(peak / 1_000_000);
+    return niceChartScale(peak);
   }, [series]);
 
-  // Domain top in micro-USDC, interior gridlines + top→bottom axis labels,
-  // all derived from the same ticks so they never drift apart.
-  const maxP = scale.max * 1_000_000;
+  // Domain top as probability fraction [0, 1], interior gridlines + top→bottom
+  // axis labels, all derived from the same ticks so they never drift apart.
+  const maxP = scale.max;
   const gridRatios = scale.ticks
     .slice(1, -1)
     .map((t) => t / scale.max);

@@ -34,17 +34,10 @@ export interface ListMarketsResponse {
 export interface SparklinePoint {
   /** Trade timestamp in unix seconds. */
   t: number;
-  /** Price in micro-USDC (divide by 1e6 to get dollars in [0, 1]). */
+  /** Probability in [0, 1]. */
   p: number;
 }
 
-export interface SparklineResponse {
-  market_id: number;
-  outcome: string;
-  window_hours: number;
-  points: SparklinePoint[];
-  /** Window volume in micro-USDC (divide by 1e6 for dollars). */
-  volume_micro_usd: number;
-  /** All-time volume in micro-USDC, independent of window_hours. */
-  volume_total_micro_usd: number;
+export interface PricesHistoryResponse {
+  history: SparklinePoint[];
 }

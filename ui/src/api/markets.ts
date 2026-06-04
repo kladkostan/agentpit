@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { GammaMarket } from "@/types/gamma";
-import type { Market, MarketState, SparklineResponse } from "@/types/market";
+import type { Market, MarketState, PricesHistoryResponse } from "@/types/market";
 import { isoToUnix } from "@/api/gamma-utils";
 
 const _stateOf = (g: GammaMarket): MarketState =>
@@ -47,29 +47,23 @@ export function useMarket(id: number | string | undefined) {
   });
 }
 
-export async function getSparkline(
-  marketId: number,
-  outcome: string,
-  windowHours = 24,
-): Promise<SparklineResponse> {
-  const params = new URLSearchParams({ window_hours: String(windowHours) });
-  return apiFetch<SparklineResponse>(
-    `/sparkline/${marketId}/${encodeURIComponent(outcome)}?${params}`,
+export async function getPricesHistory(
+  tokenId: string,
+  interval = "1d",
+): Promise<PricesHistoryResponse> {
+  return apiFetch<PricesHistoryResponse>(
+    `/prices-history?market=${encodeURIComponent(tokenId)}&interval=${interval}`,
   );
 }
 
-export function useSparkline(
-  marketId: number,
-  outcome: string | undefined,
-  windowHours = 24,
-) {
+export function usePricesHistory(tokenId: string | undefined, interval = "1d") {
   return useQuery({
-    queryKey: ["sparkline", marketId, outcome, windowHours],
+    queryKey: ["prices-history", tokenId, interval],
     queryFn: () => {
-      if (!outcome) throw new Error("outcome is required");
-      return getSparkline(marketId, outcome, windowHours);
+      if (!tokenId) throw new Error("tokenId is required");
+      return getPricesHistory(tokenId, interval);
     },
-    enabled: Boolean(outcome),
+    enabled: Boolean(tokenId),
     staleTime: 30_000,
     refetchInterval: 60_000,
     refetchOnWindowFocus: false,
