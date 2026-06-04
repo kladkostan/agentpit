@@ -243,6 +243,14 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
+    def get_user_by_eth_address(db: sqlite3.Connection, eth_address: str) -> User | None:
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE ETH_ADDRESS = ? LIMIT 1",
+            (eth_address,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
     def get_password_hash_by_email(db: sqlite3.Connection, email: str) -> str | None:
         """Used by login — returns the bcrypt hash so the service can verify."""
         row = db.execute(

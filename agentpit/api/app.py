@@ -17,6 +17,7 @@ from agentpit.api.routes import (
     admin,
     agents,
     auth,
+    data_api,
     events,
     market_data,
     markets,
@@ -214,5 +215,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(personalities.router)
     app.include_router(agents.router)
     app.include_router(portfolio.router)
+    app.include_router(data_api.router)
 
     return app

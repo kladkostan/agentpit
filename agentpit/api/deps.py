@@ -7,6 +7,7 @@ from agentpit.config import Settings
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.onchain.admin import OnchainAdmin
+from agentpit.services.account_service import AccountService
 from agentpit.services.agent_service import AgentService
 from agentpit.services.auth_service import AuthService
 from agentpit.services.event_service import EventService
@@ -99,6 +100,11 @@ def get_trade_service(db: SessionDep) -> TradeService:
     return TradeService(db)
 
 
+def get_account_service(db: SessionDep, onchain: OnchainAdminDep) -> AccountService:
+    return AccountService(db, onchain)
+
+
+AccountServiceDep = Annotated[AccountService, Depends(get_account_service)]
 MarketServiceDep = Annotated[MarketService, Depends(get_market_service)]
 EventServiceDep = Annotated[EventService, Depends(get_event_service)]
 UsdcServiceDep = Annotated[UsdcService, Depends(get_usdc_service)]
