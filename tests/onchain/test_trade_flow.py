@@ -128,6 +128,11 @@ def test_match_settles_on_chain():
     assert admin.ctf_balance(ea, yes_id) == 100_000_000
     assert admin.ctf_balance(eb, yes_id) == b_pre_yes - 100_000_000
 
+    # /last-trade-price reflects the settled match: maker price 0.6, taker side SELL.
+    yes_token = market["erc1155_tokens"][0][0]
+    ltp = client.get(f"/last-trade-price?token_id={yes_token}").json()
+    assert ltp == {"price": "0.6", "side": "SELL"}
+
 
 def test_complementary_buys_mint_via_split():
     """Two BUYs on opposite outcomes whose prices sum to >= 1.00 should match.

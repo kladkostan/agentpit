@@ -31,3 +31,18 @@ def get_prices_history(
     return service.get_prices_history(
         market, start_ts=startTs, end_ts=endTs, interval=interval, fidelity=fidelity
     )
+
+
+@router.get("/midpoint")
+def get_midpoint(token_id: str, service: OrderServiceDep) -> dict:
+    return service.get_midpoint(token_id)
+
+
+@router.get("/price")
+def get_price(token_id: str, side: str, service: OrderServiceDep) -> dict:
+    return service.get_price(token_id, side)
+
+
+@router.get("/last-trade-price")
+def get_last_trade_price(token_id: str, service: OrderServiceDep) -> dict:
+    return service.get_last_trade_price(token_id)

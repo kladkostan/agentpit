@@ -23,6 +23,7 @@ from agentpit.domain.exceptions import (
     InsufficientBalanceError,
     MarketNotFoundError,
     MarketStateError,
+    NotFoundError,
 )
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.order_signer import OrderData, sign_order
@@ -379,6 +380,45 @@ class OrderService:
                 thinned.append(points[-1])
             points = thinned
         return {"history": points}
+
+    def _best_bid_ask(self, token_id: str) -> tuple[int | None, int | None]:
+        """(best_bid_price_int, best_ask_price_int) from the live book."""
+        with self._db.read() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT SIDE, PRICE FROM orders "
+                "WHERE TOKEN_ID = ? AND STATUS = 'live'",
+                (token_id,),
+            ).fetchall()
+        bids = [int(r["PRICE"]) for r in rows if r["SIDE"] == "BUY"]
+        asks = [int(r["PRICE"]) for r in rows if r["SIDE"] == "SELL"]
+        return (max(bids) if bids else None, min(asks) if asks else None)
+
+    def get_midpoint(self, token_id: str) -> dict:
+        best_bid, best_ask = self._best_bid_ask(token_id)
+        if best_bid is None or best_ask is None:
+            raise NotFoundError("no book for token")
+        return {"mid": price_to_decimal_str((best_bid + best_ask) // 2)}
+
+    def get_price(self, token_id: str, side: str) -> dict:
+        best_bid, best_ask = self._best_bid_ask(token_id)
+        chosen = best_ask if side == "BUY" else best_bid
+        if chosen is None:
+            raise NotFoundError("no resting orders on that side")
+        return {"price": price_to_decimal_str(chosen)}
+
+    def get_last_trade_price(self, token_id: str) -> dict:
+        with self._db.read() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT PRICE, SIDE FROM trades "
+                "WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
+                "ORDER BY MATCH_TIME DESC LIMIT 1",
+                (token_id,),
+            ).fetchone()
+        if row is None:
+            raise NotFoundError("no trades for token")
+        return {"price": price_to_decimal_str(int(row["PRICE"])), "side": row["SIDE"]}
 
     # --- internals ------------------------------------------------------
 
