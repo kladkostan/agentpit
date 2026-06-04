@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import secrets
@@ -11,6 +12,7 @@ from eth_utils.crypto import keccak
 from web3 import Web3
 
 from agentpit.datastructures.cancel_orders_response import CancelOrdersResponse
+from agentpit.datastructures.orderbook_summary import OrderBookLevel, OrderBookSummary
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.order_response import OrderResponse
 from agentpit.datastructures.place_order_request import PlaceOrderRequest
@@ -265,25 +267,67 @@ class OrderService:
             ]
         return self.cancel_orders(user, ids)
 
-    def get_orderbook(self, market_id: int, outcome: str) -> dict[str, Any]:
-        _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
+    def get_book(self, token_id: str) -> OrderBookSummary:
+        """Aggregated order book for one outcome token (§8.5)."""
         with self._db.read() as conn:
+            resolved = resolve_by_token_id(conn, token_id)
+            if resolved is None:
+                raise MarketNotFoundError(0)
             conn.row_factory = sqlite3.Row
-            cur = conn.execute(
-                "SELECT ORDER_ID, SIDE, PRICE, REMAINING_AMOUNT, MAKER, CREATED_AT "
-                "FROM orders WHERE TOKEN_ID = ? AND STATUS = 'live'",
-                (token_id_str,),
-            )
-            rows = [dict(r) for r in cur.fetchall()]
+            rows = conn.execute(
+                "SELECT SIDE, PRICE, SUM(REMAINING_AMOUNT) AS SZ FROM orders "
+                "WHERE TOKEN_ID = ? AND STATUS = 'live' GROUP BY SIDE, PRICE",
+                (token_id,),
+            ).fetchall()
+            last = conn.execute(
+                "SELECT PRICE FROM trades WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
+                "ORDER BY MATCH_TIME DESC LIMIT 1",
+                (token_id,),
+            ).fetchone()
         bids = sorted(
             (r for r in rows if r["SIDE"] == "BUY"),
-            key=lambda r: (-int(r["PRICE"]), int(r["CREATED_AT"])),
+            key=lambda r: -int(r["PRICE"]),
         )
         asks = sorted(
             (r for r in rows if r["SIDE"] == "SELL"),
-            key=lambda r: (int(r["PRICE"]), int(r["CREATED_AT"])),
+            key=lambda r: int(r["PRICE"]),
         )
-        return {"market_id": market_id, "outcome": outcome, "bids": bids, "asks": asks}
+
+        def level(r: sqlite3.Row) -> OrderBookLevel:
+            return OrderBookLevel(
+                price=price_to_decimal_str(int(r["PRICE"])),
+                size=size_to_decimal_str(int(r["SZ"])),
+            )
+
+        bid_levels = [level(r) for r in bids]
+        ask_levels = [level(r) for r in asks]
+        last_trade_price = (
+            price_to_decimal_str(int(last["PRICE"])) if last is not None else "0"
+        )
+        timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+        digest_src = "".join(
+            f"{l.price}:{l.size}|" for l in (*bid_levels, *ask_levels)
+        )
+        book_hash = hashlib.sha1(digest_src.encode()).hexdigest()  # noqa: S324
+        return OrderBookSummary(
+            market=resolved.condition_id,
+            asset_id=token_id,
+            timestamp=timestamp,
+            hash=book_hash,
+            bids=bid_levels,
+            asks=ask_levels,
+            last_trade_price=last_trade_price,
+        )
+
+    def get_books(self, token_ids: list[str]) -> list[OrderBookSummary]:
+        """Batch book read (§8.5). Skips unknown token ids."""
+        out: list[OrderBookSummary] = []
+        for token_id in token_ids:
+            try:
+                out.append(self.get_book(token_id))
+            except MarketNotFoundError:
+                continue
+        return out
 
     def get_sparkline(
         self, market_id: int, outcome: str, window_hours: int = 24

@@ -70,15 +70,6 @@ def list_open_orders(
     )
 
 
-@router.get("/orderbook/{market_id}/{outcome}")
-def get_orderbook(
-    market_id: int,
-    outcome: str,
-    service: OrderServiceDep,
-) -> dict:
-    return service.get_orderbook(market_id, outcome)
-
-
 @router.get("/sparkline/{market_id}/{outcome}")
 def get_sparkline(
     market_id: int,
