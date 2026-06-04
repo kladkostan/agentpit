@@ -14,7 +14,6 @@ from agentpit.services.event_service import EventService
 from agentpit.services.market_service import MarketService
 from agentpit.services.order_service import OrderService
 from agentpit.services.personality_service import PersonalityService
-from agentpit.services.portfolio_service import PortfolioService
 from agentpit.services.position_service import PositionService
 from agentpit.services.trade_service import TradeService
 from agentpit.services.usdc_service import UsdcService
@@ -79,10 +78,6 @@ def get_agent_service(db: SessionDep) -> AgentService:
     return AgentService(db)
 
 
-def get_portfolio_service(db: SessionDep, onchain: OnchainAdminDep) -> PortfolioService:
-    return PortfolioService(db, onchain)
-
-
 def get_auth_service(
     db: SessionDep,
     coder: JwtCoderDep,
@@ -111,7 +106,6 @@ UsdcServiceDep = Annotated[UsdcService, Depends(get_usdc_service)]
 PositionServiceDep = Annotated[PositionService, Depends(get_position_service)]
 PersonalityServiceDep = Annotated[PersonalityService, Depends(get_personality_service)]
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
-PortfolioServiceDep = Annotated[PortfolioService, Depends(get_portfolio_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 OrderServiceDep = Annotated[OrderService, Depends(get_order_service)]
 TradeServiceDep = Annotated[TradeService, Depends(get_trade_service)]

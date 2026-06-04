@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getBook, placeMarketOrder, placeOrder, useBook } from "@/api/orders";
-import { usePortfolio } from "@/api/portfolio";
+import { usePositions } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { useRequireAuth } from "@/auth/useRequireAuth";
 import {
@@ -24,9 +24,6 @@ import type { OrderBookSummary, OrderSide } from "@/types/order";
 import { ApiError } from "@/api/client";
 
 type Mode = "Limit" | "Market";
-
-// Portfolio balances are stored as micro-shares on the server.
-const PORTFOLIO_SHARES_SCALE = 1_000_000;
 
 interface OrderTicketProps {
   marketId: number;
@@ -70,7 +67,7 @@ function parseDecimal(input: string): number {
 }
 
 export function OrderTicket({
-  marketId,
+  marketId: _marketId,
   tokens,
   outcome,
   question,
@@ -90,17 +87,23 @@ export function OrderTicket({
   const tokenId = tokens.find(([, label]) => label === outcome)?.[0] ?? "";
   const { data: book } = useBook(tokenId);
   const { user } = useAuth();
-  const { data: portfolio } = usePortfolio(Boolean(user));
+  const { data: positionsList } = usePositions(user?.eth_address);
+
+  // Build a set of token_ids that belong to this market for fast membership check.
+  const marketTokenIds = useMemo(
+    () => new Set(tokens.map(([id]) => id)),
+    [tokens],
+  );
 
   const heldByOutcome = useMemo(() => {
     const map = new Map<string, number>();
-    if (!portfolio) return map;
-    for (const p of portfolio.positions) {
-      if (p.market_id !== marketId) continue;
-      map.set(p.outcome_label, p.balance / PORTFOLIO_SHARES_SCALE);
+    if (!positionsList) return map;
+    for (const p of positionsList) {
+      if (!marketTokenIds.has(p.asset)) continue;
+      map.set(p.outcome, p.size);
     }
     return map;
-  }, [portfolio, marketId]);
+  }, [positionsList, marketTokenIds]);
 
   const heldOfCurrent = heldByOutcome.get(outcome) ?? 0;
 
@@ -121,7 +124,7 @@ export function OrderTicket({
     void queryClient.invalidateQueries({
       queryKey: ["book", tokenId],
     });
-    void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+    void queryClient.invalidateQueries({ queryKey: ["positions", user?.eth_address] });
   };
 
   const limitMutation = useMutation({

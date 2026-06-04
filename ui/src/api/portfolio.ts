@@ -1,29 +1,50 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 
-export interface PortfolioPosition {
-  market_id: number;
-  question: string;
-  token_id: string;
-  outcome_label: string;
-  outcome_index: number;
-  balance: number;
+export interface Position {
+  proxyWallet: string;
+  asset: string;          // token_id
+  conditionId: string;
+  size: number;           // display shares
+  avgPrice: number;
+  curPrice: number;
+  cashPnl: number;
+  currentValue: number;
+  outcome: string;
+  outcomeIndex: number;
+  oppositeOutcome: string;
+  oppositeAsset: string;
+  title: string;
+  slug: string;
+  icon: string;
+  redeemable: boolean;
 }
 
-export interface PortfolioResponse {
-  eth_address: string;
-  usdc_balance: number;
-  positions: PortfolioPosition[];
+export async function getPositions(userAddress: string): Promise<Position[]> {
+  return apiFetch<Position[]>(`/positions?user=${encodeURIComponent(userAddress)}`);
 }
 
-export async function getPortfolio(): Promise<PortfolioResponse> {
-  return apiFetch<PortfolioResponse>("/portfolio");
-}
-
-export function usePortfolio(enabled = true) {
+export function usePositions(userAddress: string | undefined) {
   return useQuery({
-    queryKey: ["portfolio"],
-    queryFn: getPortfolio,
+    queryKey: ["positions", userAddress],
+    queryFn: () => {
+      if (!userAddress) throw new Error("userAddress is required");
+      return getPositions(userAddress);
+    },
+    enabled: Boolean(userAddress),
+    staleTime: 10_000,
+  });
+}
+
+export async function getUsdcBalance(): Promise<number> {
+  const r = await apiFetch<{ balance: string }>("/balance-allowance?asset_type=COLLATERAL");
+  return Number(r.balance) / 1_000_000;
+}
+
+export function useUsdcBalance(enabled = true) {
+  return useQuery({
+    queryKey: ["balance-allowance", "COLLATERAL"],
+    queryFn: getUsdcBalance,
     enabled,
     staleTime: 10_000,
   });

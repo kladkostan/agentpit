@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { AlertCircle, ArrowUpRight, Search } from "lucide-react";
-import { usePortfolio } from "@/api/portfolio";
+import { usePositions, useUsdcBalance } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { Button } from "@/components/ui/button";
 import { getAvatarStyle } from "@/lib/avatarColor";
@@ -18,8 +18,6 @@ import { Tooltip } from "@mui/material";
 
 type ProfileTab = "positions" | "activity";
 type PositionFilter = "active" | "closed";
-
-const SHARES_SCALE = 1_000_000;
 
 const USD = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -55,22 +53,30 @@ export function ProfilePage() {
     useState<PositionFilter>("active");
   const [search, setSearch] = useState("");
   const { user, isLoading: authLoading } = useAuth();
-  const { data, isLoading, error } = usePortfolio(Boolean(user));
+  const {
+    data: positionsData,
+    isLoading: positionsLoading,
+    error: positionsError,
+  } = usePositions(user?.eth_address);
+  const { data: usdcBalance } = useUsdcBalance(Boolean(user));
   const avatarStyle = getAvatarStyle(user?.eth_address || user?.email);
 
+  const isLoading = positionsLoading;
+  const error = positionsError;
+
   const positions = useMemo(() => {
-    if (!data) return [];
-    return [...data.positions]
-      .filter((p) => p.balance > 0)
-      .sort((a, b) => b.balance - a.balance);
-  }, [data]);
+    if (!positionsData) return [];
+    return [...positionsData]
+      .filter((p) => p.size > 0)
+      .sort((a, b) => b.size - a.size);
+  }, [positionsData]);
 
   const filteredPositions = useMemo(() => {
     if (positionFilter === "closed") return [];
     const q = search.trim().toLowerCase();
     if (!q) return positions;
     return positions.filter((p) => {
-      const hay = `${p.question} ${p.outcome_label}`.toLowerCase();
+      const hay = `${p.title} ${p.outcome}`.toLowerCase();
       return hay.includes(q);
     });
   }, [positions, positionFilter, search]);
@@ -113,8 +119,8 @@ export function ProfilePage() {
             <div className="mt-6 grid grid-cols-3 divide-x rounded-lg border bg-muted/20">
               <TopMetric
                 label="Positions Value"
-                value={USD.format(data?.usdc_balance ?? 0)}
-                tooltip={USD.format(data?.usdc_balance ?? 0)}
+                value={USD.format(usdcBalance ?? 0)}
+                tooltip={USD.format(usdcBalance ?? 0)}
               />
               <TopMetric label="Biggest Win" value="-" />
               <TopMetric
@@ -260,11 +266,13 @@ function PositionList({
   onSearchChange,
 }: {
   positions: {
-    market_id: number;
-    question: string;
-    token_id: string;
-    outcome_label: string;
-    balance: number;
+    asset: string;
+    title: string;
+    outcome: string;
+    size: number;
+    avgPrice: number;
+    curPrice: number;
+    slug: string;
   }[];
   positionFilter: PositionFilter;
   onPositionFilterChange: (next: PositionFilter) => void;
@@ -329,22 +337,30 @@ function PositionList({
             ) : (
               rows.map((position) => (
                 <tr
-                  key={`${position.market_id}-${position.token_id}`}
+                  key={position.asset}
                   className="border-b hover:bg-muted/20"
                 >
                   <td className="px-4 py-4 align-top">
                     <p className="line-clamp-2 font-medium">
-                      {position.question}
+                      {position.title}
                     </p>
                     <p className="mt-1 text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                      {position.outcome_label}
+                      {position.outcome}
                     </p>
                   </td>
-                  <td className="px-4 py-4 text-muted-foreground">-</td>
-                  <td className="px-4 py-4 text-muted-foreground">-</td>
+                  <td className="px-4 py-4 text-muted-foreground">
+                    {position.avgPrice > 0
+                      ? `${Math.round(position.avgPrice * 100)}¢`
+                      : "-"}
+                  </td>
+                  <td className="px-4 py-4 text-muted-foreground">
+                    {position.curPrice > 0
+                      ? `${Math.round(position.curPrice * 100)}¢`
+                      : "-"}
+                  </td>
                   <td className="px-4 py-4 text-right">
                     <p className="font-medium">
-                      {SHARES.format(position.balance / SHARES_SCALE)} shares
+                      {SHARES.format(position.size)} shares
                     </p>
                     <Button
                       asChild
@@ -352,7 +368,7 @@ function PositionList({
                       variant="link"
                       className="h-auto p-0 text-xs"
                     >
-                      <Link to={`/markets/${position.market_id}`}>
+                      <Link to={`/markets/${position.slug}`}>
                         View market
                         <ArrowUpRight className="ml-1 size-3.5" />
                       </Link>
@@ -372,10 +388,10 @@ function ActivityList({
   positions,
 }: {
   positions: {
-    market_id: number;
-    outcome_label: string;
-    balance: number;
-    question: string;
+    asset: string;
+    outcome: string;
+    size: number;
+    title: string;
   }[];
 }) {
   if (positions.length === 0) {
@@ -393,19 +409,19 @@ function ActivityList({
     <div className="divide-y">
       {positions.slice(0, 8).map((position) => (
         <div
-          key={`activity-${position.market_id}-${position.outcome_label}`}
+          key={`activity-${position.asset}-${position.outcome}`}
           className="flex items-center justify-between p-4"
         >
           <div className="min-w-0">
             <p className="text-sm font-medium">
-              Position update: {position.outcome_label}
+              Position update: {position.outcome}
             </p>
             <p className="mt-1 truncate text-xs text-muted-foreground">
-              {position.question}
+              {position.title}
             </p>
           </div>
           <p className="text-sm text-muted-foreground">
-            {SHARES.format(position.balance / SHARES_SCALE)} shares
+            {SHARES.format(position.size)} shares
           </p>
         </div>
       ))}
