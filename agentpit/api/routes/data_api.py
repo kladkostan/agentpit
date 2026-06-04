@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from agentpit.api.deps import AccountServiceDep
+from agentpit.datastructures.activity_wire import ActivityWire
 from agentpit.datastructures.position_wire import PositionWire
 
 router = APIRouter(tags=["data-api"])
@@ -20,3 +21,17 @@ def get_positions(
 @router.get("/value")
 def get_value(user: str, service: AccountServiceDep) -> list[dict]:
     return service.total_value(user)
+
+
+@router.get("/activity", response_model=list[ActivityWire])
+def get_activity(
+    user: str,
+    service: AccountServiceDep,
+    type: str | None = None,
+    market: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[ActivityWire]:
+    return service.list_activity(
+        user, type_filter=_csv(type), market=_csv(market), limit=limit, offset=offset
+    )

@@ -1,11 +1,14 @@
+import json
 import sqlite3
 
+from agentpit.datastructures.activity_wire import ActivityWire
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.position_wire import PositionWire
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.polymarket.format import price_to_float, size_to_float
+from agentpit.polymarket.resolve import resolve_by_token_id
 
 
 class AccountService:
@@ -78,6 +81,87 @@ class AccountService:
         positions = self.list_positions(eth_address)
         total = sum(p.currentValue for p in positions)
         return [{"user": eth_address, "value": total}]
+
+    def list_activity(
+        self,
+        eth_address: str,
+        *,
+        type_filter: list[str] | None = None,
+        market: list[str] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ActivityWire]:
+        with self._db.read() as conn:
+            user = TableRead.get_user_by_eth_address(conn, eth_address)
+            if user is None:
+                return []
+            conn.row_factory = sqlite3.Row
+            trade_rows = conn.execute(
+                "SELECT MARKET, ASSET_ID, SIDE, PRICE, TRADE_SIZE, MATCH_TIME, "
+                "TRANSACTION_HASH FROM trades "
+                "WHERE (TAKER_API_KEY = ? OR MAKER_API_KEY = ?) AND STATUS != 'FAILED'",
+                (user.api_key, user.api_key),
+            ).fetchall()
+            tx_rows = conn.execute(
+                "SELECT TRANSACTION_TYPE, MARKET_ID, DETAILS, "
+                "CAST(strftime('%s', TIMESTAMP) AS INTEGER) AS TS "
+                "FROM transactions WHERE API_KEY = ?",
+                (user.api_key,),
+            ).fetchall()
+
+            acts: list[ActivityWire] = []
+            for r in trade_rows:
+                resolved = resolve_by_token_id(conn, r["ASSET_ID"])
+                mkt = resolved.market if resolved else None
+                price = price_to_float(int(r["PRICE"]))
+                size = size_to_float(int(r["TRADE_SIZE"]))
+                outcome = (
+                    mkt.erc1155_tokens[resolved.outcome_index][1]
+                    if resolved and mkt else ""
+                )
+                acts.append(ActivityWire(
+                    proxyWallet=eth_address,
+                    timestamp=int(r["MATCH_TIME"]),
+                    conditionId=r["MARKET"],
+                    type="TRADE",
+                    size=size,
+                    usdcSize=price * size,
+                    transactionHash=r["TRANSACTION_HASH"] or "",
+                    price=price,
+                    asset=r["ASSET_ID"],
+                    side=r["SIDE"],
+                    outcomeIndex=resolved.outcome_index if resolved else 0,
+                    title=mkt.question if mkt else "",
+                    slug=(mkt.slug or "") if mkt else "",
+                    icon=(mkt.icon_url or "") if mkt else "",
+                    outcome=outcome,
+                ))
+            for r in tx_rows:
+                mkt = (
+                    TableRead.read_market(conn, r["MARKET_ID"])
+                    if r["MARKET_ID"] is not None else None
+                )
+                details = json.loads(r["DETAILS"]) if r["DETAILS"] else {}
+                amount = details.get("amount", details.get("collateral_amount", 0))
+                size = (amount or 0) / 1_000_000
+                acts.append(ActivityWire(
+                    proxyWallet=eth_address,
+                    timestamp=int(r["TS"]) if r["TS"] is not None else 0,
+                    conditionId=mkt.condition_id.value if mkt else "",
+                    type=r["TRANSACTION_TYPE"],
+                    size=size,
+                    usdcSize=size,
+                    title=mkt.question if mkt else "",
+                    slug=(mkt.slug or "") if mkt else "",
+                    icon=(mkt.icon_url or "") if mkt else "",
+                ))
+
+        if type_filter:
+            acts = [a for a in acts if a.type in type_filter]
+        if market:
+            acts = [a for a in acts if a.conditionId in market]
+        acts.sort(key=lambda a: a.timestamp, reverse=True)
+        return acts[offset:offset + limit]
 
     # --- helpers --------------------------------------------------------
 

@@ -1,7 +1,4 @@
 from agentpit.datastructures.portfolio_response import PortfolioResponse, Position
-from agentpit.datastructures.transaction_history_response import (
-    TransactionHistoryResponse,
-)
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -54,12 +51,4 @@ class PortfolioService:
             eth_address=user.eth_address,
             usdc_balance=usdc_balance,
             positions=positions,
-        )
-
-    def get_transaction_history(self, user: User) -> TransactionHistoryResponse:
-        with self._db.read() as conn:
-            transactions = TableRead.get_transaction_history(conn, user.api_key)
-        return TransactionHistoryResponse(
-            eth_address=user.eth_address,
-            transactions=transactions,
         )

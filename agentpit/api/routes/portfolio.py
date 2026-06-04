@@ -2,9 +2,6 @@ from fastapi import APIRouter
 
 from agentpit.api.deps import CurrentUserDep, PortfolioServiceDep
 from agentpit.datastructures.portfolio_response import PortfolioResponse
-from agentpit.datastructures.transaction_history_response import (
-    TransactionHistoryResponse,
-)
 
 router = APIRouter(tags=["portfolio"])
 
@@ -16,11 +13,3 @@ def get_portfolio(
     market_id: int | None = None,
 ) -> PortfolioResponse:
     return service.get_portfolio(user, market_id=market_id)
-
-
-@router.get("/transactions", response_model=TransactionHistoryResponse)
-def get_transaction_history(
-    user: CurrentUserDep,
-    service: PortfolioServiceDep,
-) -> TransactionHistoryResponse:
-    return service.get_transaction_history(user)

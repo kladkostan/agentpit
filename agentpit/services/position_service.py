@@ -8,6 +8,7 @@ from agentpit.datastructures.split_position_request import (
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
+from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
     InsufficientBalanceError,
     MarketNotFoundError,
@@ -36,6 +37,10 @@ class PositionService:
         if bal < payload.amount:
             raise InsufficientBalanceError(f"need {payload.amount}, have {bal}")
         self._onchain.user_split_position(user.eth_key, condition_id, payload.amount)
+        with self._db.write() as conn:
+            TableWrite.log_transaction(
+                conn, user.api_key, "SPLIT", market_id, {"amount": payload.amount}
+            )
         return self._snapshot(user, market, locked=payload.amount)
 
     def merge(
@@ -55,6 +60,10 @@ class PositionService:
             usd_address, _ZERO_BYTES32, condition_id, partition, payload.amount
         )
         send_user_tx(self._onchain._client, user.eth_key, fn)  # noqa: SLF001
+        with self._db.write() as conn:
+            TableWrite.log_transaction(
+                conn, user.api_key, "MERGE", market_id, {"amount": payload.amount}
+            )
         return self._snapshot(user, market, unlocked=payload.amount)
 
     def redeem(self, user: User, market_id: int) -> RedeemPositionResponse:
@@ -70,6 +79,11 @@ class PositionService:
         pre_balance = self._onchain.usd_balance(user.eth_address)
         send_user_tx(self._onchain._client, user.eth_key, fn)  # noqa: SLF001
         new_balance = self._onchain.usd_balance(user.eth_address)
+        with self._db.write() as conn:
+            TableWrite.log_transaction(
+                conn, user.api_key, "REDEEM", market_id,
+                {"collateral_amount": new_balance - pre_balance},
+            )
         return RedeemPositionResponse(
             market_id=market.market_id,
             collateral_amount=new_balance - pre_balance,
