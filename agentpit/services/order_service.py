@@ -28,7 +28,7 @@ from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.order_signer import OrderData, sign_order
 from agentpit.onchain.user_wallet import send_admin_tx
 from agentpit.datastructures.open_order import OpenOrder
-from agentpit.polymarket.format import decimal_str_to_size_micro, price_to_decimal_str, size_to_decimal_str
+from agentpit.polymarket.format import decimal_str_to_size_micro, price_to_decimal_str, price_to_float, size_to_decimal_str
 from agentpit.polymarket.resolve import resolve_by_token_id
 
 log = logging.getLogger(__name__)
@@ -329,53 +329,56 @@ class OrderService:
                 continue
         return out
 
-    def get_sparkline(
-        self, market_id: int, outcome: str, window_hours: int = 24
-    ) -> dict[str, Any]:
-        """Recent trade prices + window volume for a market+outcome.
+    _INTERVAL_HOURS = {
+        "1h": 1, "6h": 6, "1d": 24, "1w": 168, "1m": 720, "max": 24 * 365 * 100,
+    }
 
-        Returns at most 60 (time, price) points from the trailing
-        `window_hours` window. Used by home-page cards to render a
-        sparkline + the trailing-window % move and dollar volume.
+    def get_prices_history(
+        self,
+        token_id: str,
+        *,
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+        interval: str = "1d",
+        fidelity: int = 0,
+    ) -> dict:
+        """Trade-price history for one outcome token (§8.6).
+
+        Returns ``{"history": [{"t": int_seconds, "p": float_0_1}]}`` ascending.
+        `interval` selects a trailing window unless explicit start/end are given;
+        `fidelity` (minutes) thins the series.
         """
-        _, _, token_id_str = self._resolve_market_lookup(market_id, outcome)
         now = int(datetime.now(timezone.utc).timestamp())
-        since = now - max(1, window_hours) * 3600
-        # Single query returns the windowed points and both the windowed
-        # and all-time volume aggregates so the endpoint only hits SQLite
-        # once per request.
+        end = end_ts if end_ts is not None else now
+        if start_ts is not None:
+            start = start_ts
+        else:
+            hours = self._INTERVAL_HOURS.get(interval, 24)
+            start = end - hours * 3600
         with self._db.read() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT MATCH_TIME, PRICE, TRADE_SIZE FROM trades "
+                "SELECT MATCH_TIME, PRICE FROM trades "
                 "WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
+                "AND MATCH_TIME >= ? AND MATCH_TIME <= ? "
                 "ORDER BY MATCH_TIME ASC",
-                (token_id_str,),
+                (token_id, start, end),
             ).fetchall()
-        windowed = [r for r in rows if int(r["MATCH_TIME"]) >= since]
-        points = [{"t": int(r["MATCH_TIME"]), "p": int(r["PRICE"])} for r in windowed]
-        # Downsample if we have a lot of trades — keep the shape readable.
-        max_points = 60
-        if len(points) > max_points:
-            stride = len(points) / max_points
-            sampled = [points[int(i * stride)] for i in range(max_points)]
-            if sampled[-1] != points[-1]:
-                sampled[-1] = points[-1]
-            points = sampled
-        volume_micro_usd = sum(
-            (int(r["PRICE"]) * int(r["TRADE_SIZE"])) // _PRICE_ONE for r in windowed
-        )
-        volume_total_micro_usd = sum(
-            (int(r["PRICE"]) * int(r["TRADE_SIZE"])) // _PRICE_ONE for r in rows
-        )
-        return {
-            "market_id": market_id,
-            "outcome": outcome,
-            "window_hours": window_hours,
-            "points": points,
-            "volume_micro_usd": int(volume_micro_usd),
-            "volume_total_micro_usd": int(volume_total_micro_usd),
-        }
+        points = [
+            {"t": int(r["MATCH_TIME"]), "p": price_to_float(int(r["PRICE"]))}
+            for r in rows
+        ]
+        # Optional fidelity thinning (minutes between kept points).
+        if fidelity > 0 and points:
+            step = fidelity * 60
+            thinned = [points[0]]
+            for pt in points[1:]:
+                if pt["t"] - thinned[-1]["t"] >= step:
+                    thinned.append(pt)
+            if thinned[-1] is not points[-1]:
+                thinned.append(points[-1])
+            points = thinned
+        return {"history": points}
 
     # --- internals ------------------------------------------------------
 
@@ -393,16 +396,6 @@ class OrderService:
                 return self._get_order_row(conn, order_id)
             except RuntimeError:
                 return None
-
-    def _resolve_market_lookup(self, market_id: int, outcome: str):
-        with self._db.read() as conn:
-            market = TableRead.read_market(conn, market_id)
-        if market is None:
-            raise MarketNotFoundError(market_id)
-        for token_id_str, label in market.erc1155_tokens:
-            if label.upper() == outcome.upper():
-                return market, int(token_id_str), token_id_str
-        raise MarketStateError(f"market {market_id} has no outcome '{outcome}'")
 
     @staticmethod
     def _amounts_from_price_size(
