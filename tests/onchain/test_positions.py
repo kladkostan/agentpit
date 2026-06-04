@@ -15,7 +15,7 @@ def test_split_then_merge_round_trip():
     mid = market["market_id"]
     yes_id, no_id = market["erc1155_tokens"][0][0], market["erc1155_tokens"][1][0]
 
-    initial = client.get("/usdc_balance", headers=hdr(token)).json()["balance"]
+    initial = int(client.get("/balance-allowance", headers=hdr(token)).json()["balance"])
 
     split_amount = 100_000_000
     split = client.post(
@@ -29,7 +29,7 @@ def test_split_then_merge_round_trip():
     assert body["token_balances"][yes_id] == split_amount
     assert body["token_balances"][no_id] == split_amount
 
-    after_split = client.get("/usdc_balance", headers=hdr(token)).json()["balance"]
+    after_split = int(client.get("/balance-allowance", headers=hdr(token)).json()["balance"])
     assert after_split == initial - split_amount
 
     merge_amount = 40_000_000
@@ -44,7 +44,7 @@ def test_split_then_merge_round_trip():
     assert mbody["token_balances"][yes_id] == split_amount - merge_amount
     assert mbody["token_balances"][no_id] == split_amount - merge_amount
 
-    after_merge = client.get("/usdc_balance", headers=hdr(token)).json()["balance"]
+    after_merge = int(client.get("/balance-allowance", headers=hdr(token)).json()["balance"])
     assert after_merge == initial - split_amount + merge_amount
 
 
