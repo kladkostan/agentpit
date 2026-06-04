@@ -22,6 +22,9 @@ function formatAxisPct(fraction: number): string {
   return `${Number.isInteger(pct) ? pct : pct.toFixed(1)}%`;
 }
 
+/** Prices-history window for the event trend chart: "1m" ≈ 720h (30 days),
+ *  matching the "30-day trend" header. */
+const CHART_INTERVAL = "1m";
 /** How many time markers to spread across the X axis. */
 const X_AXIS_TICKS = 5;
 /** Chart canvas height in viewBox + CSS pixels. */
@@ -56,9 +59,12 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
   const queries = useQueries({
     queries: picked.map((s) => {
       const tokenId = s.market.erc1155_tokens[0]?.[0] ?? "";
+      // The event chart shows a 30-day trend, so request the "1m" (≈720h)
+      // window; the interval is part of the key to avoid colliding with the
+      // 1d cache entry used by MarketCard/useYesMid.
       return {
-        queryKey: ["prices-history", tokenId],
-        queryFn: () => getPricesHistory(tokenId),
+        queryKey: ["prices-history", tokenId, CHART_INTERVAL],
+        queryFn: () => getPricesHistory(tokenId, CHART_INTERVAL),
         staleTime: 30_000,
         refetchInterval: 60_000,
         refetchOnWindowFocus: false,

@@ -67,7 +67,8 @@ export async function placeMarketOrder(
     );
   }
 
-  // computation.size is already whole shares (display units)
+  // computation.size is a display-share quantity (may be fractional); the
+  // backend accepts fractional decimal sizes, like Polymarket.
   const requestedShares = computation.size;
   const response = await placeOrder({
     token_id: args.tokenId,

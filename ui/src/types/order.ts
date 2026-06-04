@@ -40,7 +40,7 @@ export interface OrderBookSummary {
 }
 
 export interface MarketOrderResult {
-  filledShares: number;       // display shares (already divided by 1e6)
+  filledShares: number;       // display shares (decimal, from postOrder amounts)
   remainingShares: number;
   avgPrice: number | null;
   txHash: string | null;
