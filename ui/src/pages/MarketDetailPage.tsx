@@ -163,7 +163,10 @@ export function MarketDetailPage() {
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-8">
-          <Orderbook marketId={market.market_id} outcome={outcome} />
+          <Orderbook
+            tokenId={market.erc1155_tokens.find(([, label]) => label === outcome)?.[0] ?? ""}
+            outcome={outcome}
+          />
           {market.description ? (
             <section className="space-y-3 border-t pt-6">
               <h2 className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">

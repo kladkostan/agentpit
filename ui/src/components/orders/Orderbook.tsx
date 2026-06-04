@@ -1,31 +1,28 @@
-import { useOrderbook } from "@/api/orders";
+import { useBook } from "@/api/orders";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
-  aggregateLevels,
-  SHARES_SCALE,
+  levelsFrom,
   type OrderbookLevel,
 } from "@/components/orders/orderMath";
 
 interface OrderbookProps {
-  marketId: number;
+  tokenId: string;
   outcome: string;
 }
 
 const DEPTH = 8;
 
-// 0.1¢ tick → cents with 1 decimal, matching the spread/mid readout below.
-const formatCents = (microUsdc: number): string =>
-  (microUsdc / 10_000).toFixed(1);
+// Price is already dollars in [0, 1] → convert to cents with 1 decimal.
+const formatCents = (dollars: number): string => (dollars * 100).toFixed(1);
 
-const formatSize = (microShares: number): string => {
-  const v = microShares / SHARES_SCALE;
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
-  return v.toFixed(2);
+const formatSize = (shares: number): string => {
+  if (shares >= 1000) return `${(shares / 1000).toFixed(1)}k`;
+  return shares.toFixed(2);
 };
 
-export function Orderbook({ marketId, outcome }: OrderbookProps) {
-  const { data, isLoading, error, isStale } = useOrderbook(marketId, outcome);
+export function Orderbook({ tokenId, outcome }: OrderbookProps) {
+  const { data, isLoading, error, isStale } = useBook(tokenId);
 
   if (isLoading) {
     return (
@@ -46,11 +43,11 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
     );
   }
 
-  const asks = aggregateLevels(data.asks)
+  const asks = levelsFrom(data.asks)
     .sort((a, b) => a.price - b.price)
     .slice(0, DEPTH)
     .reverse();
-  const bids = aggregateLevels(data.bids)
+  const bids = levelsFrom(data.bids)
     .sort((a, b) => b.price - a.price)
     .slice(0, DEPTH);
 
@@ -60,12 +57,16 @@ export function Orderbook({ marketId, outcome }: OrderbookProps) {
     ...bids.map((e) => e.size),
   );
 
-  const bestAsk = asks.length ? asks[asks.length - 1]!.price / 1_000_000 : null;
-  const bestBid = bids.length ? bids[0]!.price / 1_000_000 : null;
+  const bestAskPrice = asks.length ? asks[asks.length - 1]!.price : null;
+  const bestBidPrice = bids.length ? bids[0]!.price : null;
   const spread =
-    bestAsk !== null && bestBid !== null ? bestAsk - bestBid : null;
+    bestAskPrice !== null && bestBidPrice !== null
+      ? bestAskPrice - bestBidPrice
+      : null;
   const mid =
-    bestAsk !== null && bestBid !== null ? (bestAsk + bestBid) / 2 : null;
+    bestAskPrice !== null && bestBidPrice !== null
+      ? (bestAskPrice + bestBidPrice) / 2
+      : null;
 
   return (
     <section className="space-y-4">
@@ -166,10 +167,8 @@ function Row({
 }) {
   const price = formatCents(entry.price);
   const size = formatSize(entry.size);
-  const total = (
-    (entry.price / 1_000_000) *
-    (entry.size / SHARES_SCALE)
-  ).toFixed(2);
+  // price is dollars, size is display shares → total in dollars
+  const total = (entry.price * entry.size).toFixed(2);
   const depthPct = Math.min(100, (entry.size / maxSize) * 100);
   return (
     <div className="relative grid grid-cols-[1fr_1fr_1fr] px-5 py-1.5 font-mono text-[13px] tabular-nums">

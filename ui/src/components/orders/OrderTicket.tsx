@@ -3,17 +3,16 @@ import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { getOrderbook, placeMarketOrder, placeOrder, useOrderbook } from "@/api/orders";
+import { getBook, placeMarketOrder, placeOrder, useBook } from "@/api/orders";
 import { usePortfolio } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { useRequireAuth } from "@/auth/useRequireAuth";
 import {
   MAX_PROB,
   MIN_PROB,
-  SHARES_SCALE,
   SLIPPAGE_CAP,
-  bestAskMicro,
-  bestBidMicro,
+  bestAsk,
+  bestBid,
   computeMarketBuy,
   computeMarketSell,
   dollarsFromShares,
@@ -21,10 +20,13 @@ import {
   sharesFromDollars,
 } from "@/components/orders/orderMath";
 import type { Erc1155Token } from "@/types/market";
-import type { OrderSide, OrderbookResponse } from "@/types/order";
+import type { OrderBookSummary, OrderSide } from "@/types/order";
 import { ApiError } from "@/api/client";
 
 type Mode = "Limit" | "Market";
+
+// Portfolio balances are stored as micro-shares on the server.
+const PORTFOLIO_SHARES_SCALE = 1_000_000;
 
 interface OrderTicketProps {
   marketId: number;
@@ -85,7 +87,8 @@ export function OrderTicket({
 
   const requireAuth = useRequireAuth();
   const queryClient = useQueryClient();
-  const { data: book } = useOrderbook(marketId, outcome);
+  const tokenId = tokens.find(([, label]) => label === outcome)?.[0] ?? "";
+  const { data: book } = useBook(tokenId);
   const { user } = useAuth();
   const { data: portfolio } = usePortfolio(Boolean(user));
 
@@ -94,14 +97,12 @@ export function OrderTicket({
     if (!portfolio) return map;
     for (const p of portfolio.positions) {
       if (p.market_id !== marketId) continue;
-      map.set(p.outcome_label, p.balance / SHARES_SCALE);
+      map.set(p.outcome_label, p.balance / PORTFOLIO_SHARES_SCALE);
     }
     return map;
   }, [portfolio, marketId]);
 
   const heldOfCurrent = heldByOutcome.get(outcome) ?? 0;
-
-  const tokenId = tokens.find(([, label]) => label === outcome)?.[0] ?? "";
 
   function selectSide(next: OrderSide) {
     setSide(next);
@@ -111,18 +112,14 @@ export function OrderTicket({
     }
   }
 
-  const bestAsk =
-    book && book.asks.length > 0
-      ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
-      : null;
-  const bestBid =
-    book && book.bids.length > 0
-      ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
-      : null;
+  const bestAskPrice =
+    book && book.asks.length > 0 ? bestAsk(book.asks) : null;
+  const bestBidPrice =
+    book && book.bids.length > 0 ? bestBid(book.bids) : null;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({
-      queryKey: ["orderbook", marketId, outcome],
+      queryKey: ["book", tokenId],
     });
     void queryClient.invalidateQueries({ queryKey: ["portfolio"] });
   };
@@ -253,7 +250,7 @@ export function OrderTicket({
     !limitMutation.isPending &&
     !marketMutation.isPending &&
     (mode === "Limit" ||
-      (side === "BUY" ? bestAsk !== null : bestBid !== null));
+      (side === "BUY" ? bestAskPrice !== null : bestBidPrice !== null));
 
   const onSubmit = requireAuth(() => {
     if (mode === "Limit") {
@@ -282,8 +279,8 @@ export function OrderTicket({
   const sharesValue = parseDecimal(limitShares);
   const priceForCost = (() => {
     if (mode === "Limit") return parseDecimal(limitPrice);
-    if (side === "BUY") return bestAsk ?? NaN;
-    return bestBid ?? NaN;
+    if (side === "BUY") return bestAskPrice ?? NaN;
+    return bestBidPrice ?? NaN;
   })();
   const liveCost =
     Number.isFinite(sharesValue) &&
@@ -309,7 +306,6 @@ export function OrderTicket({
 
       <div className="space-y-3.5 px-5 py-5">
         <OutcomePicker
-          marketId={marketId}
           tokens={tokens}
           selected={outcome}
           side={side}
@@ -372,9 +368,9 @@ export function OrderTicket({
             </Field>
             <Hint>
               Max slippage {SLIPPAGE_CAP.toFixed(2)} over best ask
-              {bestAsk !== null ? (
+              {bestAskPrice !== null ? (
                 <>
-                  {" "}({Math.round(bestAsk * 100)}¢)
+                  {" "}({Math.round(bestAskPrice * 100)}¢)
                 </>
               ) : null}
             </Hint>
@@ -406,7 +402,7 @@ export function OrderTicket({
               </span>{" "}
               {outcome} shares · max slippage {SLIPPAGE_CAP.toFixed(2)} under
               best bid
-              {bestBid !== null ? <> ({Math.round(bestBid * 100)}¢)</> : null}
+              {bestBidPrice !== null ? <> ({Math.round(bestBidPrice * 100)}¢)</> : null}
             </Hint>
           </div>
         )}
@@ -445,22 +441,20 @@ export function OrderTicket({
 /* ---------- Outcome picker (cents, sans, strong selected state) ---------- */
 
 function OutcomePicker({
-  marketId,
   tokens,
   selected,
   side,
   onSelect,
 }: {
-  marketId: number;
   tokens: Erc1155Token[];
   selected: string;
   side: OrderSide;
   onSelect: (label: string) => void;
 }) {
   const results = useQueries({
-    queries: tokens.map(([, label]) => ({
-      queryKey: ["orderbook", marketId, label],
-      queryFn: () => getOrderbook(marketId, label),
+    queries: tokens.map(([tokenId]) => ({
+      queryKey: ["book", tokenId],
+      queryFn: () => getBook(tokenId),
       refetchInterval: 5000,
       refetchIntervalInBackground: false,
     })),
@@ -476,14 +470,15 @@ function OutcomePicker({
       }}
     >
       {tokens.map(([id, label], i) => {
-        const book = results[i]?.data as OrderbookResponse | undefined;
+        const bookData = results[i]?.data as OrderBookSummary | undefined;
         // Show the price you'd actually trade at for the current side: the
         // best ask when buying, the best bid when selling — not the mid.
-        const micro =
+        const price =
           side === "BUY"
-            ? bestAskMicro(book?.asks ?? [])
-            : bestBidMicro(book?.bids ?? []);
-        const cents = micro !== null ? micro / 10_000 : null;
+            ? bestAsk(bookData?.asks ?? [])
+            : bestBid(bookData?.bids ?? []);
+        // price is dollars in [0,1] → convert to cents for display
+        const cents = price !== null ? price * 100 : null;
         const isActive = label === selected;
         const isPositive = i === 0;
         const tone = isPositive ? "emerald" : "rose";

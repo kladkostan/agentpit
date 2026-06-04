@@ -1,38 +1,35 @@
 import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { getOrderbook } from "@/api/orders";
+import { getBook } from "@/api/orders";
 import type { Market } from "@/types/market";
-import type { OrderbookResponse } from "@/types/order";
+import type { OrderBookSummary } from "@/types/order";
 
 /**
  * Returns the mid-price (in dollars in [0, 1]) of the YES book for a market.
  * Falls back to whichever side exists if the book is single-sided.
  */
-export function computeMid(book: OrderbookResponse | undefined): number | null {
+export function computeMid(book: OrderBookSummary | undefined): number | null {
   if (!book) return null;
   const bid =
     book.bids.length > 0
-      ? Math.max(...book.bids.map((b) => b.PRICE)) / 1_000_000
+      ? Math.max(...book.bids.map((b) => parseFloat(b.price)))
       : null;
   const ask =
     book.asks.length > 0
-      ? Math.min(...book.asks.map((a) => a.PRICE)) / 1_000_000
+      ? Math.min(...book.asks.map((a) => parseFloat(a.price)))
       : null;
   if (bid !== null && ask !== null) return (bid + ask) / 2;
   return ask ?? bid;
 }
 
-export function useOutcomeMid(
-  marketId: number,
-  outcomeLabel: string | undefined,
-) {
+export function useOutcomeMid(tokenId: string | undefined) {
   const query = useQuery({
-    queryKey: ["orderbook", marketId, outcomeLabel],
+    queryKey: ["book", tokenId],
     queryFn: () => {
-      if (!outcomeLabel) throw new Error("missing outcome label");
-      return getOrderbook(marketId, outcomeLabel);
+      if (!tokenId) throw new Error("tokenId is required");
+      return getBook(tokenId);
     },
-    enabled: Boolean(outcomeLabel),
+    enabled: Boolean(tokenId),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
@@ -71,14 +68,14 @@ export function useYesMidMap(
 ): ReadonlyMap<number, number> {
   const queries = useQueries({
     queries: markets.map((m) => {
-      const yesLabel = m.erc1155_tokens[0]?.[1];
+      const tokenId = m.erc1155_tokens[0]?.[0];
       return {
-        queryKey: ["orderbook", m.market_id, yesLabel],
+        queryKey: ["book", tokenId],
         queryFn: () => {
-          if (!yesLabel) throw new Error("missing outcome label");
-          return getOrderbook(m.market_id, yesLabel);
+          if (!tokenId) throw new Error("tokenId is required");
+          return getBook(tokenId);
         },
-        enabled: Boolean(yesLabel),
+        enabled: Boolean(tokenId),
         refetchInterval: 30_000,
         refetchIntervalInBackground: false,
         refetchOnWindowFocus: false,

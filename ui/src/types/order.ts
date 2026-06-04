@@ -21,20 +21,22 @@ export interface OrderResponse {
   tradeIDs: string[];
 }
 
-export interface OrderbookEntry {
-  ORDER_ID: string;
-  SIDE: OrderSide;
-  PRICE: number;             // integer micro-USDC
-  REMAINING_AMOUNT: number;  // integer micro-shares
-  MAKER: string;
-  CREATED_AT: number;
+export interface OrderBookLevel {
+  price: string; // decimal 0–1
+  size: string;  // decimal shares
 }
 
-export interface OrderbookResponse {
-  market_id: number;
-  outcome: string;
-  bids: OrderbookEntry[];
-  asks: OrderbookEntry[];
+export interface OrderBookSummary {
+  market: string;       // condition_id
+  asset_id: string;     // token_id
+  timestamp: string;
+  hash: string;
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+  min_order_size: string;
+  tick_size: string;
+  neg_risk: boolean;
+  last_trade_price: string;
 }
 
 export interface MarketOrderResult {

@@ -26,8 +26,9 @@ const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
 };
 
 export function MarketCard({ market, eventSlug }: MarketCardProps) {
+  const yesTokenId = market.erc1155_tokens[0]?.[0];
   const yesLabel = market.erc1155_tokens[0]?.[1];
-  const { mid: yesMid } = useOutcomeMid(market.market_id, yesLabel);
+  const { mid: yesMid } = useOutcomeMid(yesTokenId);
   const { data: spark } = useSparkline(market.market_id, yesLabel);
   const yesPctLabel = formatProbabilityPct(yesMid);
   const tone = STATE_TONE[market.market_state];

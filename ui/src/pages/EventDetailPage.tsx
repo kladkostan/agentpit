@@ -153,7 +153,10 @@ export function EventDetailPage() {
           {isSingleMarket && onlyMarket ? (
             <div className="rounded-2xl border bg-card/40 px-5 py-5">
               <Orderbook
-                marketId={onlyMarket.market_id}
+                tokenId={(() => {
+                  const outcomeLabel = selection?.outcome || onlyMarket.erc1155_tokens[0]?.[1] || "";
+                  return onlyMarket.erc1155_tokens.find(([, label]) => label === outcomeLabel)?.[0] ?? "";
+                })()}
                 outcome={
                   selection?.outcome ||
                   onlyMarket.erc1155_tokens[0]?.[1] ||
@@ -187,7 +190,7 @@ export function EventDetailPage() {
                     {isExpanded ? (
                       <div className="border-b border-border/60 bg-foreground/[0.02] px-5 py-4 animate-fade-up">
                         <Orderbook
-                          marketId={market.market_id}
+                          tokenId={market.erc1155_tokens.find(([, label]) => label === (selection.outcome || yesLabel))?.[0] ?? ""}
                           outcome={selection.outcome || yesLabel}
                         />
                       </div>

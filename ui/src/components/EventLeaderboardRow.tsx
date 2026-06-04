@@ -1,4 +1,4 @@
-import { bestAskMicro, deriveNoAskMicro } from "@/components/orders/orderMath";
+import { bestAsk, deriveNoAsk } from "@/components/orders/orderMath";
 import { formatProbabilityPct } from "@/lib/format";
 import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
@@ -51,17 +51,20 @@ export function EventLeaderboardRow({
   onToggleMarket,
   onPickOutcome,
 }: EventLeaderboardRowProps) {
+  const yesTokenId = market.erc1155_tokens[0]?.[0];
+  const noTokenId = market.erc1155_tokens[1]?.[0];
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const noLabel = market.erc1155_tokens[1]?.[1];
-  const yes = useOutcomeMid(market.market_id, yesLabel);
-  const no = useOutcomeMid(market.market_id, noLabel);
+  const yes = useOutcomeMid(yesTokenId);
+  const no = useOutcomeMid(noTokenId);
   // The Yes/No chips are buy entry points, so show the price to BUY each
   // outcome — the order book's best ask — which agrees with the book to the
   // cent. The big % stays the mid (the market's implied probability).
-  const yesAskMicro = yes.data ? bestAskMicro(yes.data.asks) : null;
-  const noAskMicro = deriveNoAskMicro(no.data?.asks ?? [], yes.data?.bids ?? []);
-  const yesCents = yesAskMicro !== null ? yesAskMicro / 10_000 : null;
-  const noCents = noAskMicro !== null ? noAskMicro / 10_000 : null;
+  const yesAsk = yes.data ? bestAsk(yes.data.asks) : null;
+  const noAsk = deriveNoAsk(no.data?.asks ?? [], yes.data?.bids ?? []);
+  // Convert dollars to cents for display
+  const yesCents = yesAsk !== null ? yesAsk * 100 : null;
+  const noCents = noAsk !== null ? noAsk * 100 : null;
   const yesPctLabel = formatProbabilityPct(yes.mid);
   const label = market.outcome_label ?? market.question;
 

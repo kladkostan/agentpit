@@ -1,98 +1,71 @@
 import { describe, expect, it } from "vitest";
 import {
-  aggregateLevels,
-  bestAskMicro,
-  bestBidMicro,
+  bestAsk,
+  bestBid,
   computeMarketBuy,
   computeMarketSell,
-  deriveNoAskMicro,
+  deriveNoAsk,
   dollarsFromShares,
-  PRICE_TICK,
+  levelsFrom,
   pickSellOutcome,
   sharesFromDollars,
-  SHARES_SCALE,
+  SLIPPAGE_CAP,
+  MAX_PROB,
+  MIN_PROB,
 } from "./orderMath";
-import type { OrderbookEntry } from "@/types/order";
+import type { OrderBookLevel } from "@/types/order";
 
-const mkEntry = (price: number): OrderbookEntry => ({
-  ORDER_ID: `${price}`,
-  SIDE: "BUY",
-  PRICE: price,
-  REMAINING_AMOUNT: SHARES_SCALE,
-  MAKER: "0x0",
-  CREATED_AT: 0,
+const mkLevel = (price: number, size = 1): OrderBookLevel => ({
+  price: String(price),
+  size: String(size),
 });
 
-describe("bestAskMicro", () => {
-  it("returns the lowest ask, snapped to the 0.1¢ tick like the order book", () => {
-    // Raw 184_500 (18.45¢) snaps to 185_000 (18.5¢) — matching the price the
-    // order book renders, so the ticket chip and the book agree to the cent.
-    expect(bestAskMicro([mkEntry(184_500), mkEntry(200_000)])).toBe(185_000);
+describe("bestAsk", () => {
+  it("returns the lowest ask in dollars", () => {
+    expect(bestAsk([mkLevel(0.185), mkLevel(0.2)])).toBeCloseTo(0.185, 5);
   });
 
   it("returns null for an empty book side", () => {
-    expect(bestAskMicro([])).toBeNull();
+    expect(bestAsk([])).toBeNull();
   });
 });
 
-describe("bestBidMicro", () => {
-  it("returns the highest bid, snapped to the 0.1¢ tick", () => {
-    // 174_500 (17.45¢) snaps to 175_000 (17.5¢).
-    expect(bestBidMicro([mkEntry(174_500), mkEntry(170_000)])).toBe(175_000);
+describe("bestBid", () => {
+  it("returns the highest bid in dollars", () => {
+    expect(bestBid([mkLevel(0.175), mkLevel(0.17)])).toBeCloseTo(0.175, 5);
   });
 
   it("returns null for an empty book side", () => {
-    expect(bestBidMicro([])).toBeNull();
+    expect(bestBid([])).toBeNull();
   });
 });
 
-describe("deriveNoAskMicro", () => {
+describe("deriveNoAsk", () => {
   it("uses the NO book's own best ask when present", () => {
-    expect(deriveNoAskMicro([mkEntry(825_500)], [mkEntry(174_500)])).toBe(
-      826_000,
-    );
+    expect(deriveNoAsk([mkLevel(0.826)], [mkLevel(0.175)])).toBeCloseTo(0.826, 5);
   });
 
   it("falls back to the complement of the YES best bid when NO is empty", () => {
-    // NO ask mirrors a YES bid: 1.0 − 0.175 = 0.825 → 825_000 micro.
-    expect(deriveNoAskMicro([], [mkEntry(174_500), mkEntry(170_000)])).toBe(
-      825_000,
-    );
+    // NO ask mirrors a YES bid: 1.0 − 0.175 = 0.825
+    expect(deriveNoAsk([], [mkLevel(0.175), mkLevel(0.17)])).toBeCloseTo(0.825, 5);
   });
 
   it("returns null when neither side is known", () => {
-    expect(deriveNoAskMicro([], [])).toBeNull();
+    expect(deriveNoAsk([], [])).toBeNull();
   });
 });
 
-describe("aggregateLevels", () => {
-  const entry = (price: number, shares: number): OrderbookEntry => ({
-    ORDER_ID: `${price}-${shares}`,
-    SIDE: "BUY",
-    PRICE: price,
-    REMAINING_AMOUNT: shares * SHARES_SCALE,
-    MAKER: "0x0",
-    CREATED_AT: 0,
-  });
-
-  it("merges distinct sub-cent prices into 0.1¢ levels, summing size", () => {
-    // 0.020 and 0.0201 both fall in the 0.020 level; 0.017 is its own level.
-    // Before, these rendered as three "$0.02" rows.
-    const levels = aggregateLevels([
-      entry(20000, 100),
-      entry(20100, 5),
-      entry(17000, 20),
+describe("levelsFrom", () => {
+  it("parses decimal strings into numeric dollars and shares", () => {
+    const levels = levelsFrom([
+      { price: "0.45", size: "100" },
+      { price: "0.46", size: "50" },
     ]);
-    const byPrice = new Map(levels.map((l) => [l.price, l.size]));
     expect(levels).toHaveLength(2);
-    expect(byPrice.get(20000)).toBe(105 * SHARES_SCALE);
-    expect(byPrice.get(17000)).toBe(20 * SHARES_SCALE);
-  });
-
-  it("snaps each level to a multiple of the 0.1¢ tick", () => {
-    const [level] = aggregateLevels([entry(20600, 10)]); // 0.0206 → 0.021
-    expect(level?.price).toBe(21000);
-    expect((level?.price ?? 0) % PRICE_TICK).toBe(0);
+    expect(levels[0]?.price).toBeCloseTo(0.45, 5);
+    expect(levels[0]?.size).toBe(100);
+    expect(levels[1]?.price).toBeCloseTo(0.46, 5);
+    expect(levels[1]?.size).toBe(50);
   });
 });
 
@@ -124,51 +97,27 @@ describe("dollarsFromShares", () => {
   });
 });
 
-const ask = (
-  price: number,
-  remainingShares: number,
-): OrderbookEntry => ({
-  ORDER_ID: `ask-${price}-${remainingShares}`,
-  SIDE: "SELL",
-  PRICE: Math.round(price * 1_000_000),
-  REMAINING_AMOUNT: remainingShares * 1_000_000,
-  MAKER: "0x0",
-  CREATED_AT: 0,
-});
-
 describe("computeMarketBuy", () => {
   it("returns null for an empty book", () => {
     expect(computeMarketBuy([], 50)).toBeNull();
   });
 
   it("caps at best_ask + SLIPPAGE_CAP", () => {
-    const result = computeMarketBuy([ask(0.65, 100)], 50);
+    const result = computeMarketBuy([mkLevel(0.65, 100)], 50);
     expect(result).not.toBeNull();
-    expect(result!.priceCap).toBeCloseTo(0.67, 5);
-    expect(result!.sizeWire).toBe(Math.floor((50 * 1_000_000) / 0.67));
+    expect(result!.priceCap).toBeCloseTo(0.65 + SLIPPAGE_CAP, 5);
+    expect(result!.size).toBeCloseTo(50 / (0.65 + SLIPPAGE_CAP), 5);
   });
 
   it("clamps price cap at MAX_PROB (0.99)", () => {
-    const result = computeMarketBuy([ask(0.98, 100)], 50);
-    expect(result!.priceCap).toBeCloseTo(0.99, 5);
+    const result = computeMarketBuy([mkLevel(0.98, 100)], 50);
+    expect(result!.priceCap).toBeCloseTo(MAX_PROB, 5);
   });
 
   it("returns null for non-positive amount", () => {
-    expect(computeMarketBuy([ask(0.65, 100)], 0)).toBeNull();
-    expect(computeMarketBuy([ask(0.65, 100)], -1)).toBeNull();
+    expect(computeMarketBuy([mkLevel(0.65, 100)], 0)).toBeNull();
+    expect(computeMarketBuy([mkLevel(0.65, 100)], -1)).toBeNull();
   });
-});
-
-const bid = (
-  price: number,
-  remainingShares: number,
-): OrderbookEntry => ({
-  ORDER_ID: `bid-${price}-${remainingShares}`,
-  SIDE: "BUY",
-  PRICE: Math.round(price * 1_000_000),
-  REMAINING_AMOUNT: remainingShares * 1_000_000,
-  MAKER: "0x0",
-  CREATED_AT: 0,
 });
 
 describe("computeMarketSell", () => {
@@ -176,19 +125,19 @@ describe("computeMarketSell", () => {
     expect(computeMarketSell([], 100)).toBeNull();
   });
 
-  it("caps at best_bid - SLIPPAGE_CAP", () => {
-    const result = computeMarketSell([bid(0.65, 100)], 50);
-    expect(result!.priceCap).toBeCloseTo(0.63, 5);
-    expect(result!.sizeWire).toBe(50 * 1_000_000);
+  it("caps at best_bid - SLIPPAGE_CAP and size equals input shares", () => {
+    const result = computeMarketSell([mkLevel(0.65, 100)], 50);
+    expect(result!.priceCap).toBeCloseTo(0.65 - SLIPPAGE_CAP, 5);
+    expect(result!.size).toBe(50);
   });
 
   it("clamps price cap at MIN_PROB (0.01)", () => {
-    const result = computeMarketSell([bid(0.02, 100)], 50);
-    expect(result!.priceCap).toBeCloseTo(0.01, 5);
+    const result = computeMarketSell([mkLevel(0.02, 100)], 50);
+    expect(result!.priceCap).toBeCloseTo(MIN_PROB, 5);
   });
 
   it("returns null for non-positive shares", () => {
-    expect(computeMarketSell([bid(0.65, 100)], 0)).toBeNull();
+    expect(computeMarketSell([mkLevel(0.65, 100)], 0)).toBeNull();
   });
 });
 

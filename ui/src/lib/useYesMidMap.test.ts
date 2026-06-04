@@ -1,39 +1,35 @@
 import { describe, expect, it } from "vitest";
-import type { OrderbookEntry, OrderbookResponse } from "@/types/order";
+import type { OrderBookLevel, OrderBookSummary } from "@/types/order";
 import { computeMid, deriveNoCents } from "./useYesMid";
 
-function entry(price: number): OrderbookEntry {
-  return {
-    ORDER_ID: "x",
-    SIDE: "BUY",
-    PRICE: price,
-    REMAINING_AMOUNT: 1,
-    MAKER: "m",
-    CREATED_AT: 0,
-  };
+function lvl(price: number): OrderBookLevel {
+  return { price: String(price), size: "1" };
 }
 
-function book(bids: number[], asks: number[]): OrderbookResponse {
+function book(bids: number[], asks: number[]): OrderBookSummary {
   return {
-    market_id: 1,
-    outcome: "Yes",
-    bids: bids.map(entry),
-    asks: asks.map(entry),
+    market: "0xc",
+    asset_id: "1",
+    timestamp: "0",
+    hash: "",
+    bids: bids.map(lvl),
+    asks: asks.map(lvl),
+    min_order_size: "0",
+    tick_size: "0.001",
+    neg_risk: false,
+    last_trade_price: "0",
   };
 }
 
 describe("computeMid", () => {
   it("returns midpoint when both sides exist", () => {
     // best bid 0.4, best ask 0.46 → mid 0.43
-    expect(computeMid(book([400_000, 380_000], [460_000, 480_000]))).toBeCloseTo(
-      0.43,
-      5,
-    );
+    expect(computeMid(book([0.4, 0.38], [0.46, 0.48]))).toBeCloseTo(0.43, 5);
   });
 
   it("falls back to the only available side", () => {
-    expect(computeMid(book([], [200_000]))).toBeCloseTo(0.2, 5);
-    expect(computeMid(book([800_000], []))).toBeCloseTo(0.8, 5);
+    expect(computeMid(book([], [0.2]))).toBeCloseTo(0.2, 5);
+    expect(computeMid(book([0.8], []))).toBeCloseTo(0.8, 5);
   });
 
   it("returns null when the book is empty or missing", () => {

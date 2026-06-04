@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "@/api/client";
-import { SHARES_SCALE, computeMarketBuy, computeMarketSell } from "@/components/orders/orderMath";
+import { computeMarketBuy, computeMarketSell } from "@/components/orders/orderMath";
 import type {
   MarketOrderResult,
+  OrderBookSummary,
   OrderSide,
-  OrderbookResponse,
   OrderResponse,
   PlaceOrderRequest,
 } from "@/types/order";
@@ -26,28 +26,18 @@ export async function cancelOrder(orderId: string): Promise<void> {
   );
 }
 
-export async function getOrderbook(
-  marketId: number,
-  outcome: string,
-): Promise<OrderbookResponse> {
-  return apiFetch<OrderbookResponse>(
-    `/orderbook/${marketId}/${encodeURIComponent(outcome)}`,
-  );
+export async function getBook(tokenId: string): Promise<OrderBookSummary> {
+  return apiFetch<OrderBookSummary>(`/book?token_id=${encodeURIComponent(tokenId)}`);
 }
 
-export function useOrderbook(
-  marketId: number | undefined,
-  outcome: string | undefined,
-) {
+export function useBook(tokenId: string | undefined) {
   return useQuery({
-    queryKey: ["orderbook", marketId, outcome],
+    queryKey: ["book", tokenId],
     queryFn: () => {
-      if (marketId === undefined || !outcome) {
-        throw new Error("marketId and outcome are required");
-      }
-      return getOrderbook(marketId, outcome);
+      if (!tokenId) throw new Error("tokenId is required");
+      return getBook(tokenId);
     },
-    enabled: marketId !== undefined && Boolean(outcome),
+    enabled: Boolean(tokenId),
     refetchInterval: 3000,
     refetchIntervalInBackground: false,
   });
@@ -58,7 +48,7 @@ export interface PlaceMarketOrderArgs {
   side: OrderSide;
   /** For BUY: dollar amount. For SELL: display-share count. */
   amount: number;
-  book: OrderbookResponse;
+  book: OrderBookSummary;
 }
 
 export async function placeMarketOrder(
@@ -77,7 +67,8 @@ export async function placeMarketOrder(
     );
   }
 
-  const requestedShares = computation.sizeWire / SHARES_SCALE;
+  // computation.size is already whole shares (display units)
+  const requestedShares = computation.size;
   const response = await placeOrder({
     token_id: args.tokenId,
     side: args.side,
