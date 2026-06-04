@@ -453,6 +453,40 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
+    def list_trades_for_api_key(
+        db: sqlite3.Connection,
+        api_key: str,
+        *,
+        market: str | None = None,
+        asset_id: str | None = None,
+        trade_id: str | None = None,
+        before: int | None = None,
+        after: int | None = None,
+    ) -> list[dict]:
+        """Trades where the user is taker OR maker, newest first."""
+        db.row_factory = sqlite3.Row
+        clauses = ["(TAKER_API_KEY = ? OR MAKER_API_KEY = ?)"]
+        params: list = [api_key, api_key]
+        if market is not None:
+            clauses.append("MARKET = ?"); params.append(market)
+        if asset_id is not None:
+            clauses.append("ASSET_ID = ?"); params.append(asset_id)
+        if trade_id is not None:
+            clauses.append("TRADE_ID = ?"); params.append(trade_id)
+        if before is not None:
+            clauses.append("MATCH_TIME < ?"); params.append(before)
+        if after is not None:
+            clauses.append("MATCH_TIME > ?"); params.append(after)
+        cur = db.execute(
+            "SELECT TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID, "
+            "PRICE, TRADE_SIZE, SIDE, STATUS, MATCH_TIME, TRANSACTION_HASH, "
+            "BUCKET_INDEX, FEE_RATE_BPS, TAKER_API_KEY, MAKER_API_KEY "
+            f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC",
+            params,
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    @staticmethod
     def get_transaction_history(db: sqlite3.Connection, api_key: str) -> list:
         """
         Fetch the transaction history for a given API key.
