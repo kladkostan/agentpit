@@ -26,7 +26,8 @@ def _email():
 def test_data_trades_dual_perspective_and_secret_safe():
     app = create_app()
     client = TestClient(app)
-    ra = client.post("/register", json={"email": _email(), "password": "hunter22hunter22"}).json()
+    a_email = _email()
+    ra = client.post("/register", json={"email": a_email, "password": "hunter22hunter22"}).json()
     b_email = _email()
     rb = client.post("/register", json={"email": b_email, "password": "hunter22hunter22"}).json()
     ta, tb = ra["access_token"], rb["access_token"]
@@ -69,10 +70,16 @@ def test_data_trades_dual_perspective_and_secret_safe():
     assert abody["data"][0]["trader_side"] == "MAKER"
     assert abody["data"][0]["owner"] == a_uid
 
-    # Secret-safety: no api_key column/value ever appears in a response body.
+    # Secret-safety (§13): neither the api_key column names NOR the actual
+    # api_key VALUES (incl. the counterparty's, surfaced cross-perspective)
+    # ever appear in a response body.
+    with db.read() as conn:
+        a_api_key = TableRead.get_user_by_email(conn, a_email).api_key
+        b_api_key = TableRead.get_user_by_email(conn, b_email).api_key
     for raw in (rb_trades.text, client.get("/data/trades", headers=_hdr(ta)).text):
         assert "TAKER_API_KEY" not in raw and "MAKER_API_KEY" not in raw
         assert "api_key" not in raw.lower()
+        assert a_api_key not in raw and b_api_key not in raw
 
 
 def test_data_trades_empty_and_requires_auth():

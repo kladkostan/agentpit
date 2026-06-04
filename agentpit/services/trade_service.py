@@ -21,7 +21,7 @@ class TradeService:
     def __init__(self, db: DbSession):
         self._db = db
 
-    def list_trades(self, user: User, **filters) -> TradesEnvelope:
+    def list_trades(self, user: User, *, limit: int = 100, **filters) -> TradesEnvelope:
         with self._db.read() as conn:
             rows = TableRead.list_trades_for_api_key(conn, user.api_key, **filters)
         trades: list[TradeWire] = []
@@ -77,4 +77,8 @@ class TradeService:
                     trader_side=trader_side,
                 )
             )
-        return TradesEnvelope(count=len(trades), data=trades)
+        # next_cursor is the static "no more pages" sentinel ("LTE="): agentpit
+        # returns all matching trades up to `limit` in one page (paper-rig
+        # volumes are small). TODO: real cursor pagination if counts grow.
+        page = trades[:limit]
+        return TradesEnvelope(limit=limit, count=len(page), data=page)

@@ -80,8 +80,15 @@ def list_trades(
     id: str | None = None,
     before: int | None = None,
     after: int | None = None,
+    limit: int = 100,
 ) -> TradesEnvelope:
     return service.list_trades(
-        user, market=market, asset_id=asset_id, trade_id=id, before=before, after=after
+        user,
+        limit=limit,
+        market=market,
+        asset_id=asset_id,
+        trade_id=id,
+        before=before,
+        after=after,
     )
 
