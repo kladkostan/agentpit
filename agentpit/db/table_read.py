@@ -157,6 +157,13 @@ class TableRead:
         return row[0] if row else None
 
     @staticmethod
+    def get_user_id_by_api_key(db: sqlite3.Connection, api_key: str) -> str | None:
+        row = db.execute(
+            "SELECT USER_ID FROM users WHERE API_KEY = ? LIMIT 1", (api_key,)
+        ).fetchone()
+        return row[0] if row else None
+
+    @staticmethod
     def get_agent_by_id(db: sqlite3.Connection, agent_id: str) -> dict | None:
         """
         Fetch an agent by AGENT_ID.

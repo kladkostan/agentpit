@@ -709,11 +709,27 @@ class OrderService:
         trade_id = "{}-{}-{}".format(
             taker_row["ORDER_ID"], match["maker_order_id"], secrets.token_hex(8)
         )
+        token_id = taker_row["TOKEN_ID"]
+        resolved = resolve_by_token_id(conn, token_id)
+        condition_id = resolved.condition_id if resolved else token_id
+        outcome_label = (
+            resolved.market.erc1155_tokens[resolved.outcome_index][1]
+            if resolved else ""
+        )
+        maker_row = match["maker_row"]
+        maker_user_id = TableRead.get_user_id_by_api_key(conn, maker_row["API_KEY"])
+        maker_side = maker_row["SIDE"]
         maker_orders_payload = [
             {
                 "order_id": match["maker_order_id"],
-                "owner": match["maker_row"]["MAKER"],
+                "owner": maker_user_id or "",         # non-secret USER_ID (§13)
+                "maker_address": maker_row["MAKER"],  # eth address
                 "matched_amount": str(match["trade_size"]),
+                "price": int(match["price"]),
+                "fee_rate_bps": int(maker_row["FEE_RATE_BPS"]),
+                "asset_id": token_id,
+                "outcome": outcome_label,
+                "side": maker_side,
             }
         ]
         conn.execute(
@@ -721,15 +737,16 @@ class OrderService:
             INSERT INTO trades (
                 TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID,
                 PRICE, TRADE_SIZE, REMAINING_SIZE, SIDE, STATUS,
-                MATCH_TIME, TRANSACTION_HASH, BUCKET_INDEX, FEE_RATE_BPS
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                MATCH_TIME, TRANSACTION_HASH, BUCKET_INDEX, FEE_RATE_BPS,
+                TAKER_API_KEY, MAKER_API_KEY
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trade_id,
                 taker_row["ORDER_ID"],
                 json.dumps(maker_orders_payload),
-                taker_row["TOKEN_ID"],
-                taker_row["TOKEN_ID"],
+                condition_id,                 # MARKET = condition_id (§7 fix)
+                token_id,                     # ASSET_ID = token_id
                 match["price"],
                 match["trade_size"],
                 taker_row["REMAINING_AMOUNT"],
@@ -739,6 +756,8 @@ class OrderService:
                 "",
                 0,
                 int(taker_row["FEE_RATE_BPS"]),
+                taker_row["API_KEY"],          # internal filter key (never serialized)
+                maker_row["API_KEY"],          # internal filter key
             ),
         )
         return trade_id

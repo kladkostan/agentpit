@@ -27,6 +27,10 @@ class TableCreate:
             )
             """
         )
+        existing = {r[1] for r in db.execute("PRAGMA table_info(trades)").fetchall()}
+        for col in ("TAKER_API_KEY", "MAKER_API_KEY"):
+            if col not in existing:
+                db.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
 
     @staticmethod
     def create_orders_table(db: sqlite3.Connection) -> None:
