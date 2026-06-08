@@ -1,0 +1,22 @@
+# Optional Postgres for CI or machines using OrbStack/colima/podman.
+# Local dev on the maintainer's Mac uses native Homebrew Postgres instead
+# (see scripts/run_postgres.sh) — no Docker daemon required.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: agentpit
+      POSTGRES_PASSWORD: agentpit
+      POSTGRES_DB: agentpit
+    ports:
+      - "5432:5432"
+    volumes:
+      - agentpit_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentpit"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  agentpit_pg:
