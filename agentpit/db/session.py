@@ -15,6 +15,11 @@ class DbSession:
     own connection, so reads and writes run concurrently.
     """
 
+    # Registry of currently-open sessions. The test suite uses it to close
+    # pools leaked by per-test `create_app()` calls (which never run their
+    # lifespan shutdown), so they don't pin Postgres connections.
+    _open: "list[DbSession]" = []
+
     def __init__(
         self,
         dsn: str,
@@ -33,6 +38,7 @@ class DbSession:
         )
         with self._pool.connection() as conn:
             TableCreate.create_all_tables(conn)
+        DbSession._open.append(self)
 
     @contextmanager
     def read(self) -> Iterator[psycopg.Connection]:
@@ -46,3 +52,7 @@ class DbSession:
 
     def close(self) -> None:
         self._pool.close()
+        try:
+            DbSession._open.remove(self)
+        except ValueError:
+            pass

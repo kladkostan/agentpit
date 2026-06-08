@@ -14,6 +14,7 @@ import pytest
 
 from agentpit.api.deps import get_db_session
 from agentpit.api.main import app
+from agentpit.db.session import DbSession
 from agentpit.db.table_create import TableCreate
 from tests.db_helpers import TEST_DSN, fresh_test_db
 
@@ -43,6 +44,7 @@ def _isolated_db_session():
     overridden onto the singleton app (the app's lifespan closes its own
     db_session on TestClient shutdown, so endpoints must use the override)."""
     _truncate_all()
+    before = {id(s) for s in DbSession._open}
     fresh = fresh_test_db()
     previous = app.dependency_overrides.get(get_db_session)
     app.dependency_overrides[get_db_session] = lambda: fresh
@@ -53,4 +55,8 @@ def _isolated_db_session():
             app.dependency_overrides.pop(get_db_session, None)
         else:
             app.dependency_overrides[get_db_session] = previous
-        fresh.close()
+        # Close every session created during this test (fresh + any pools
+        # leaked by per-test create_app()); keep the import-time singleton.
+        for s in list(DbSession._open):
+            if id(s) not in before:
+                s.close()
