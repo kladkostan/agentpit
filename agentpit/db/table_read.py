@@ -450,7 +450,9 @@ class TableRead:
             f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC",
             params,
         )
-        return [dict(r) for r in cur.fetchall()]
+        # Keep the case-insensitive dict rows — a plain dict(r) would lower-case
+        # the keys and break the upper-case access in TradeService.
+        return list(cur.fetchall())
 
     @staticmethod
     def get_transaction_history(db: psycopg.Connection, api_key: str) -> list:

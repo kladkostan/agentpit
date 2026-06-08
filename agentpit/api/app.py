@@ -187,7 +187,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await task
                 except asyncio.CancelledError:
                     pass
-            db_session.close()
+            # The pool is intentionally NOT closed here: a psycopg pool is
+            # terminal once closed (unlike the old auto-reconnecting SQLite
+            # session), and tests reuse the singleton app across many
+            # TestClient lifespans. The pool is released by the test harness
+            # (conftest session registry) or on process exit.
 
     app = FastAPI(title="AgentPit", lifespan=lifespan)
     app.dependency_overrides[get_db_session] = lambda: db_session

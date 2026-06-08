@@ -3,7 +3,6 @@ populated, MAKER_ORDERS carries USER_ID owner + maker_address."""
 
 import json
 import secrets
-import sqlite3
 import uuid
 
 from fastapi.testclient import TestClient
@@ -56,9 +55,8 @@ def test_trade_row_is_owner_attributed():
     client.post("/order", headers=_hdr(tb), json={"token_id": yes, "side": "SELL", "price": "0.6", "size": 100})
 
     with db.read() as conn:
-        conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT * FROM trades WHERE ASSET_ID = ? ORDER BY MATCH_TIME DESC LIMIT 1",
+            "SELECT * FROM trades WHERE ASSET_ID = %s ORDER BY MATCH_TIME DESC LIMIT 1",
             (yes,),
         ).fetchone()
     assert row["MARKET"] == cond                  # condition_id, not token_id
