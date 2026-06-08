@@ -1,13 +1,13 @@
 # Assumptions : aLL database methods will be called holding a global lock
-import sqlite3
+import psycopg
 
 from agentpit.datastructures.market_state import MarketState
 
 
 class TableCreate:
     @staticmethod
-    def create_trades_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_trades_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS trades (
                 TRADE_ID TEXT PRIMARY KEY,
@@ -15,77 +15,71 @@ class TableCreate:
                 MAKER_ORDERS TEXT,
                 MARKET TEXT,
                 ASSET_ID TEXT,
-                PRICE INTEGER,
-                TRADE_SIZE INTEGER,
-                REMAINING_SIZE INTEGER,
+                PRICE BIGINT,
+                TRADE_SIZE BIGINT,
+                REMAINING_SIZE BIGINT,
                 SIDE TEXT,
                 STATUS TEXT,
-                MATCH_TIME INTEGER,
+                MATCH_TIME BIGINT,
                 TRANSACTION_HASH TEXT,
                 BUCKET_INDEX INTEGER,
-                FEE_RATE_BPS INTEGER
+                FEE_RATE_BPS BIGINT,
+                TAKER_API_KEY TEXT,
+                MAKER_API_KEY TEXT
             )
             """
         )
-        existing = {r[1] for r in db.execute("PRAGMA table_info(trades)").fetchall()}
-        for col in ("TAKER_API_KEY", "MAKER_API_KEY"):
-            if col not in existing:
-                db.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
 
     @staticmethod
-    def create_orders_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_orders_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS orders (
                 API_KEY TEXT,
-                PRICE INTEGER,
+                PRICE BIGINT,
                 POST_ONLY INTEGER,
                 ORDER_TYPE TEXT,
-                SALT INTEGER,
+                SALT TEXT,
                 MAKER TEXT,
                 TAKER TEXT,
                 SIGNER TEXT,
                 TOKEN_ID TEXT,
-                MAKER_AMOUNT INTEGER,
-                TAKER_AMOUNT INTEGER,
-                EXPIRATION INTEGER,
+                MAKER_AMOUNT BIGINT,
+                TAKER_AMOUNT BIGINT,
+                EXPIRATION BIGINT,
                 NONCE INTEGER,
-                FEE_RATE_BPS INTEGER,
+                FEE_RATE_BPS BIGINT,
                 SIDE TEXT,
-                SIGNATURE_TYPE TEXT,
+                SIGNATURE_TYPE INTEGER,
                 SIGNATURE TEXT,
                 ORDER_JSON TEXT,
                 STATUS TEXT DEFAULT 'live',
-                REMAINING_AMOUNT INTEGER,
-                CREATED_AT INTEGER,
+                REMAINING_AMOUNT BIGINT,
+                CREATED_AT BIGINT,
                 ORDER_ID TEXT PRIMARY KEY
             )
             """
         )
-        # additive: pre-existing dev DBs may not have SIGNATURE
-        cols = {row[1] for row in db.execute("PRAGMA table_info(orders)").fetchall()}
-        if "SIGNATURE" not in cols:
-            db.execute("ALTER TABLE orders ADD COLUMN SIGNATURE TEXT")
-        db.execute(
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_orders_price_side ON orders(PRICE, SIDE)"
         )
-        db.execute(
+        conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_order_type_status_expiration
                 ON orders(ORDER_TYPE, STATUS, EXPIRATION)
             """
         )
-        db.execute(
+        conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_orders_status_expiration
                 ON orders(STATUS, EXPIRATION)
             """
         )
-        db.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
 
     @staticmethod
-    def create_users_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_users_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
                 USER_ID         TEXT PRIMARY KEY,
@@ -95,95 +89,98 @@ class TableCreate:
                 ETH_ADDRESS     TEXT NOT NULL UNIQUE,
                 ETH_PRIVATE_KEY TEXT NOT NULL UNIQUE,
                 API_KEY         TEXT NOT NULL UNIQUE,
-                ONBOARDED_AT    INTEGER,
-                CREATED_AT      INTEGER NOT NULL,
+                ONBOARDED_AT    BIGINT,
+                CREATED_AT      BIGINT NOT NULL,
                 IS_BOT          INTEGER NOT NULL DEFAULT 0
             )
             """
         )
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(EMAIL)")
-        TableCreate._migrate_users_table(db)
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(EMAIL)")
+        TableCreate._migrate_users_table(conn)
 
     @staticmethod
-    def _migrate_users_table(db: sqlite3.Connection) -> None:
+    def _migrate_users_table(conn: psycopg.Connection) -> None:
         """Idempotent additive migration for the users table.
 
         Pre-auth versions of the schema only had USER_ID, API_KEY, ETH_PRIVATE_KEY.
         Add the new columns if they're missing so existing dev DBs keep working.
-        New columns marked NOT NULL in the canonical schema are added as nullable
-        here because SQLite cannot add NOT NULL columns without a default.
         """
-        existing = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
         additions = [
             ("EMAIL", "TEXT"),
             ("PASSWORD_HASH", "TEXT"),
             ("HANDLE", "TEXT"),
             ("ETH_ADDRESS", "TEXT"),
-            ("ONBOARDED_AT", "INTEGER"),
-            ("CREATED_AT", "INTEGER"),
+            ("ONBOARDED_AT", "BIGINT"),
+            ("CREATED_AT", "BIGINT"),
             ("IS_BOT", "INTEGER NOT NULL DEFAULT 0"),
         ]
         for col, col_type in additions:
-            if col not in existing:
-                db.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+            conn.execute(
+                f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {col_type}"
+            )
 
     @staticmethod
-    def create_markets_table(db: sqlite3.Connection) -> None:
+    def create_markets_table(conn: psycopg.Connection) -> None:
         allowed_states = ", ".join(f"'{s.value}'" for s in MarketState)
-        db.execute(
+        conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS markets (
-                MARKET_ID INTEGER PRIMARY KEY,
-                CONDITION_ID TEXT NOT NULL UNIQUE, -- u256 hex string
-                POLYMARKET_ID INTEGER,      -- optional source market id from Polymarket
-                POLYMARKET_CONDITION_ID TEXT, -- upstream conditionId for resolution mirror
-                EVENT_ID INTEGER,           -- optional parent event grouping markets
-                OUTCOME_LABEL TEXT,         -- short label shown inside an event (e.g. "France")
-                ICON_URL TEXT,              -- optional icon for the outcome row (flag, logo, etc.)
+                MARKET_ID BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                CONDITION_ID TEXT NOT NULL UNIQUE,
+                POLYMARKET_ID BIGINT,
+                POLYMARKET_CONDITION_ID TEXT,
+                EVENT_ID BIGINT,
+                OUTCOME_LABEL TEXT,
+                ICON_URL TEXT,
                 POLYMARKET_YES_TOKEN_ID TEXT,
                 POLYMARKET_NO_TOKEN_ID TEXT,
-                QUESTION TEXT NOT NULL,     -- question string used to compute condition_id
-                SLUG TEXT NOT NULL,                  -- optional URL-safe identifier
-                DESCRIPTION TEXT NOT NULL,  -- human-readable description
-                ERC1155_TOKENS TEXT NOT NULL, -- JSON array of [tokenId, label] pairs
-                START_DATE INTEGER NOT NULL, -- unix timestamp
-                END_DATE INTEGER,   -- unix timestamp
-                RESOLVED_OUTCOME INTEGER, -- index of the winning outcome
+                QUESTION TEXT NOT NULL,
+                SLUG TEXT NOT NULL,
+                DESCRIPTION TEXT NOT NULL,
+                ERC1155_TOKENS TEXT NOT NULL,
+                START_DATE BIGINT NOT NULL,
+                END_DATE BIGINT,
+                RESOLVED_OUTCOME INTEGER,
                 MARKET_STATE TEXT NOT NULL DEFAULT '{MarketState.DRAFT.value}'
                     CHECK (MARKET_STATE IN ({allowed_states}))
             )
             """
         )
-        cols = {row[1] for row in db.execute("PRAGMA table_info(markets)").fetchall()}
-        if "POLYMARKET_CONDITION_ID" not in cols:
-            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_CONDITION_ID TEXT")
-        if "EVENT_ID" not in cols:
-            db.execute("ALTER TABLE markets ADD COLUMN EVENT_ID INTEGER")
-        if "OUTCOME_LABEL" not in cols:
-            db.execute("ALTER TABLE markets ADD COLUMN OUTCOME_LABEL TEXT")
-        if "ICON_URL" not in cols:
-            db.execute("ALTER TABLE markets ADD COLUMN ICON_URL TEXT")
-        if "POLYMARKET_YES_TOKEN_ID" not in cols:
-            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_YES_TOKEN_ID TEXT")
-        if "POLYMARKET_NO_TOKEN_ID" not in cols:
-            db.execute("ALTER TABLE markets ADD COLUMN POLYMARKET_NO_TOKEN_ID TEXT")
-        db.execute(
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS POLYMARKET_CONDITION_ID TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS EVENT_ID BIGINT"
+        )
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS OUTCOME_LABEL TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS ICON_URL TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS POLYMARKET_YES_TOKEN_ID TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS POLYMARKET_NO_TOKEN_ID TEXT"
+        )
+        conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(CONDITION_ID)"
         )
-        db.execute(
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_markets_polymarket_condition_id "
             "ON markets(POLYMARKET_CONDITION_ID)"
         )
-        db.execute(
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_markets_event_id ON markets(EVENT_ID)"
         )
 
     @staticmethod
-    def create_events_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_events_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
-                EVENT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                EVENT_ID BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                 SLUG TEXT NOT NULL UNIQUE,
                 TITLE TEXT NOT NULL,
                 DESCRIPTION TEXT NOT NULL DEFAULT '',
@@ -195,30 +192,30 @@ class TableCreate:
             )
             """
         )
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)")
-        db.execute(
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)")
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_polymarket_event_id "
             "ON events(POLYMARKET_EVENT_ID)"
         )
 
     @staticmethod
-    def create_transactions_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_transactions_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS transactions (
-                TRANSACTION_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP,
+                TRANSACTION_ID BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                TIMESTAMP timestamptz DEFAULT now(),
                 API_KEY TEXT NOT NULL,
                 TRANSACTION_TYPE TEXT NOT NULL,
-                MARKET_ID INTEGER,
+                MARKET_ID BIGINT,
                 DETAILS TEXT
             )
             """
         )
 
     @staticmethod
-    def create_agents_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_agents_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS agents (
                 AGENT_ID TEXT PRIMARY KEY,
@@ -231,8 +228,8 @@ class TableCreate:
         )
 
     @staticmethod
-    def create_personalities_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_personalities_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS personalities (
                 PERSONALITY_ID TEXT PRIMARY KEY,
@@ -243,32 +240,32 @@ class TableCreate:
         )
 
     @staticmethod
-    def create_price_snapshots_table(db: sqlite3.Connection) -> None:
-        db.execute(
+    def create_price_snapshots_table(conn: psycopg.Connection) -> None:
+        conn.execute(
             """
             CREATE TABLE IF NOT EXISTS price_snapshots (
-                SNAPSHOT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                MARKET_ID INTEGER NOT NULL,
+                SNAPSHOT_ID BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                MARKET_ID BIGINT NOT NULL,
                 ASSET_ID TEXT NOT NULL,
-                T INTEGER NOT NULL,
-                MID_MICRO_USD INTEGER NOT NULL
+                T BIGINT NOT NULL,
+                MID_MICRO_USD BIGINT NOT NULL
             )
             """
         )
-        db.execute(
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_snapshots_market_t "
             "ON price_snapshots(MARKET_ID, T)"
         )
 
     @staticmethod
-    def create_all_tables(db: sqlite3.Connection) -> None:
+    def create_all_tables(conn: psycopg.Connection) -> None:
         # errors propagate; no exception handling here
-        TableCreate.create_orders_table(db)
-        TableCreate.create_trades_table(db)
-        TableCreate.create_users_table(db)
-        TableCreate.create_agents_table(db)
-        TableCreate.create_personalities_table(db)
-        TableCreate.create_events_table(db)
-        TableCreate.create_markets_table(db)
-        TableCreate.create_transactions_table(db)
-        TableCreate.create_price_snapshots_table(db)
+        TableCreate.create_orders_table(conn)
+        TableCreate.create_trades_table(conn)
+        TableCreate.create_users_table(conn)
+        TableCreate.create_agents_table(conn)
+        TableCreate.create_personalities_table(conn)
+        TableCreate.create_events_table(conn)
+        TableCreate.create_markets_table(conn)
+        TableCreate.create_transactions_table(conn)
+        TableCreate.create_price_snapshots_table(conn)
