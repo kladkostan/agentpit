@@ -238,54 +238,52 @@ class TableWrite:
 
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
-        row = db.execute(
-            "SELECT COALESCE(MAX(MARKET_ID), 0) + 1 as NEXT_ID FROM markets"
-        ).fetchone()
-        next_market_id = int(row["NEXT_ID"])
-
-        db.execute(
-            """
-            INSERT INTO markets (MARKET_ID,
-                                 CONDITION_ID,
-                                 POLYMARKET_ID,
-                                 POLYMARKET_CONDITION_ID,
-                                 QUESTION,
-                                 DESCRIPTION,
-                                 SLUG,
-                                 START_DATE,
-                                 END_DATE,
-                                 ERC1155_TOKENS,
-                                 MARKET_STATE,
-                                 EVENT_ID,
-                                 OUTCOME_LABEL,
-                                 ICON_URL,
-                                 POLYMARKET_YES_TOKEN_ID,
-                                 POLYMARKET_NO_TOKEN_ID)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                next_market_id,
-                condition_id.value,
-                request.polymarket_id,
-                request.polymarket_condition_id,
-                request.question,
-                request.description,
-                request.slug,
-                request.start_date,
-                request.end_date,
-                erc1155_tokens_json,
-                request.state,
-                request.event_id,
-                request.outcome_label,
-                request.icon_url,
-                request.polymarket_yes_token_id,
-                request.polymarket_no_token_id,
-            ),
+        # MARKET_ID is a BIGINT IDENTITY column — let Postgres assign it (avoids
+        # the old racy MAX(MARKET_ID)+1) and read it back with RETURNING.
+        new_market_id = int(
+            db.execute(
+                """
+                INSERT INTO markets (CONDITION_ID,
+                                     POLYMARKET_ID,
+                                     POLYMARKET_CONDITION_ID,
+                                     QUESTION,
+                                     DESCRIPTION,
+                                     SLUG,
+                                     START_DATE,
+                                     END_DATE,
+                                     ERC1155_TOKENS,
+                                     MARKET_STATE,
+                                     EVENT_ID,
+                                     OUTCOME_LABEL,
+                                     ICON_URL,
+                                     POLYMARKET_YES_TOKEN_ID,
+                                     POLYMARKET_NO_TOKEN_ID)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING MARKET_ID
+                """,
+                (
+                    condition_id.value,
+                    request.polymarket_id,
+                    request.polymarket_condition_id,
+                    request.question,
+                    request.description,
+                    request.slug,
+                    request.start_date,
+                    request.end_date,
+                    erc1155_tokens_json,
+                    request.state,
+                    request.event_id,
+                    request.outcome_label,
+                    request.icon_url,
+                    request.polymarket_yes_token_id,
+                    request.polymarket_no_token_id,
+                ),
+            ).fetchone()["MARKET_ID"]
         )
 
         return Market(
             question=request.question,
-            market_id=next_market_id,
+            market_id=new_market_id,
             polymarket_id=request.polymarket_id,
             polymarket_condition_id=request.polymarket_condition_id,
             polymarket_yes_token_id=request.polymarket_yes_token_id,
