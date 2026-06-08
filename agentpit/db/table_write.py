@@ -1,7 +1,7 @@
-import sqlite3
 import json
 import time as _time
 import uuid
+import psycopg
 from web3 import Web3
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
@@ -17,7 +17,7 @@ from agentpit.datastructures.market_state import MarketState
 class TableWrite:
     @staticmethod
     def create_user(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         email: str,
         password_hash: str,
         handle: str | None = None,
@@ -40,7 +40,7 @@ class TableWrite:
                 USER_ID, EMAIL, PASSWORD_HASH, HANDLE,
                 ETH_ADDRESS, ETH_PRIVATE_KEY, API_KEY,
                 ONBOARDED_AT, CREATED_AT
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s)
             """,
             (
                 user_id,
@@ -56,48 +56,48 @@ class TableWrite:
         return user_id, acct, api_key
 
     @staticmethod
-    def mark_user_onboarded(db: sqlite3.Connection, user_id: str) -> None:
+    def mark_user_onboarded(db: psycopg.Connection, user_id: str) -> None:
         db.execute(
-            "UPDATE users SET ONBOARDED_AT = ? WHERE USER_ID = ?",
+            "UPDATE users SET ONBOARDED_AT = %s WHERE USER_ID = %s",
             (int(_time.time()), user_id),
         )
 
     @staticmethod
-    def update_user_handle(db: sqlite3.Connection, user_id: str, handle: str) -> bool:
+    def update_user_handle(db: psycopg.Connection, user_id: str, handle: str) -> bool:
         cur = db.execute(
-            "UPDATE users SET HANDLE = ? WHERE USER_ID = ?",
+            "UPDATE users SET HANDLE = %s WHERE USER_ID = %s",
             (handle, user_id),
         )
         return cur.rowcount > 0
 
     @staticmethod
     def update_user_password_hash(
-        db: sqlite3.Connection, user_id: str, password_hash: str
+        db: psycopg.Connection, user_id: str, password_hash: str
     ) -> bool:
         cur = db.execute(
-            "UPDATE users SET PASSWORD_HASH = ? WHERE USER_ID = ?",
+            "UPDATE users SET PASSWORD_HASH = %s WHERE USER_ID = %s",
             (password_hash, user_id),
         )
         return cur.rowcount > 0
 
     @staticmethod
-    def mark_user_as_bot(db: sqlite3.Connection, api_key: str) -> bool:
-        cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = ?", (api_key,))
+    def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:
+        cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = %s", (api_key,))
         return cur.rowcount > 0
 
     @staticmethod
     def mark_user_as_bot_by_eth_address(
-        db: sqlite3.Connection, eth_address: str
+        db: psycopg.Connection, eth_address: str
     ) -> bool:
         cur = db.execute(
-            "UPDATE users SET IS_BOT = 1 WHERE LOWER(ETH_ADDRESS) = LOWER(?)",
+            "UPDATE users SET IS_BOT = 1 WHERE LOWER(ETH_ADDRESS) = LOWER(%s)",
             (eth_address,),
         )
         return cur.rowcount > 0
 
     @staticmethod
     def create_personality(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         personality_id: str,
         title: str,
         beliefs: str,
@@ -111,7 +111,7 @@ class TableWrite:
         db.execute(
             """
             INSERT INTO personalities (PERSONALITY_ID, PERSONALITY_TITLE, PERSONALITY_SPEC)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             """,
             (personality_id, title, spec),
         )
@@ -119,19 +119,19 @@ class TableWrite:
 
     @staticmethod
     def create_agent(
-        db: sqlite3.Connection, agent_id: str, personality_id: str
+        db: psycopg.Connection, agent_id: str, personality_id: str
     ) -> None:
         db.execute(
             """
             INSERT INTO agents (AGENT_ID, PERSONALITY)
-            VALUES (?, ?)
+            VALUES (%s, %s)
             """,
             (agent_id, personality_id),
         )
 
     @staticmethod
     def upsert_event(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         *,
         slug: str,
         title: str,
@@ -147,16 +147,16 @@ class TableWrite:
         Used by both the seeder and the Polymarket sync to be idempotent.
         """
         existing = db.execute(
-            "SELECT EVENT_ID FROM events WHERE SLUG = ? LIMIT 1", (slug,)
+            "SELECT EVENT_ID FROM events WHERE SLUG = %s LIMIT 1", (slug,)
         ).fetchone()
         if existing is not None:
-            event_id = int(existing[0])
+            event_id = int(existing["EVENT_ID"])
             db.execute(
                 """
                 UPDATE events
-                SET TITLE = ?, DESCRIPTION = ?, ICON_URL = ?, CATEGORY = ?,
-                    START_DATE = ?, END_DATE = ?, POLYMARKET_EVENT_ID = ?
-                WHERE EVENT_ID = ?
+                SET TITLE = %s, DESCRIPTION = %s, ICON_URL = %s, CATEGORY = %s,
+                    START_DATE = %s, END_DATE = %s, POLYMARKET_EVENT_ID = %s
+                WHERE EVENT_ID = %s
                 """,
                 (
                     title,
@@ -170,11 +170,12 @@ class TableWrite:
                 ),
             )
         else:
-            cur = db.execute(
+            row = db.execute(
                 """
                 INSERT INTO events (SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY,
                                     START_DATE, END_DATE, POLYMARKET_EVENT_ID)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING EVENT_ID
                 """,
                 (
                     slug,
@@ -186,8 +187,8 @@ class TableWrite:
                     end_date,
                     polymarket_event_id,
                 ),
-            )
-            event_id = int(cur.lastrowid or 0)
+            ).fetchone()
+            event_id = int(row["EVENT_ID"])
         return Event(
             event_id=event_id,
             slug=slug,
@@ -202,7 +203,7 @@ class TableWrite:
 
     @staticmethod
     def attach_market_to_event(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         *,
         market_id: int,
         event_id: int,
@@ -213,17 +214,17 @@ class TableWrite:
         db.execute(
             """
             UPDATE markets
-            SET EVENT_ID = ?,
-                OUTCOME_LABEL = COALESCE(?, OUTCOME_LABEL),
-                ICON_URL      = COALESCE(?, ICON_URL)
-            WHERE MARKET_ID = ?
+            SET EVENT_ID = %s,
+                OUTCOME_LABEL = COALESCE(%s, OUTCOME_LABEL),
+                ICON_URL      = COALESCE(%s, ICON_URL)
+            WHERE MARKET_ID = %s
             """,
             (event_id, outcome_label, icon_url, market_id),
         )
 
     @staticmethod
     def create_market(
-        db: sqlite3.Connection, request: CreateMarketRequest, is_polygon_market: bool
+        db: psycopg.Connection, request: CreateMarketRequest, is_polygon_market: bool
     ) -> Market:
 
         # The local create-market path now sets `request.condition_id` upstream
@@ -238,9 +239,9 @@ class TableWrite:
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
         row = db.execute(
-            "SELECT COALESCE(MAX(MARKET_ID), 0) + 1 FROM markets"
+            "SELECT COALESCE(MAX(MARKET_ID), 0) + 1 as NEXT_ID FROM markets"
         ).fetchone()
-        next_market_id = int(row[0])
+        next_market_id = int(row["NEXT_ID"])
 
         db.execute(
             """
@@ -260,7 +261,7 @@ class TableWrite:
                                  ICON_URL,
                                  POLYMARKET_YES_TOKEN_ID,
                                  POLYMARKET_NO_TOKEN_ID)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 next_market_id,
@@ -304,14 +305,14 @@ class TableWrite:
 
     @staticmethod
     def update_market_state_if_needed(
-        db: sqlite3.Connection, request: CreateMarketRequest
+        db: psycopg.Connection, request: CreateMarketRequest
     ) -> Market:
         # Compute condition_id from question and number of outcomes
         erc1155_tokens_json = json.dumps(request.erc1155_tokens, separators=(",", ":"))
 
         # Fetch existing market details to preserve state and IDs
         cursor = db.execute(
-            "SELECT MARKET_ID, RESOLVED_OUTCOME FROM markets WHERE POLYMARKET_ID = ?",
+            "SELECT MARKET_ID, RESOLVED_OUTCOME FROM markets WHERE POLYMARKET_ID = %s",
             (request.polymarket_id,),
         )
         row = cursor.fetchone()
@@ -320,20 +321,21 @@ class TableWrite:
                 f"Market with Polymarket ID {request.polymarket_id} not found"
             )
 
-        market_id, resolved_outcome = row
+        market_id = row["MARKET_ID"]
+        resolved_outcome = row["RESOLVED_OUTCOME"]
 
         db.execute(
             """
             UPDATE markets
-            SET CONDITION_ID   = ?,
-                QUESTION       = ?,
-                DESCRIPTION    = ?,
-                SLUG           = ?,
-                START_DATE     = ?,
-                END_DATE       = ?,
-                ERC1155_TOKENS = ?,
-                MARKET_STATE  = ?
-            WHERE POLYMARKET_ID = ?
+            SET CONDITION_ID   = %s,
+                QUESTION       = %s,
+                DESCRIPTION    = %s,
+                SLUG           = %s,
+                START_DATE     = %s,
+                END_DATE       = %s,
+                ERC1155_TOKENS = %s,
+                MARKET_STATE  = %s
+            WHERE POLYMARKET_ID = %s
             """,
             (
                 request.condition_id,
@@ -364,7 +366,7 @@ class TableWrite:
 
     @staticmethod
     def log_transaction(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         api_key: str,
         transaction_type: str,
         market_id: int | None = None,
@@ -385,13 +387,13 @@ class TableWrite:
         db.execute(
             """
             INSERT INTO transactions (API_KEY, TRANSACTION_TYPE, MARKET_ID, DETAILS)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             """,
             (api_key, transaction_type, market_id, details_json),
         )
 
     @staticmethod
-    def activate_market(db: sqlite3.Connection, market_id: int) -> Market:
+    def activate_market(db: psycopg.Connection, market_id: int) -> Market:
         """
         Activate a market, transitioning it from DRAFT to ACTIVE.
 
@@ -420,7 +422,7 @@ class TableWrite:
 
         # Update state
         db.execute(
-            "UPDATE markets SET MARKET_STATE = ? WHERE MARKET_ID = ?",
+            "UPDATE markets SET MARKET_STATE = %s WHERE MARKET_ID = %s",
             (MarketState.ACTIVE.value, market_id),
         )
 
@@ -429,7 +431,7 @@ class TableWrite:
         return market
 
     @staticmethod
-    def close_market(db: sqlite3.Connection, market_id: int) -> Market:
+    def close_market(db: psycopg.Connection, market_id: int) -> Market:
         """
         Close a market, transitioning it from ACTIVE to CLOSED.
 
@@ -458,7 +460,7 @@ class TableWrite:
 
         # Update state to CLOSED
         db.execute(
-            "UPDATE markets SET MARKET_STATE = ? WHERE MARKET_ID = ?",
+            "UPDATE markets SET MARKET_STATE = %s WHERE MARKET_ID = %s",
             (MarketState.CLOSED.value, market_id),
         )
 
@@ -468,7 +470,7 @@ class TableWrite:
 
     @staticmethod
     def resolve_market(
-        db: sqlite3.Connection, market_id: int, winning_outcome_index: int
+        db: psycopg.Connection, market_id: int, winning_outcome_index: int
     ) -> Market:
         """
         Resolve a market by specifying the winning outcome.
@@ -506,7 +508,7 @@ class TableWrite:
 
         # Update state and outcome
         db.execute(
-            "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE MARKET_ID = ?",
+            "UPDATE markets SET MARKET_STATE = %s, RESOLVED_OUTCOME = %s WHERE MARKET_ID = %s",
             (MarketState.RESOLVED.value, winning_outcome_index, market_id),
         )
 
@@ -516,7 +518,7 @@ class TableWrite:
         return market
 
     @staticmethod
-    def cancel_market(db: sqlite3.Connection, market_id: int) -> tuple[Market, int]:
+    def cancel_market(db: psycopg.Connection, market_id: int) -> tuple[Market, int]:
         """Cancel a market.
 
         Refund logic is intentionally not implemented here: with on-chain CTF
@@ -535,7 +537,7 @@ class TableWrite:
             raise ValueError(f"Market {market_id} is already cancelled")
 
         db.execute(
-            "UPDATE markets SET MARKET_STATE = ? WHERE MARKET_ID = ?",
+            "UPDATE markets SET MARKET_STATE = %s WHERE MARKET_ID = %s",
             (MarketState.CANCELLED.value, market_id),
         )
 
@@ -544,7 +546,7 @@ class TableWrite:
 
     @staticmethod
     def update_market_state_to_resolved_if_needed(
-        db: sqlite3.Connection, condition_id: ConditionId, winning_outcome_index: int
+        db: psycopg.Connection, condition_id: ConditionId, winning_outcome_index: int
     ) -> Market:
         """
         Idempotently resolves a market. If already resolved or cancelled, does nothing.
@@ -580,7 +582,7 @@ class TableWrite:
             )
 
         db.execute(
-            "UPDATE markets SET MARKET_STATE = ?, RESOLVED_OUTCOME = ? WHERE CONDITION_ID = ?",
+            "UPDATE markets SET MARKET_STATE = %s, RESOLVED_OUTCOME = %s WHERE CONDITION_ID = %s",
             (
                 MarketState.RESOLVED.value,
                 winning_outcome_index,

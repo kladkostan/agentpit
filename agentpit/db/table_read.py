@@ -1,6 +1,6 @@
-import sqlite3
 import json
 import uuid
+import psycopg
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
@@ -24,74 +24,56 @@ _MARKET_COLS = (
 )
 
 
-def _row_to_market(row: tuple) -> Market:
-    (
-        market_id,
-        polymarket_id,
-        polymarket_condition_id,
-        condition_id_str,
-        question,
-        description,
-        slug,
-        start_date,
-        end_date,
-        erc1155_tokens_json,
-        market_state,
-        resolved_outcome,
-        event_id,
-        outcome_label,
-        icon_url,
-        polymarket_yes_token_id,
-        polymarket_no_token_id,
-    ) = row
+def _row_to_market(row) -> Market:
+    erc1155_tokens_json = row["ERC1155_TOKENS"]
     erc1155_tokens = json.loads(erc1155_tokens_json) if erc1155_tokens_json else []
     return Market(
-        question=question,
-        market_id=market_id,
-        polymarket_id=polymarket_id,
-        polymarket_condition_id=polymarket_condition_id,
-        polymarket_yes_token_id=polymarket_yes_token_id,
-        polymarket_no_token_id=polymarket_no_token_id,
-        condition_id=ConditionId(condition_id_str),
-        description=description,
-        slug=slug,
-        start_date=start_date,
-        end_date=end_date,
+        question=row["QUESTION"],
+        market_id=row["MARKET_ID"],
+        polymarket_id=row["POLYMARKET_ID"],
+        polymarket_condition_id=row["POLYMARKET_CONDITION_ID"],
+        polymarket_yes_token_id=row["POLYMARKET_YES_TOKEN_ID"],
+        polymarket_no_token_id=row["POLYMARKET_NO_TOKEN_ID"],
+        condition_id=ConditionId(row["CONDITION_ID"]),
+        description=row["DESCRIPTION"],
+        slug=row["SLUG"],
+        start_date=row["START_DATE"],
+        end_date=row["END_DATE"],
         erc1155_tokens=erc1155_tokens,
-        market_state=MarketState(market_state),
-        resolved_outcome=resolved_outcome,
-        event_id=event_id,
-        outcome_label=outcome_label,
-        icon_url=icon_url,
+        market_state=MarketState(row["MARKET_STATE"]),
+        resolved_outcome=row["RESOLVED_OUTCOME"],
+        event_id=row["EVENT_ID"],
+        outcome_label=row["OUTCOME_LABEL"],
+        icon_url=row["ICON_URL"],
     )
 
 
 class TableRead:
     @staticmethod
     def read_condition_id_by_polymarket_id(
-        db: sqlite3.Connection, polymarket_id: int
+        db: psycopg.Connection, polymarket_id: int
     ) -> int | None:
         """Return MARKET_ID for a Polymarket id, or None if not found."""
         row = db.execute(
-            "SELECT CONDITION_ID FROM markets WHERE POLYMARKET_ID = ? LIMIT 1",
+            "SELECT CONDITION_ID FROM markets WHERE POLYMARKET_ID = %s LIMIT 1",
             (polymarket_id,),
         ).fetchone()
-        return ConditionId(str(row[0])) if row is not None else None
+        return ConditionId(str(row["CONDITION_ID"])) if row is not None else None
 
     @staticmethod
     def market_exists_by_polymarket_id(
-        db: sqlite3.Connection, polymarket_id: int
+        db: psycopg.Connection, polymarket_id: int
     ) -> bool:
         """Return True if a market row exists for the given Polymarket id."""
         row = db.execute(
-            "SELECT 1 FROM markets WHERE POLYMARKET_ID = ? LIMIT 1",
+            "SELECT 1 FROM markets WHERE POLYMARKET_ID = %s LIMIT 1",
             (polymarket_id,),
         ).fetchone()
         return row is not None
 
     @staticmethod
     def get_market_status_by_condition_id(
-        db: sqlite3.Connection, condition_id: str
+        db: psycopg.Connection, condition_id: str
     ) -> tuple[MarketState, int | None] | None:
         """
         Fetch the market state and resolved outcome by CONDITION_ID.
@@ -100,18 +82,18 @@ class TableRead:
             Tuple of (MarketState, resolved_outcome) if found, otherwise None.
         """
         row = db.execute(
-            "SELECT COALESCE(MARKET_STATE, 'DRAFT'), RESOLVED_OUTCOME FROM markets WHERE CONDITION_ID = ? LIMIT 1",
+            "SELECT COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE, RESOLVED_OUTCOME FROM markets WHERE CONDITION_ID = %s LIMIT 1",
             (condition_id,),
         ).fetchone()
 
         if row is None:
             return None
 
-        return MarketState(row[0]), row[1]
+        return MarketState(row["MARKET_STATE"]), row["RESOLVED_OUTCOME"]
 
     @staticmethod
     def get_market_state(
-        db: sqlite3.Connection, condition_id: ConditionId
+        db: psycopg.Connection, condition_id: ConditionId
     ) -> MarketState | None:
         """
         Fetch the market state by CONDITION_ID.
@@ -120,18 +102,18 @@ class TableRead:
             MarketState if found, otherwise None.
         """
         row = db.execute(
-            "SELECT COALESCE(MARKET_STATE, 'DRAFT') FROM markets WHERE CONDITION_ID = ? LIMIT 1",
+            "SELECT COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE FROM markets WHERE CONDITION_ID = %s LIMIT 1",
             (condition_id.value,),
         ).fetchone()
 
         if row is None:
             return None
 
-        return MarketState(row[0])
+        return MarketState(row["MARKET_STATE"])
 
     @staticmethod
     def get_private_key_for_api_key(
-        db: sqlite3.Connection, api_key: str
+        db: psycopg.Connection, api_key: str
     ) -> LocalAccount | None:
         """Return the eth account for an API key, or None if no user matches.
 
@@ -139,51 +121,50 @@ class TableRead:
         is required: a request with an unknown api_key resolves to None.
         """
         row = db.execute(
-            "SELECT ETH_PRIVATE_KEY FROM users WHERE API_KEY = ? LIMIT 1",
+            "SELECT ETH_PRIVATE_KEY FROM users WHERE API_KEY = %s LIMIT 1",
             (api_key,),
         ).fetchone()
         if row is None:
             return None
-        existing_key = parse_32b_hex_private_key(row[0])
+        existing_key = parse_32b_hex_private_key(row["ETH_PRIVATE_KEY"])
         return Account.from_key(existing_key)
 
     @staticmethod
-    def get_eth_address_for_api_key(db: sqlite3.Connection, api_key: str) -> str | None:
+    def get_eth_address_for_api_key(db: psycopg.Connection, api_key: str) -> str | None:
         """Return the eth address for an API key, or None if no user matches."""
         row = db.execute(
-            "SELECT ETH_ADDRESS FROM users WHERE API_KEY = ? LIMIT 1",
+            "SELECT ETH_ADDRESS FROM users WHERE API_KEY = %s LIMIT 1",
             (api_key,),
         ).fetchone()
-        return row[0] if row else None
+        return row["ETH_ADDRESS"] if row else None
 
     @staticmethod
-    def get_user_id_by_api_key(db: sqlite3.Connection, api_key: str) -> str | None:
+    def get_user_id_by_api_key(db: psycopg.Connection, api_key: str) -> str | None:
         row = db.execute(
-            "SELECT USER_ID FROM users WHERE API_KEY = ? LIMIT 1", (api_key,)
+            "SELECT USER_ID FROM users WHERE API_KEY = %s LIMIT 1", (api_key,)
         ).fetchone()
-        return row[0] if row else None
+        return row["USER_ID"] if row else None
 
     @staticmethod
-    def get_agent_by_id(db: sqlite3.Connection, agent_id: str) -> dict | None:
+    def get_agent_by_id(db: psycopg.Connection, agent_id: str) -> dict | None:
         """
         Fetch an agent by AGENT_ID.
         Returns a dict with agent_id, personality_id, state, history, todo or None.
         """
         row = db.execute(
-            "SELECT PERSONALITY, STATE, HISTORY, TODO FROM agents WHERE AGENT_ID = ? LIMIT 1",
+            "SELECT PERSONALITY, STATE, HISTORY, TODO FROM agents WHERE AGENT_ID = %s LIMIT 1",
             (agent_id,),
         ).fetchone()
 
         if row is None:
             return None
 
-        personality, state_json, history_json, todo_json = row
         return {
             "agent_id": agent_id,
-            "personality_id": personality,
-            "state": json.loads(state_json),
-            "history": json.loads(history_json),
-            "todo": json.loads(todo_json),
+            "personality_id": row["PERSONALITY"],
+            "state": json.loads(row["STATE"]),
+            "history": json.loads(row["HISTORY"]),
+            "todo": json.loads(row["TODO"]),
         }
 
     _USER_COLS = (
@@ -192,112 +173,101 @@ class TableRead:
     )
 
     @staticmethod
-    def _row_to_user(row: tuple) -> User:
-        (
-            user_id,
-            email,
-            handle,
-            eth_address,
-            eth_private_key,
-            api_key,
-            onboarded_at,
-            created_at,
-            is_bot,
-        ) = row
-        existing_key = parse_32b_hex_private_key(eth_private_key)
+    def _row_to_user(row) -> "User":
+        existing_key = parse_32b_hex_private_key(row["ETH_PRIVATE_KEY"])
         acct = Account.from_key(existing_key)
         return User(
-            user_id=user_id,
-            email=email,
+            user_id=row["USER_ID"],
+            email=row["EMAIL"],
             eth_key=acct,
-            eth_address=eth_address,
-            api_key=api_key,
-            handle=handle,
-            onboarded_at=onboarded_at,
-            created_at=created_at if created_at is not None else 0,
-            is_bot=bool(is_bot),
+            eth_address=row["ETH_ADDRESS"],
+            api_key=row["API_KEY"],
+            handle=row["HANDLE"],
+            onboarded_at=row["ONBOARDED_AT"],
+            created_at=row["CREATED_AT"] if row["CREATED_AT"] is not None else 0,
+            is_bot=bool(row["IS_BOT"]),
         )
 
     @staticmethod
-    def get_user_by_userid(db: sqlite3.Connection, user_id: str) -> User | None:
+    def get_user_by_userid(db: psycopg.Connection, user_id: str) -> "User | None":
         row = db.execute(
-            f"SELECT {TableRead._USER_COLS} FROM users WHERE USER_ID = ? LIMIT 1",
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE USER_ID = %s LIMIT 1",
             (user_id,),
         ).fetchone()
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
-    def get_user_by_api_key(db: sqlite3.Connection, api_key: str) -> User | None:
+    def get_user_by_api_key(db: psycopg.Connection, api_key: str) -> "User | None":
         row = db.execute(
-            f"SELECT {TableRead._USER_COLS} FROM users WHERE API_KEY = ? LIMIT 1",
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE API_KEY = %s LIMIT 1",
             (api_key,),
         ).fetchone()
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
-    def get_user_by_email(db: sqlite3.Connection, email: str) -> User | None:
+    def get_user_by_email(db: psycopg.Connection, email: str) -> "User | None":
         row = db.execute(
-            f"SELECT {TableRead._USER_COLS} FROM users WHERE EMAIL = ? LIMIT 1",
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE EMAIL = %s LIMIT 1",
             (email,),
         ).fetchone()
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
-    def get_user_by_eth_address(db: sqlite3.Connection, eth_address: str) -> User | None:
+    def get_user_by_eth_address(db: psycopg.Connection, eth_address: str) -> "User | None":
         row = db.execute(
-            f"SELECT {TableRead._USER_COLS} FROM users WHERE ETH_ADDRESS = ? LIMIT 1",
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE ETH_ADDRESS = %s LIMIT 1",
             (eth_address,),
         ).fetchone()
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
-    def get_password_hash_by_email(db: sqlite3.Connection, email: str) -> str | None:
+    def get_password_hash_by_email(db: psycopg.Connection, email: str) -> str | None:
         """Used by login — returns the bcrypt hash so the service can verify."""
         row = db.execute(
-            "SELECT PASSWORD_HASH FROM users WHERE EMAIL = ? LIMIT 1",
+            "SELECT PASSWORD_HASH FROM users WHERE EMAIL = %s LIMIT 1",
             (email,),
         ).fetchone()
-        return row[0] if row else None
+        return row["PASSWORD_HASH"] if row else None
 
     @staticmethod
-    def get_password_hash_by_userid(db: sqlite3.Connection, user_id: str) -> str | None:
+    def get_password_hash_by_userid(db: psycopg.Connection, user_id: str) -> str | None:
         row = db.execute(
-            "SELECT PASSWORD_HASH FROM users WHERE USER_ID = ? LIMIT 1",
+            "SELECT PASSWORD_HASH FROM users WHERE USER_ID = %s LIMIT 1",
             (user_id,),
         ).fetchone()
-        return row[0] if row else None
+        return row["PASSWORD_HASH"] if row else None
 
     @staticmethod
-    def read_market(db: sqlite3.Connection, market_id: int) -> Market | None:
+    def read_market(db: psycopg.Connection, market_id: int) -> "Market | None":
         row = db.execute(
-            f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = ?",
+            f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = %s",
             (market_id,),
         ).fetchone()
         return _row_to_market(row) if row else None
 
     @staticmethod
     def read_market_by_condition_id(
-        db: sqlite3.Connection, condition_id: ConditionId
-    ) -> Market | None:
+        db: psycopg.Connection, condition_id: ConditionId
+    ) -> "Market | None":
         row = db.execute(
-            f"SELECT {_MARKET_COLS} FROM markets WHERE CONDITION_ID = ?",
+            f"SELECT {_MARKET_COLS} FROM markets WHERE CONDITION_ID = %s",
             (condition_id.value,),
         ).fetchone()
         return _row_to_market(row) if row else None
 
     @staticmethod
-    def list_all_markets(db: sqlite3.Connection) -> list[Market]:
+    def list_all_markets(db: psycopg.Connection) -> "list[Market]":
         cur = db.execute(f"SELECT {_MARKET_COLS} FROM markets ORDER BY MARKET_ID")
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
     def list_markets(
-        db: sqlite3.Connection, limit: int = 100, offset: int = 0
-    ) -> tuple[list[Market], int]:
-        total = db.execute("SELECT COUNT(*) FROM markets").fetchone()[0]
+        db: psycopg.Connection, limit: int = 100, offset: int = 0
+    ) -> "tuple[list[Market], int]":
+        total = db.execute("SELECT COUNT(*) as CNT FROM markets").fetchone()["CNT"]
         cur = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
-            "ORDER BY MARKET_ID DESC LIMIT ? OFFSET ?",
+            "ORDER BY MARKET_ID DESC LIMIT %s OFFSET %s",
             (limit, offset),
         )
         markets = [_row_to_market(row) for row in cur.fetchall()]
@@ -309,80 +279,69 @@ class TableRead:
     )
 
     @staticmethod
-    def _row_to_event(row: tuple) -> Event:
-        (
-            event_id,
-            slug,
-            title,
-            description,
-            icon_url,
-            category,
-            start_date,
-            end_date,
-            polymarket_event_id,
-        ) = row
+    def _row_to_event(row) -> "Event":
         return Event(
-            event_id=event_id,
-            slug=slug,
-            title=title,
-            description=description or "",
-            icon_url=icon_url,
-            category=category,
-            start_date=start_date,
-            end_date=end_date,
-            polymarket_event_id=polymarket_event_id,
+            event_id=row["EVENT_ID"],
+            slug=row["SLUG"],
+            title=row["TITLE"],
+            description=row["DESCRIPTION"] or "",
+            icon_url=row["ICON_URL"],
+            category=row["CATEGORY"],
+            start_date=row["START_DATE"],
+            end_date=row["END_DATE"],
+            polymarket_event_id=row["POLYMARKET_EVENT_ID"],
         )
 
     @staticmethod
-    def get_event_by_id(db: sqlite3.Connection, event_id: int) -> Event | None:
+    def get_event_by_id(db: psycopg.Connection, event_id: int) -> "Event | None":
         row = db.execute(
-            f"SELECT {TableRead._EVENT_COLS} FROM events WHERE EVENT_ID = ? LIMIT 1",
+            f"SELECT {TableRead._EVENT_COLS} FROM events WHERE EVENT_ID = %s LIMIT 1",
             (event_id,),
         ).fetchone()
         return TableRead._row_to_event(row) if row else None
 
     @staticmethod
-    def get_event_by_slug(db: sqlite3.Connection, slug: str) -> Event | None:
+    def get_event_by_slug(db: psycopg.Connection, slug: str) -> "Event | None":
         row = db.execute(
-            f"SELECT {TableRead._EVENT_COLS} FROM events WHERE SLUG = ? LIMIT 1",
+            f"SELECT {TableRead._EVENT_COLS} FROM events WHERE SLUG = %s LIMIT 1",
             (slug,),
         ).fetchone()
         return TableRead._row_to_event(row) if row else None
 
     @staticmethod
     def get_event_by_polymarket_event_id(
-        db: sqlite3.Connection, polymarket_event_id: str
-    ) -> Event | None:
+        db: psycopg.Connection, polymarket_event_id: str
+    ) -> "Event | None":
         row = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events "
-            "WHERE POLYMARKET_EVENT_ID = ? LIMIT 1",
+            "WHERE POLYMARKET_EVENT_ID = %s LIMIT 1",
             (polymarket_event_id,),
         ).fetchone()
         return TableRead._row_to_event(row) if row else None
 
     @staticmethod
-    def list_markets_by_event_id(db: sqlite3.Connection, event_id: int) -> list[Market]:
+    def list_markets_by_event_id(db: psycopg.Connection, event_id: int) -> "list[Market]":
         cur = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
-            "WHERE EVENT_ID = ? ORDER BY MARKET_ID",
+            "WHERE EVENT_ID = %s ORDER BY MARKET_ID",
             (event_id,),
         )
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
     def list_events_with_markets(
-        db: sqlite3.Connection, limit: int = 100, offset: int = 0
-    ) -> tuple[list[tuple[Event, list[Market]]], int]:
+        db: psycopg.Connection, limit: int = 100, offset: int = 0
+    ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ordered by newest, each paired with its child markets.
 
         Used by the home page: every market belongs to an event, so this is
         the primary listing query. One query for the event page + one for
         all member markets (bucketed in Python) — no N+1.
         """
-        total = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        total = db.execute("SELECT COUNT(*) as CNT FROM events").fetchone()["CNT"]
         events_cur = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events "
-            "ORDER BY EVENT_ID DESC LIMIT ? OFFSET ?",
+            "ORDER BY EVENT_ID DESC LIMIT %s OFFSET %s",
             (limit, offset),
         )
         events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]
@@ -390,7 +349,7 @@ class TableRead:
             return [], total
 
         ids = [ev.event_id for ev in events]
-        placeholders = ",".join("?" * len(ids))
+        placeholders = ",".join(["%s"] * len(ids))
         markets_cur = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
             f"WHERE EVENT_ID IN ({placeholders}) ORDER BY EVENT_ID, MARKET_ID",
@@ -405,7 +364,7 @@ class TableRead:
 
     @staticmethod
     def list_markets_filtered(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         *,
         limit: int = 100,
         offset: int = 0,
@@ -414,21 +373,21 @@ class TableRead:
         condition_ids: list[str] | None = None,
         clob_token_ids: list[str] | None = None,
         polymarket_condition_id: str | None = None,
-    ) -> list[Market]:
+    ) -> "list[Market]":
         clauses: list[str] = []
         params: list = []
         if market_id is not None:
-            clauses.append("MARKET_ID = ?")
+            clauses.append("MARKET_ID = %s")
             params.append(market_id)
         if slug is not None:
-            clauses.append("SLUG = ?")
+            clauses.append("SLUG = %s")
             params.append(slug)
         if condition_ids:
-            placeholders = ",".join("?" for _ in condition_ids)
+            placeholders = ",".join("%s" for _ in condition_ids)
             clauses.append(f"CONDITION_ID IN ({placeholders})")
             params.extend(condition_ids)
         if polymarket_condition_id is not None:
-            clauses.append("POLYMARKET_CONDITION_ID = ?")
+            clauses.append("POLYMARKET_CONDITION_ID = %s")
             params.append(polymarket_condition_id)
         if clob_token_ids:
             # Match markets whose ERC1155_TOKENS JSON contains any given token id.
@@ -440,19 +399,19 @@ class TableRead:
                     .replace("%", "\\%")
                     .replace("_", "\\_")
                 )
-                ors.append("ERC1155_TOKENS LIKE ? ESCAPE '\\'")
+                ors.append("ERC1155_TOKENS LIKE %s ESCAPE '\\'")
                 params.append(f'%"{escaped}"%')
             clauses.append("(" + " OR ".join(ors) + ")")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         cur = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets {where} "
-            "ORDER BY MARKET_ID DESC LIMIT ? OFFSET ?",
+            "ORDER BY MARKET_ID DESC LIMIT %s OFFSET %s",
             (*params, limit, offset),
         )
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def list_orphan_markets(db: sqlite3.Connection) -> list[Market]:
+    def list_orphan_markets(db: psycopg.Connection) -> "list[Market]":
         """Markets with no EVENT_ID — used by the auto-wrap singleton helper."""
         cur = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
@@ -462,7 +421,7 @@ class TableRead:
 
     @staticmethod
     def list_trades_for_api_key(
-        db: sqlite3.Connection,
+        db: psycopg.Connection,
         api_key: str,
         *,
         market: str | None = None,
@@ -472,19 +431,18 @@ class TableRead:
         after: int | None = None,
     ) -> list[dict]:
         """Trades where the user is taker OR maker, newest first."""
-        db.row_factory = sqlite3.Row
-        clauses = ["(TAKER_API_KEY = ? OR MAKER_API_KEY = ?)"]
+        clauses = ["(TAKER_API_KEY = %s OR MAKER_API_KEY = %s)"]
         params: list = [api_key, api_key]
         if market is not None:
-            clauses.append("MARKET = ?"); params.append(market)
+            clauses.append("MARKET = %s"); params.append(market)
         if asset_id is not None:
-            clauses.append("ASSET_ID = ?"); params.append(asset_id)
+            clauses.append("ASSET_ID = %s"); params.append(asset_id)
         if trade_id is not None:
-            clauses.append("TRADE_ID = ?"); params.append(trade_id)
+            clauses.append("TRADE_ID = %s"); params.append(trade_id)
         if before is not None:
-            clauses.append("MATCH_TIME < ?"); params.append(before)
+            clauses.append("MATCH_TIME < %s"); params.append(before)
         if after is not None:
-            clauses.append("MATCH_TIME > ?"); params.append(after)
+            clauses.append("MATCH_TIME > %s"); params.append(after)
         cur = db.execute(
             "SELECT TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID, "
             "PRICE, TRADE_SIZE, SIDE, STATUS, MATCH_TIME, TRANSACTION_HASH, "
@@ -495,7 +453,7 @@ class TableRead:
         return [dict(r) for r in cur.fetchall()]
 
     @staticmethod
-    def get_transaction_history(db: sqlite3.Connection, api_key: str) -> list:
+    def get_transaction_history(db: psycopg.Connection, api_key: str) -> list:
         """
         Fetch the transaction history for a given API key.
         """
@@ -503,7 +461,7 @@ class TableRead:
             """
             SELECT TRANSACTION_ID, TIMESTAMP, TRANSACTION_TYPE, MARKET_ID, DETAILS
             FROM transactions
-            WHERE API_KEY = ?
+            WHERE API_KEY = %s
             ORDER BY TIMESTAMP DESC
             """,
             (api_key,),
@@ -512,11 +470,11 @@ class TableRead:
         for row in cursor.fetchall():
             transactions.append(
                 {
-                    "transaction_id": row[0],
-                    "timestamp": row[1],
-                    "transaction_type": row[2],
-                    "market_id": row[3],
-                    "details": json.loads(row[4]) if row[4] else {},
+                    "transaction_id": row["TRANSACTION_ID"],
+                    "timestamp": row["TIMESTAMP"],
+                    "transaction_type": row["TRANSACTION_TYPE"],
+                    "market_id": row["MARKET_ID"],
+                    "details": json.loads(row["DETAILS"]) if row["DETAILS"] else {},
                 }
             )
         return transactions
