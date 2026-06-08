@@ -19,8 +19,9 @@ TEST_DSN = os.environ.get("AGENTPIT_DATABASE_URL", "postgresql:///agentpit_test"
 
 def fresh_test_db() -> DbSession:
     """A DbSession (psycopg pool) on the test database (schema ensured by
-    __init__). Replaces `DbSession(':memory:')`."""
-    return DbSession(TEST_DSN)
+    __init__). Replaces `DbSession(':memory:')`. min_size=0 + short max_idle
+    so leaked/idle test pools shed their Postgres connections quickly."""
+    return DbSession(TEST_DSN, min_size=0, max_idle=5.0)
 
 
 def fresh_test_conn() -> psycopg.Connection:

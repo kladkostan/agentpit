@@ -126,7 +126,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "exposing /admin/* to the network"
         )
 
-    db_session = DbSession(settings.database_url)
+    db_session = DbSession(
+        settings.database_url,
+        min_size=settings.pool_min_size,
+        max_idle=settings.pool_max_idle,
+    )
     coder = JwtCoder(settings)
     onchain_admin = _build_onchain_admin(settings)
     current_user_fn = make_current_user_dep(coder)

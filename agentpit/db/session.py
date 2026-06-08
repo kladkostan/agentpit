@@ -15,11 +15,19 @@ class DbSession:
     own connection, so reads and writes run concurrently.
     """
 
-    def __init__(self, dsn: str, *, min_size: int = 2, max_size: int = 16):
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        min_size: int = 2,
+        max_size: int = 16,
+        max_idle: float = 600.0,
+    ):
         self._pool = ConnectionPool(
             dsn,
             min_size=min_size,
             max_size=max_size,
+            max_idle=max_idle,
             kwargs={"row_factory": ci_dict_row, "autocommit": False},
             open=True,
         )

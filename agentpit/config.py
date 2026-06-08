@@ -15,6 +15,12 @@ class Settings(BaseSettings):
         default="postgresql:///agentpit",
         validation_alias="AGENTPIT_DATABASE_URL",
     )
+    # Pool floor. 2 keeps warm connections in prod; tests set 0 so the many
+    # short-lived create_app() pools don't each pin idle connections.
+    pool_min_size: int = Field(default=2, validation_alias="AGENTPIT_POOL_MIN_SIZE")
+    pool_max_idle: float = Field(
+        default=600.0, validation_alias="AGENTPIT_POOL_MAX_IDLE"
+    )
     sync_enabled: bool = Field(default=False, validation_alias="SYNC")
     sync_interval_seconds: int = Field(
         default=60 * 60, validation_alias="AGENTPIT_SYNC_INTERVAL_SECONDS"

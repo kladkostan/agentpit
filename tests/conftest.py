@@ -4,6 +4,8 @@ import os
 # the deployed exchange — no off-mode). Each test gets a clean DB via TRUNCATE
 # and its own DbSession pool, overridden onto the shared app.
 os.environ.setdefault("AGENTPIT_DATABASE_URL", "postgresql:///agentpit_test")
+os.environ.setdefault("AGENTPIT_POOL_MIN_SIZE", "0")  # leaked create_app pools hold 0 conns
+os.environ.setdefault("AGENTPIT_POOL_MAX_IDLE", "5")  # shed idle connections fast in tests
 os.environ.setdefault("SYNC", "false")
 os.environ.setdefault("JWT_SECRET", "test-only-secret")
 
