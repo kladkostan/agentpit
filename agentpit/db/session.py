@@ -2,9 +2,9 @@ from contextlib import contextmanager
 from typing import Iterator
 
 import psycopg
-from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from agentpit.db.row_factory import ci_dict_row
 from agentpit.db.table_create import TableCreate
 
 
@@ -20,7 +20,7 @@ class DbSession:
             dsn,
             min_size=min_size,
             max_size=max_size,
-            kwargs={"row_factory": dict_row, "autocommit": False},
+            kwargs={"row_factory": ci_dict_row, "autocommit": False},
             open=True,
         )
         with self._pool.connection() as conn:
