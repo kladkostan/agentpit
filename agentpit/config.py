@@ -11,7 +11,10 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    db_path: str = Field(default=":memory:", validation_alias="AGENTPIT_DB_PATH")
+    database_url: str = Field(
+        default="postgresql:///agentpit",
+        validation_alias="AGENTPIT_DATABASE_URL",
+    )
     sync_enabled: bool = Field(default=False, validation_alias="SYNC")
     sync_interval_seconds: int = Field(
         default=60 * 60, validation_alias="AGENTPIT_SYNC_INTERVAL_SECONDS"
