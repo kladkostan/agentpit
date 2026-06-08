@@ -186,8 +186,8 @@ class TableCreate:
                 DESCRIPTION TEXT NOT NULL DEFAULT '',
                 ICON_URL TEXT,
                 CATEGORY TEXT,
-                START_DATE INTEGER,
-                END_DATE INTEGER,
+                START_DATE BIGINT,
+                END_DATE BIGINT,
                 POLYMARKET_EVENT_ID TEXT
             )
             """
