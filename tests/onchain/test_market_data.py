@@ -41,7 +41,7 @@ def test_midpoint_and_price_from_book():
     from agentpit.db.session import DbSession
     from agentpit.db.table_read import TableRead
     settings = Settings()
-    db = DbSession(settings.db_path)
+    db = DbSession(settings.database_url)
     with db.read() as conn:
         user_b = TableRead.get_user_by_email(conn, rb["user"]["email"])
     _give_yes_tokens(client, market, user_b.eth_key)
@@ -83,7 +83,7 @@ def test_resting_orders_feed_the_book():
     from agentpit.db.session import DbSession
     from agentpit.db.table_read import TableRead
     settings = Settings()
-    db = DbSession(settings.db_path)
+    db = DbSession(settings.database_url)
     with db.read() as conn:
         user_b = TableRead.get_user_by_email(conn, rb["user"]["email"])
     _give_yes_tokens(client, market, user_b.eth_key)

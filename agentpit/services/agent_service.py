@@ -16,7 +16,7 @@ class AgentService:
                 raise AgentAlreadyExistsError(payload.agent_id)
 
             personality_row = conn.execute(
-                "SELECT 1 FROM personalities WHERE PERSONALITY_ID = ? LIMIT 1",
+                "SELECT 1 FROM personalities WHERE PERSONALITY_ID = %s LIMIT 1",
                 (payload.personality_id,),
             ).fetchone()
             if personality_row is None:

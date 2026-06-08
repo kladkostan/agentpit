@@ -50,7 +50,7 @@ class TableCreate:
                 NONCE INTEGER,
                 FEE_RATE_BPS BIGINT,
                 SIDE TEXT,
-                SIGNATURE_TYPE INTEGER,
+                SIGNATURE_TYPE TEXT,
                 SIGNATURE TEXT,
                 ORDER_JSON TEXT,
                 STATUS TEXT DEFAULT 'live',

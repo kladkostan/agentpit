@@ -49,7 +49,7 @@ def test_resolve_then_winner_redeems():
     # calls reportPayouts; do that via the admin helper.
     admin = _admin()
     settings = Settings()
-    db = DbSession(settings.db_path)
+    db = DbSession(settings.database_url)
     with db.read() as conn:
         user_a_row = TableRead.get_user_by_email(conn, user_a["user"]["email"])
     question_id = (

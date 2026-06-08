@@ -46,7 +46,7 @@ def test_trade_row_is_owner_attributed():
     w = Web3Client(settings, d)
     c = Contracts(w.web3, d)
     admin = OnchainAdmin(w, c)
-    db = DbSession(settings.db_path)
+    db = DbSession(settings.database_url)
     with db.read() as conn:
         user_b = TableRead.get_user_by_email(conn, b_email)
     admin.user_split_position(user_b.eth_key, bytes.fromhex(cond[2:]), 200_000_000)
