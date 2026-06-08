@@ -1,5 +1,4 @@
 import json
-import sqlite3
 
 from agentpit.datastructures.activity_wire import ActivityWire
 from agentpit.datastructures.market_state import MarketState
@@ -95,17 +94,16 @@ class AccountService:
             user = TableRead.get_user_by_eth_address(conn, eth_address)
             if user is None:
                 return []
-            conn.row_factory = sqlite3.Row
             trade_rows = conn.execute(
                 "SELECT MARKET, ASSET_ID, SIDE, PRICE, TRADE_SIZE, MATCH_TIME, "
                 "TRANSACTION_HASH FROM trades "
-                "WHERE (TAKER_API_KEY = ? OR MAKER_API_KEY = ?) AND STATUS != 'FAILED'",
+                "WHERE (TAKER_API_KEY = %s OR MAKER_API_KEY = %s) AND STATUS != 'FAILED'",
                 (user.api_key, user.api_key),
             ).fetchall()
             tx_rows = conn.execute(
                 "SELECT TRANSACTION_TYPE, MARKET_ID, DETAILS, "
-                "CAST(strftime('%s', TIMESTAMP) AS INTEGER) AS TS "
-                "FROM transactions WHERE API_KEY = ?",
+                "EXTRACT(EPOCH FROM TIMESTAMP)::bigint AS TS "
+                "FROM transactions WHERE API_KEY = %s",
                 (user.api_key,),
             ).fetchall()
 
@@ -166,14 +164,13 @@ class AccountService:
     # --- helpers --------------------------------------------------------
 
     @staticmethod
-    def _avg_fill_price(conn: sqlite3.Connection, api_key: str, token_id: str) -> float:
+    def _avg_fill_price(conn, api_key: str, token_id: str) -> float:
         """Size-weighted average price of the user's fills on this asset
         (taker or maker), in dollars; 0.0 if none."""
-        conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT PRICE, TRADE_SIZE FROM trades "
-            "WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
-            "AND (TAKER_API_KEY = ? OR MAKER_API_KEY = ?)",
+            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
+            "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
             (token_id, api_key, api_key),
         ).fetchall()
         num = sum(int(r["PRICE"]) * int(r["TRADE_SIZE"]) for r in rows)
@@ -181,11 +178,10 @@ class AccountService:
         return price_to_float(num // den) if den else 0.0
 
     @staticmethod
-    def _cur_price(conn: sqlite3.Connection, token_id: str) -> float:
+    def _cur_price(conn, token_id: str) -> float:
         """Book midpoint in dollars; fall back to last trade, else 0.5."""
-        conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT SIDE, PRICE FROM orders WHERE TOKEN_ID = ? AND STATUS = 'live'",
+            "SELECT SIDE, PRICE FROM orders WHERE TOKEN_ID = %s AND STATUS = 'live'",
             (token_id,),
         ).fetchall()
         bids = [int(r["PRICE"]) for r in rows if r["SIDE"] == "BUY"]
@@ -193,7 +189,7 @@ class AccountService:
         if bids and asks:
             return price_to_float((max(bids) + min(asks)) // 2)
         last = conn.execute(
-            "SELECT PRICE FROM trades WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
+            "SELECT PRICE FROM trades WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
             "ORDER BY MATCH_TIME DESC LIMIT 1",
             (token_id,),
         ).fetchone()

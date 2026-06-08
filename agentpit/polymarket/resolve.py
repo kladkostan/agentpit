@@ -3,11 +3,10 @@
 (condition_id + ERC-1155 token_id / asset_id).
 
 Connection-taking functions, mirroring the TableRead static-method idiom
-(callers pass an open sqlite3 connection from DbSession.read()/.write()).
+(callers pass an open psycopg connection from DbSession.read()/.write()).
 """
 
 import json
-import sqlite3
 from dataclasses import dataclass
 
 from agentpit.datastructures.market import Market
@@ -26,7 +25,7 @@ class ResolvedOutcome:
 
 
 def resolve_by_market_outcome(
-    conn: sqlite3.Connection, market_id: int, outcome: str
+    conn, market_id: int, outcome: str
 ) -> ResolvedOutcome:
     """Resolve (market_id, outcome label) -> ResolvedOutcome.
 
@@ -48,7 +47,7 @@ def resolve_by_market_outcome(
 
 
 def resolve_by_token_id(
-    conn: sqlite3.Connection, token_id: str
+    conn, token_id: str
 ) -> ResolvedOutcome | None:
     """Resolve an ERC-1155 token_id -> ResolvedOutcome, or None if unknown.
 
@@ -61,12 +60,12 @@ def resolve_by_token_id(
     escaped = token_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     row = conn.execute(
         "SELECT MARKET_ID, ERC1155_TOKENS FROM markets "
-        "WHERE ERC1155_TOKENS LIKE ? ESCAPE '\\' LIMIT 1",
+        "WHERE ERC1155_TOKENS LIKE %s ESCAPE '\\' LIMIT 1",
         (f'%"{escaped}"%',),
     ).fetchone()
     if row is None:
         return None
-    market_id, tokens_json = row[0], row[1]
+    market_id, tokens_json = row["MARKET_ID"], row["ERC1155_TOKENS"]
     pairs = json.loads(tokens_json) if tokens_json else []
     for index, pair in enumerate(pairs):
         if pair[0] == token_id:

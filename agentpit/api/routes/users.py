@@ -1,4 +1,4 @@
-import sqlite3
+import psycopg.errors
 
 from fastapi import APIRouter
 
@@ -29,7 +29,7 @@ def update_me_handle(
             updated = TableWrite.update_user_handle(conn, user.user_id, payload.handle)
         if not updated:
             return UserPublic.model_validate(user.model_dump())
-    except sqlite3.IntegrityError as exc:
+    except psycopg.errors.UniqueViolation as exc:
         raise HandleAlreadyExistsError(payload.handle) from exc
 
     with db.read() as conn:

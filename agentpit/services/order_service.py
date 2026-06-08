@@ -2,7 +2,6 @@ import hashlib
 import json
 import logging
 import secrets
-import sqlite3
 from dataclasses import asdict
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -106,7 +105,7 @@ class OrderService:
                 with self._db.write() as conn:
                     conn.execute(
                         "UPDATE trades SET STATUS = 'FAILED' "
-                        "WHERE TAKER_ORDER_ID = ?",
+                        "WHERE TAKER_ORDER_ID = %s",
                         (order_id,),
                     )
                 failed_row = self._safe_row(order_id)
@@ -155,16 +154,15 @@ class OrderService:
         order_id: str | None = None,
     ) -> list[OpenOrder]:
         """Return the caller's live orders as Polymarket OpenOrder[] (§8.3)."""
-        clauses = ["API_KEY = ?", "STATUS = 'live'"]
+        clauses = ["API_KEY = %s", "STATUS = 'live'"]
         params: list = [user.api_key]
         if asset_id is not None:
-            clauses.append("TOKEN_ID = ?")
+            clauses.append("TOKEN_ID = %s")
             params.append(asset_id)
         if order_id is not None:
-            clauses.append("ORDER_ID = ?")
+            clauses.append("ORDER_ID = %s")
             params.append(order_id)
         with self._db.read() as conn:
-            conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT ORDER_ID, TOKEN_ID, SIDE, PRICE, REMAINING_AMOUNT, MAKER, "
                 "MAKER_AMOUNT, TAKER_AMOUNT, CREATED_AT, EXPIRATION, ORDER_TYPE "
@@ -214,7 +212,7 @@ class OrderService:
             for order_id in order_ids:
                 cur = conn.execute(
                     "UPDATE orders SET STATUS = 'cancelled' "
-                    "WHERE ORDER_ID = ? AND API_KEY = ? AND STATUS = 'live'",
+                    "WHERE ORDER_ID = %s AND API_KEY = %s AND STATUS = 'live'",
                     (order_id, user.api_key),
                 )
                 if cur.rowcount > 0:
@@ -228,12 +226,11 @@ class OrderService:
     def cancel_all(self, user: User) -> CancelOrdersResponse:
         """Cancel every live order owned by the caller."""
         with self._db.read() as conn:
-            conn.row_factory = sqlite3.Row
             ids = [
                 r["ORDER_ID"]
                 for r in conn.execute(
                     "SELECT ORDER_ID FROM orders "
-                    "WHERE API_KEY = ? AND STATUS = 'live'",
+                    "WHERE API_KEY = %s AND STATUS = 'live'",
                     (user.api_key,),
                 ).fetchall()
             ]
@@ -244,21 +241,20 @@ class OrderService:
     ) -> CancelOrdersResponse:
         """Cancel the caller's live orders filtered by condition_id (`market`)
         and/or token_id (`asset_id`). With neither filter, cancels all."""
-        clauses = ["API_KEY = ?", "STATUS = 'live'"]
+        clauses = ["API_KEY = %s", "STATUS = 'live'"]
         params: list = [user.api_key]
         if asset_id is not None:
-            clauses.append("TOKEN_ID = ?")
+            clauses.append("TOKEN_ID = %s")
             params.append(asset_id)
         if market is not None:
             # `market` is a condition_id; resolve it to the market's token ids.
             with self._db.read() as conn:
                 m = TableRead.read_market_by_condition_id(conn, ConditionId(market))
             token_ids = [t for t, _label in m.erc1155_tokens] if m else ["\x00"]
-            placeholders = ",".join("?" for _ in token_ids)
+            placeholders = ",".join("%s" for _ in token_ids)
             clauses.append(f"TOKEN_ID IN ({placeholders})")
             params.extend(token_ids)
         with self._db.read() as conn:
-            conn.row_factory = sqlite3.Row
             ids = [
                 r["ORDER_ID"]
                 for r in conn.execute(
@@ -274,14 +270,13 @@ class OrderService:
             resolved = resolve_by_token_id(conn, token_id)
             if resolved is None:
                 raise MarketNotFoundError(0)
-            conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT SIDE, PRICE, SUM(REMAINING_AMOUNT) AS SZ FROM orders "
-                "WHERE TOKEN_ID = ? AND STATUS = 'live' GROUP BY SIDE, PRICE",
+                "WHERE TOKEN_ID = %s AND STATUS = 'live' GROUP BY SIDE, PRICE",
                 (token_id,),
             ).fetchall()
             last = conn.execute(
-                "SELECT PRICE FROM trades WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
+                "SELECT PRICE FROM trades WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
                 "ORDER BY MATCH_TIME DESC LIMIT 1",
                 (token_id,),
             ).fetchone()
@@ -294,7 +289,7 @@ class OrderService:
             key=lambda r: int(r["PRICE"]),
         )
 
-        def level(r: sqlite3.Row) -> OrderBookLevel:
+        def level(r) -> OrderBookLevel:
             return OrderBookLevel(
                 price=price_to_decimal_str(int(r["PRICE"])),
                 size=size_to_decimal_str(int(r["SZ"])),
@@ -357,11 +352,10 @@ class OrderService:
             hours = self._INTERVAL_HOURS.get(interval, 24)
             start = end - hours * 3600
         with self._db.read() as conn:
-            conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT MATCH_TIME, PRICE FROM trades "
-                "WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
-                "AND MATCH_TIME >= ? AND MATCH_TIME <= ? "
+                "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
+                "AND MATCH_TIME >= %s AND MATCH_TIME <= %s "
                 "ORDER BY MATCH_TIME ASC",
                 (token_id, start, end),
             ).fetchall()
@@ -384,10 +378,9 @@ class OrderService:
     def _best_bid_ask(self, token_id: str) -> tuple[int | None, int | None]:
         """(best_bid_price_int, best_ask_price_int) from the live book."""
         with self._db.read() as conn:
-            conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT SIDE, PRICE FROM orders "
-                "WHERE TOKEN_ID = ? AND STATUS = 'live'",
+                "WHERE TOKEN_ID = %s AND STATUS = 'live'",
                 (token_id,),
             ).fetchall()
         bids = [int(r["PRICE"]) for r in rows if r["SIDE"] == "BUY"]
@@ -409,10 +402,9 @@ class OrderService:
 
     def get_last_trade_price(self, token_id: str) -> dict:
         with self._db.read() as conn:
-            conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT PRICE, SIDE FROM trades "
-                "WHERE ASSET_ID = ? AND STATUS != 'FAILED' "
+                "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
                 "ORDER BY MATCH_TIME DESC LIMIT 1",
                 (token_id,),
             ).fetchone()
@@ -472,7 +464,7 @@ class OrderService:
 
     def _insert_order(
         self,
-        conn: sqlite3.Connection,
+        conn,
         *,
         api_key: str,
         order: OrderData,
@@ -495,7 +487,7 @@ class OrderService:
                 EXPIRATION, NONCE, FEE_RATE_BPS,
                 SIDE, SIGNATURE_TYPE, SIGNATURE, ORDER_JSON,
                 STATUS, REMAINING_AMOUNT, CREATED_AT, ORDER_ID
-            ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, 0, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 api_key,
@@ -559,15 +551,14 @@ class OrderService:
         return int((price * _USDC_SCALE).to_integral_value(rounding=ROUND_HALF_UP))
 
     @staticmethod
-    def _complement_token_id(conn: sqlite3.Connection, token_id: str) -> str | None:
+    def _complement_token_id(conn, token_id: str) -> str | None:
         """Look up the binary-market complement of `token_id`, if one exists.
 
         Returns None when no two-outcome market contains this token (so the
         MINT/MERGE paths simply don't apply).
         """
-        conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT ERC1155_TOKENS FROM markets WHERE ERC1155_TOKENS LIKE ? LIMIT 1",
+            "SELECT ERC1155_TOKENS FROM markets WHERE ERC1155_TOKENS LIKE %s LIMIT 1",
             (f'%"{token_id}"%',),
         ).fetchone()
         if row is None:
@@ -583,17 +574,16 @@ class OrderService:
         return None
 
     @staticmethod
-    def _get_order_row(conn: sqlite3.Connection, order_id: str) -> sqlite3.Row:
-        conn.row_factory = sqlite3.Row
+    def _get_order_row(conn, order_id: str):
         row = conn.execute(
-            "SELECT * FROM orders WHERE ORDER_ID = ? LIMIT 1", (order_id,)
+            "SELECT * FROM orders WHERE ORDER_ID = %s LIMIT 1", (order_id,)
         ).fetchone()
         if row is None:
             raise RuntimeError(f"order {order_id} not found post-insert")
         return row
 
     def _match(
-        self, conn: sqlite3.Connection, taker_row: sqlite3.Row, *, dry_run: bool
+        self, conn, taker_row, *, dry_run: bool
     ) -> list[dict]:
         """Match the taker order against resting orders.
 
@@ -615,15 +605,14 @@ class OrderService:
         opposite = "SELL" if taker_side == "BUY" else "BUY"
         if taker_side == "BUY":
             sql = (
-                "SELECT * FROM orders WHERE SIDE=? AND STATUS='live' "
-                "AND PRICE <= ? AND TOKEN_ID=? AND ORDER_ID != ?"
+                "SELECT * FROM orders WHERE SIDE=%s AND STATUS='live' "
+                "AND PRICE <= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
             )
         else:
             sql = (
-                "SELECT * FROM orders WHERE SIDE=? AND STATUS='live' "
-                "AND PRICE >= ? AND TOKEN_ID=? AND ORDER_ID != ?"
+                "SELECT * FROM orders WHERE SIDE=%s AND STATUS='live' "
+                "AND PRICE >= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
             )
-        conn.row_factory = sqlite3.Row
         same_token = conn.execute(
             sql, (opposite, taker_price, token_id, taker_row["ORDER_ID"])
         ).fetchall()
@@ -635,7 +624,7 @@ class OrderService:
                 else (-int(r["PRICE"]), int(r["CREATED_AT"]))
             ),
         )
-        tagged: list[tuple[str, sqlite3.Row]] = [("NORMAL", c) for c in same_token]
+        tagged: list[tuple[str, Any]] = [("NORMAL", c) for c in same_token]
 
         complement_id = self._complement_token_id(conn, token_id)
         if complement_id is not None:
@@ -643,7 +632,7 @@ class OrderService:
             if taker_side == "BUY":
                 comp_sql = (
                     "SELECT * FROM orders WHERE SIDE='BUY' AND STATUS='live' "
-                    "AND PRICE >= ? AND TOKEN_ID=? AND ORDER_ID != ?"
+                    "AND PRICE >= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
                 )
                 kind = "MINT"
                 # best maker = highest price (covers more of the mint cost).
@@ -651,7 +640,7 @@ class OrderService:
             else:
                 comp_sql = (
                     "SELECT * FROM orders WHERE SIDE='SELL' AND STATUS='live' "
-                    "AND PRICE <= ? AND TOKEN_ID=? AND ORDER_ID != ?"
+                    "AND PRICE <= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
                 )
                 kind = "MERGE"
                 # best maker = lowest ask (smallest cut of the merge proceeds).
@@ -690,21 +679,21 @@ class OrderService:
             new_maker_remaining = m["new_maker_remaining"]
             new_status = "matched" if new_maker_remaining == 0 else "live"
             conn.execute(
-                "UPDATE orders SET REMAINING_AMOUNT=?, STATUS=? WHERE ORDER_ID=?",
+                "UPDATE orders SET REMAINING_AMOUNT=%s, STATUS=%s WHERE ORDER_ID=%s",
                 (new_maker_remaining, new_status, m["maker_order_id"]),
             )
             m["trade_id"] = self._insert_trade(conn, taker_row, m)
 
         new_taker_status = "matched" if taker_remaining == 0 else "live"
         conn.execute(
-            "UPDATE orders SET REMAINING_AMOUNT=?, STATUS=? WHERE ORDER_ID=?",
+            "UPDATE orders SET REMAINING_AMOUNT=%s, STATUS=%s WHERE ORDER_ID=%s",
             (taker_remaining, new_taker_status, taker_row["ORDER_ID"]),
         )
         return matches
 
     @staticmethod
     def _insert_trade(
-        conn: sqlite3.Connection, taker_row: sqlite3.Row, match: dict
+        conn, taker_row, match: dict
     ) -> str:
         trade_id = "{}-{}-{}".format(
             taker_row["ORDER_ID"], match["maker_order_id"], secrets.token_hex(8)
@@ -739,7 +728,7 @@ class OrderService:
                 PRICE, TRADE_SIZE, REMAINING_SIZE, SIDE, STATUS,
                 MATCH_TIME, TRANSACTION_HASH, BUCKET_INDEX, FEE_RATE_BPS,
                 TAKER_API_KEY, MAKER_API_KEY
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 trade_id,

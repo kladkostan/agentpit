@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from datetime import datetime, timezone
 
 from agentpit.db.session import DbSession
@@ -32,14 +31,13 @@ class SnapshotService:
         now = int(datetime.now(timezone.utc).timestamp())
         inserted = 0
         with self._db.write() as conn:
-            conn.row_factory = sqlite3.Row
             for market_id, token_id in _list_active_yes_tokens(conn):
                 mid = _compute_mid(conn, token_id)
                 if mid is None:
                     continue
                 conn.execute(
                     "INSERT INTO price_snapshots "
-                    "(MARKET_ID, ASSET_ID, T, MID_MICRO_USD) VALUES (?, ?, ?, ?)",
+                    "(MARKET_ID, ASSET_ID, T, MID_MICRO_USD) VALUES (%s, %s, %s, %s)",
                     (market_id, token_id, now, mid),
                 )
                 inserted += 1
@@ -50,12 +48,12 @@ class SnapshotService:
         cutoff = int(datetime.now(timezone.utc).timestamp()) - retention_seconds
         with self._db.write() as conn:
             cur = conn.execute(
-                "DELETE FROM price_snapshots WHERE T < ?", (cutoff,)
+                "DELETE FROM price_snapshots WHERE T < %s", (cutoff,)
             )
             return cur.rowcount
 
 
-def _list_active_yes_tokens(conn: sqlite3.Connection) -> list[tuple[int, str]]:
+def _list_active_yes_tokens(conn) -> list[tuple[int, str]]:
     rows = conn.execute(
         "SELECT MARKET_ID, ERC1155_TOKENS FROM markets "
         "WHERE COALESCE(MARKET_STATE, 'DRAFT') = 'ACTIVE'"
@@ -72,7 +70,7 @@ def _list_active_yes_tokens(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     return out
 
 
-def _compute_mid(conn: sqlite3.Connection, token_id: str) -> int | None:
+def _compute_mid(conn, token_id: str) -> int | None:
     """Best-bid/ask mid for a token, in micro-USDC. None if no live orders.
 
     Falls back to whichever side exists when the book is one-sided — same
@@ -83,7 +81,7 @@ def _compute_mid(conn: sqlite3.Connection, token_id: str) -> int | None:
         "SELECT "
         "  MIN(CASE WHEN SIDE='SELL' THEN PRICE END) AS best_ask, "
         "  MAX(CASE WHEN SIDE='BUY' THEN PRICE END) AS best_bid "
-        "FROM orders WHERE TOKEN_ID = ? AND STATUS = 'live'",
+        "FROM orders WHERE TOKEN_ID = %s AND STATUS = 'live'",
         (token_id,),
     ).fetchone()
     if row is None:

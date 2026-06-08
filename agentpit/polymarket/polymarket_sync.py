@@ -4,10 +4,8 @@ using TableWrite.create_market.
 """
 
 import logging
-import sqlite3
 import json
 from datetime import datetime, timezone
-from sqlite3 import Connection
 from typing import Any
 
 from agentpit.common import check_state
@@ -402,7 +400,7 @@ def _extract_outcome_metadata(pm_market: dict) -> tuple[str | None, str | None]:
 
 
 def bind_existing_market_to_upstream_event(
-    db: Connection, *, polymarket_id: int, pm_market: dict
+    db, *, polymarket_id: int, pm_market: dict
 ) -> bool:
     """Rebind an already-synced market to its upstream event.
 
@@ -421,7 +419,7 @@ def bind_existing_market_to_upstream_event(
 
 
 def bind_market_to_upstream_event(
-    db: Connection, market: "Market", pm_market: dict
+    db, market: "Market", pm_market: dict
 ) -> None:
     """Idempotently upsert the upstream event and attach this market to it.
 
@@ -477,7 +475,7 @@ def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
 
 
 def fetch_and_sync_polymarket_markets(
-    db: sqlite3.Connection,
+    db,
     admin: OnchainAdmin,
     host: str = POLYMARKET_GAMMA_URL,
 ) -> list[Market]:
@@ -494,7 +492,7 @@ def fetch_and_sync_polymarket_markets(
 
 
 def create_polymarket_markets_if_needed(
-    db: Connection,
+    db,
     pm_markets: list[dict],
     admin: OnchainAdmin,
 ) -> list[Any]:
@@ -526,7 +524,7 @@ def create_polymarket_markets_if_needed(
 
 
 def create_polygon_market_if_does_not_exist(
-    db: Connection,
+    db,
     pm_market: dict,
     admin: OnchainAdmin,
 ) -> Market | None:
@@ -592,7 +590,7 @@ def _winner_index_if_resolved(pm_response: dict) -> int | None:
 
 
 def mirror_polymarket_resolutions(
-    db: Connection,
+    db,
     admin: OnchainAdmin,
     *,
     fetcher=_default_resolution_fetcher,
@@ -669,7 +667,7 @@ def mirror_polymarket_resolutions(
     return resolved_count
 
 
-def sync_market_state(db: Connection, condition_id: ConditionId) -> None:
+def sync_market_state(db, condition_id: ConditionId) -> None:
     """Placeholder until upstream→local resolution mirroring is built.
 
     The original implementation queried Polymarket's CLOB for "is closed"
@@ -746,7 +744,7 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
 
 
 @staticmethod
-def update_market_outcomes(db: sqlite3.Connection) -> None:
+def update_market_outcomes(db) -> None:
     markets = TableRead.list_markets()
     for market in markets:
         if market.market_id == market_id:
@@ -754,8 +752,8 @@ def update_market_outcomes(db: sqlite3.Connection) -> None:
             db.execute(
                 """
                 UPDATE markets
-                SET MARKET_STATE = ?
-                WHERE MARKET_ID = ?
+                SET MARKET_STATE = %s
+                WHERE MARKET_ID = %s
                 """,
                 (state.value, market_id),
             )
