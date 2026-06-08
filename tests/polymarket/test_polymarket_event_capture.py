@@ -6,7 +6,6 @@ DB-only binding helper.
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 import pytest
@@ -14,7 +13,6 @@ import pytest
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
-from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.polymarket.polymarket_sync import (
@@ -24,12 +22,12 @@ from agentpit.polymarket.polymarket_sync import (
     bind_market_to_upstream_event,
     build_create_market_request_from_json,
 )
+from tests.db_helpers import fresh_test_conn
 
 
 @pytest.fixture()
 def db() -> Any:
-    conn = sqlite3.connect(":memory:")
-    TableCreate.create_all_tables(conn)
+    conn = fresh_test_conn()
     yield conn
     conn.close()
 
@@ -125,7 +123,7 @@ def test_build_create_market_request_from_json_captures_outcome_metadata():
 # ----- bind_market_to_upstream_event (DB-only) --------------------------------
 
 
-def _seed_market(db: sqlite3.Connection, *, question: str, cond_id: str):
+def _seed_market(db, *, question: str, cond_id: str):
     req = CreateMarketRequest(
         question=question,
         description=f"d-{question}",
@@ -138,7 +136,7 @@ def _seed_market(db: sqlite3.Connection, *, question: str, cond_id: str):
 
 
 def _seed_market_with_polymarket_id(
-    db: sqlite3.Connection, *, question: str, cond_id: str, polymarket_id: int
+    db, *, question: str, cond_id: str, polymarket_id: int
 ):
     req = CreateMarketRequest(
         question=question,

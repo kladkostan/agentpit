@@ -1,22 +1,47 @@
 import os
 
-# Tests use an in-memory DB and skip the Polymarket sync loop. The on-chain
-# stack (anvil + deployed exchange) is required — there is no off-mode.
-os.environ.setdefault("AGENTPIT_DB_PATH", ":memory:")
+# Tests run against a real local Postgres (the suite already requires anvil +
+# the deployed exchange — no off-mode). Each test gets a clean DB via TRUNCATE
+# and its own DbSession pool, overridden onto the shared app.
+os.environ.setdefault("AGENTPIT_DATABASE_URL", "postgresql:///agentpit_test")
 os.environ.setdefault("SYNC", "false")
 os.environ.setdefault("JWT_SECRET", "test-only-secret")
 
+import psycopg
 import pytest
 
 from agentpit.api.deps import get_db_session
-from agentpit.db.session import DbSession
 from agentpit.api.main import app
+from agentpit.db.table_create import TableCreate
+from tests.db_helpers import TEST_DSN, fresh_test_db
+
+# Ensure the schema exists once up-front (before the first truncate).
+_boot = psycopg.connect(TEST_DSN, autocommit=True)
+TableCreate.create_all_tables(_boot)
+_boot.close()
+
+
+def _truncate_all() -> None:
+    with psycopg.connect(TEST_DSN, autocommit=True) as c:
+        tables = [
+            r[0]
+            for r in c.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname='public'"
+            ).fetchall()
+        ]
+        if tables:
+            c.execute(
+                "TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE"
+            )
 
 
 @pytest.fixture(autouse=True)
 def _isolated_db_session():
-    """Give each test a fresh in-memory DB on the shared main.app."""
-    fresh = DbSession(":memory:")
+    """Clean the shared test DB and give each test its own DbSession pool,
+    overridden onto the singleton app (the app's lifespan closes its own
+    db_session on TestClient shutdown, so endpoints must use the override)."""
+    _truncate_all()
+    fresh = fresh_test_db()
     previous = app.dependency_overrides.get(get_db_session)
     app.dependency_overrides[get_db_session] = lambda: fresh
     try:

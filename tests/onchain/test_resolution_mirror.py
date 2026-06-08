@@ -13,21 +13,18 @@ import pytest
 
 def _build_admin_and_db():
     from agentpit.config import Settings
-    from agentpit.db.session import DbSession
-    from agentpit.db.table_create import TableCreate
     from agentpit.onchain.admin import OnchainAdmin
     from agentpit.onchain.contracts import Contracts
     from agentpit.onchain.deployment import Deployment
     from agentpit.onchain.web3_client import Web3Client
+    from tests.db_helpers import fresh_test_db
 
     s = Settings()
     d = Deployment.load(s.deployment_path)
     w = Web3Client(s, d)
     c = Contracts(w.web3, d)
     admin = OnchainAdmin(w, c)
-    db = DbSession(":memory:")
-    with db.write() as conn:
-        TableCreate.create_all_tables(conn)
+    db = fresh_test_db()
     return admin, db, c
 
 

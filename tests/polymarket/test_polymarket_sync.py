@@ -1,11 +1,9 @@
-import sqlite3
 from unittest.mock import patch
 
 import pytest
 
 from agentpit.common import check_state
 from agentpit.datastructures.condition_id import ConditionId
-from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.polymarket.polymarket_sync import (
@@ -17,13 +15,13 @@ from agentpit.polymarket.polymarket_sync import (
     fetch_polymarket_market,
     fetch_and_sync_polymarket_markets,
 )
+from tests.db_helpers import fresh_test_conn
 
 
 @pytest.fixture()
 def db():
-    """In-memory SQLite database with all tables created."""
-    conn = sqlite3.connect(":memory:")
-    TableCreate.create_all_tables(conn)
+    """Postgres test database connection with all tables created."""
+    conn = fresh_test_conn()
     yield conn
     conn.close()
 

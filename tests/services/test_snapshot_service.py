@@ -16,17 +16,14 @@ from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
-from agentpit.db.session import DbSession
-from agentpit.db.table_create import TableCreate
 from agentpit.db.table_write import TableWrite
 from agentpit.services.snapshot_service import SnapshotService
+from tests.db_helpers import fresh_test_db
 
 
 @pytest.fixture()
 def db_session() -> Any:
-    session = DbSession(":memory:")
-    with session.write() as conn:
-        TableCreate.create_all_tables(conn)
+    session = fresh_test_db()
     yield session
     session.close()
 
@@ -36,7 +33,7 @@ def _hex32(seed: str) -> str:
 
 
 def _seed_market(
-    session: DbSession,
+    session,
     *,
     question: str,
     cond_id: str,
@@ -60,7 +57,7 @@ def _seed_market(
 
 
 def _seed_resting_order(
-    session: DbSession,
+    session,
     *,
     token_id: str,
     side: str,
@@ -75,7 +72,7 @@ def _seed_resting_order(
     with session.write() as conn:
         conn.execute(
             "INSERT INTO orders (ORDER_ID, TOKEN_ID, SIDE, PRICE, STATUS) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s)",
             (
                 f"o-{token_id}-{side}-{price_micro_usd}",
                 token_id,
@@ -86,7 +83,7 @@ def _seed_resting_order(
         )
 
 
-def _read_snapshots(session: DbSession) -> list[tuple[int, str, int, int]]:
+def _read_snapshots(session) -> list[tuple[int, str, int, int]]:
     """Return all rows from price_snapshots as
     (market_id, asset_id, t, mid_micro_usd).
     """
@@ -95,7 +92,7 @@ def _read_snapshots(session: DbSession) -> list[tuple[int, str, int, int]]:
             "SELECT MARKET_ID, ASSET_ID, T, MID_MICRO_USD FROM price_snapshots "
             "ORDER BY SNAPSHOT_ID"
         ).fetchall()
-    return [(int(r[0]), str(r[1]), int(r[2]), int(r[3])) for r in rows]
+    return [(int(r["market_id"]), str(r["asset_id"]), int(r["t"]), int(r["mid_micro_usd"])) for r in rows]
 
 
 # ----- take_snapshot ---------------------------------------------------------
@@ -277,12 +274,12 @@ def test_prune_old_deletes_rows_older_than_retention_window(db_session):
     with db_session.write() as conn:
         conn.execute(
             "INSERT INTO price_snapshots (MARKET_ID, ASSET_ID, T, MID_MICRO_USD) "
-            "VALUES (?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s)",
             (market.market_id, yes_token, 1_000, 500_000),
         )
         conn.execute(
             "INSERT INTO price_snapshots (MARKET_ID, ASSET_ID, T, MID_MICRO_USD) "
-            "VALUES (?, ?, strftime('%s','now'), ?)",
+            "VALUES (%s, %s, EXTRACT(EPOCH FROM NOW())::BIGINT, %s)",
             (market.market_id, yes_token, 500_000),
         )
 
@@ -300,7 +297,7 @@ def test_prune_old_returns_zero_when_all_rows_are_within_retention(db_session):
     with db_session.write() as conn:
         conn.execute(
             "INSERT INTO price_snapshots (MARKET_ID, ASSET_ID, T, MID_MICRO_USD) "
-            "VALUES (?, ?, strftime('%s','now'), ?)",
+            "VALUES (%s, %s, EXTRACT(EPOCH FROM NOW())::BIGINT, %s)",
             (market.market_id, yes_token, 500_000),
         )
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 import pytest
@@ -10,22 +9,21 @@ import pytest
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
-from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
+from tests.db_helpers import fresh_test_conn
 
 
 @pytest.fixture()
 def db() -> Any:
-    """Fresh in-memory SQLite DB with all tables created."""
-    conn = sqlite3.connect(":memory:")
-    TableCreate.create_all_tables(conn)
+    """Fresh Postgres test DB connection with all tables created."""
+    conn = fresh_test_conn()
     yield conn
     conn.close()
 
 
 def _make_market(
-    db: sqlite3.Connection,
+    db,
     *,
     question: str,
     cond_id: str,

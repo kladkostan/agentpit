@@ -7,7 +7,6 @@ auto-wrap helper used at startup.
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 import pytest
@@ -15,19 +14,16 @@ import pytest
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
-from agentpit.db.session import DbSession
-from agentpit.db.table_create import TableCreate
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import EventNotFoundError
 from agentpit.services.event_service import EventService
+from tests.db_helpers import fresh_test_db
 
 
 @pytest.fixture()
 def db_session() -> Any:
-    session = DbSession(":memory:")
-    with session.write() as conn:
-        TableCreate.create_all_tables(conn)
+    session = fresh_test_db()
     yield session
     session.close()
 
@@ -37,7 +33,7 @@ def _hex32(seed: str) -> str:
 
 
 def _seed_market(
-    session: DbSession,
+    session,
     *,
     question: str,
     cond_id: str,

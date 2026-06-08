@@ -30,8 +30,6 @@ def _fake_pm_market(question_suffix: str) -> dict:
 
 def test_sync_mirrors_market_onto_local_exchange():
     from agentpit.config import Settings
-    from agentpit.db.session import DbSession
-    from agentpit.db.table_create import TableCreate
     from agentpit.db.table_read import TableRead
     from agentpit.onchain.admin import OnchainAdmin
     from agentpit.onchain.contracts import Contracts
@@ -40,6 +38,7 @@ def test_sync_mirrors_market_onto_local_exchange():
     from agentpit.polymarket.polymarket_sync import (
         create_polymarket_markets_if_needed,
     )
+    from tests.db_helpers import fresh_test_db
 
     settings = Settings()
     d = Deployment.load(settings.deployment_path)
@@ -47,9 +46,7 @@ def test_sync_mirrors_market_onto_local_exchange():
     c = Contracts(w.web3, d)
     admin = OnchainAdmin(w, c)
 
-    db = DbSession(":memory:")
-    with db.write() as conn:
-        TableCreate.create_all_tables(conn)
+    db = fresh_test_db()
 
     pm = _fake_pm_market(secrets.token_hex(4))
     upstream_yes = pm["tokens"][0]["token_id"]
@@ -92,8 +89,6 @@ def test_full_sync_pipeline_does_not_crash_on_post_create_state_check():
     where condition_id is now the LOCAL one. Hitting Polymarket with it 404s.
     """
     from agentpit.config import Settings
-    from agentpit.db.session import DbSession
-    from agentpit.db.table_create import TableCreate
     from agentpit.onchain.admin import OnchainAdmin
     from agentpit.onchain.contracts import Contracts
     from agentpit.onchain.deployment import Deployment
@@ -102,6 +97,7 @@ def test_full_sync_pipeline_does_not_crash_on_post_create_state_check():
         create_polymarket_markets_if_needed,
         sync_market_state,
     )
+    from tests.db_helpers import fresh_test_db
 
     settings = Settings()
     d = Deployment.load(settings.deployment_path)
@@ -109,9 +105,7 @@ def test_full_sync_pipeline_does_not_crash_on_post_create_state_check():
     c = Contracts(w.web3, d)
     admin = OnchainAdmin(w, c)
 
-    db = DbSession(":memory:")
-    with db.write() as conn:
-        TableCreate.create_all_tables(conn)
+    db = fresh_test_db()
 
     pm = _fake_pm_market(secrets.token_hex(4))
     with db.write() as conn:
