@@ -420,6 +420,28 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
+    def list_bot_users(db: psycopg.Connection) -> "list[User]":
+        """Every house/bot account — used by the liquidity engine on startup."""
+        rows = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE IS_BOT = 1 "
+            "ORDER BY CREATED_AT, USER_ID"
+        ).fetchall()
+        return [TableRead._row_to_user(r) for r in rows]
+
+    @staticmethod
+    def list_active_synced_markets(db: psycopg.Connection) -> "list[Market]":
+        """Markets the liquidity engine should make liquidity for.
+
+        Criteria: MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL.
+        """
+        rows = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL "
+            "ORDER BY MARKET_ID"
+        ).fetchall()
+        return [_row_to_market(row) for row in rows]
+
+    @staticmethod
     def list_trades_for_api_key(
         db: psycopg.Connection,
         api_key: str,
