@@ -94,3 +94,15 @@ class Settings(BaseSettings):
     liquidity_requote_threshold_micro: int = Field(
         default=2_000, validation_alias="AGENTPIT_LIQUIDITY_REQUOTE_THRESHOLD"
     )
+    liquidity_taker_pool_size: int = Field(
+        default=8, validation_alias="AGENTPIT_LIQUIDITY_TAKER_POOL_SIZE"
+    )
+    liquidity_print_threshold_micro: int = Field(
+        default=5_000, validation_alias="AGENTPIT_LIQUIDITY_PRINT_THRESHOLD"
+    )
+    liquidity_print_size_shares: int = Field(
+        default=100, validation_alias="AGENTPIT_LIQUIDITY_PRINT_SIZE_SHARES"
+    )
+    liquidity_max_prints_per_tick: int = Field(
+        default=5, validation_alias="AGENTPIT_LIQUIDITY_MAX_PRINTS_PER_TICK"
+    )

@@ -11,6 +11,10 @@ def test_liquidity_defaults():
     assert s.liquidity_makers_per_market == 16
     assert s.liquidity_ladder_rungs_per_side == 8
     assert abs(s.liquidity_wall_fraction - 0.6) < 1e-9
+    assert s.liquidity_taker_pool_size == 8
+    assert s.liquidity_print_threshold_micro == 5_000
+    assert s.liquidity_print_size_shares == 100
+    assert s.liquidity_max_prints_per_tick == 5
 
 
 def test_liquidity_env_override(monkeypatch):
