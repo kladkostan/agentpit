@@ -69,7 +69,7 @@ New module package: `agentpit/liquidity/` (engine logic), plus small additions t
 |---|---|---|
 | `LiquidityEngine` | `agentpit/liquidity/engine.py` (new) | Orchestrates a tick: enumerate target markets → peg → (re)quote ladder → [Stage 2: walk price] → [Stage 3: resolution]. Holds per-market state (last-pegged mid, which accounts quote which market). |
 | `HouseAccounts` provisioner | `agentpit/liquidity/house_accounts.py` (new) | Idempotent create + onboard + fund + mark-bot of N house accounts; re-onboard-on-chain-wipe; loads them as `User`s. |
-| Polymarket price oracle | `agentpit/liquidity/price_oracle.py` (new) | Fetches the real Polymarket mid via the CLOB `/midpoint` (+ batch `/midpoints`) endpoint; converts to micro-USDC; per-market try/except. |
+| Polymarket price oracle | `agentpit/liquidity/price_oracle.py` (new) | Fetches the real Polymarket touch — best **bid/ask** via CLOB `/price` (both sides) or `/book` (Stage 1.5), with `/midpoint` as fallback; converts to micro-USDC; per-market try/except. |
 | Ladder / distribution | `agentpit/liquidity/ladder.py` (new) | Pure functions: sample the U-shaped/bimodal price+size distribution → a list of `(side, price, size)` rungs around a pegged mid. Easily unit-tested. |
 | `TableRead.list_bot_users` | `agentpit/db/table_read.py` (add) | `SELECT {_USER_COLS} FROM users WHERE IS_BOT = 1` → `[User]`. Required for idempotent restart + enumerating house accounts. |
 | `TableRead.list_active_synced_markets` | `agentpit/db/table_read.py` (add) | The ACTIVE + `polymarket_condition_id IS NOT NULL` target set (one shared definition the snapshot loop can adopt too). |
@@ -102,7 +102,7 @@ Measured from real Polymarket books (per the project memory). Per side, asymmetr
 - **SELL** size ≈ **38% at 95–100¢** ("sell dear") + ~20% near the spread.
 - **~70% of resting size sits >10¢ from the touch** (the book accumulates instead of instantly matching).
 
-Engine samples each rung's price from a mixture: ≈ **0.6 "wall"** (near 0/1) + ≈ **0.4 near-spread**, centered on the pegged Polymarket mid. Near-spread rungs are placed with a guaranteed gap to the opposite touch so Stage-1 quotes never cross. (Trades, Stage 2, come only from the near-spread part.) Implemented as pure functions in `ladder.py` so the shape is unit-testable in isolation.
+Engine samples each rung's price from a mixture: ≈ **0.6 "wall"** (near 0/1) + ≈ **0.4 near-spread**, with the near-spread rungs anchored to the pegged Polymarket mid (Stage 1) and then to Polymarket's real best bid/ask (Stage 1.5). Near-spread rungs are placed with a guaranteed gap to the opposite touch so Stage-1 quotes never cross. (Trades, Stage 2, come only from the near-spread part.) Implemented as pure functions in `ladder.py` so the shape is unit-testable in isolation.
 
 ## 8. Staged delivery (MVP-first, per decision)
 
@@ -119,8 +119,27 @@ Deliverables:
 **Stage 1 explicitly produces ZERO real fills** (all quotes non-crossing) → no settlement, no self-trade risk yet.
 **Verification:** with the engine on, an empty synced market shows a deep two-sided book whose mid tracks the live Polymarket mid; restart re-detects accounts (no dupes) and re-onboards after an Anvil wipe.
 
-### Stage 2 — throttled walk-trades + settlement *(next plan, after Stage 1 green)*
-Print a small throttled number of real fills per tick to nudge agentpit's mid toward the Polymarket target: pick a taker account **distinct** from every maker it will cross (dedicated aggressor pool ↔ maker pool), place a marketable order, inspect `OrderResponse.success`, reconcile failures. Respect the single-admin-lock budget (trades/tick cap). Confirm the intended fill rate with the user here.
+### Pegging model (refined — agreed 2026-06-09)
+**Separate "alignment" (what the bot reads) from "activity" (the tape).** The **price oracle is the backbone** of alignment, NOT arbitrage: it's cheap, instant, and exact, and it can't be made hostage to the on-chain settlement bottleneck. Full cross-venue arbitrage is rejected as the *primary* mechanism because agentpit is the only tradeable venue (Polymarket is a read-only fair-value reference, so it's one-sided), and aligning via trades would make price fidelity throughput-bound. We keep the arbitrage *idea* only as the rule that drives the **tape** (Stage 2 prints), where it gives directionally-correct activity for free. Full arbitrage would only be worth it with a second tradeable venue or cheap settlement.
+
+- **Executable-price pegging (not mid).** A taker buys at the best ask and sells at the best bid — the mid is only a reference. So the oracle anchors agentpit's **touch to Polymarket's real best bid/ask** (`/price?token_id&side=buy` → ask, `&side=sell` → bid; or one `/book`), not just `/midpoint`. Then agentpit's best ask ≈ Polymarket's best ask and best bid ≈ Polymarket's best bid → the bot's executable prices and the spread match. The U-shaped walls/depth beyond the touch stay ours (Polymarket-exact depth isn't needed).
+
+### Stage 1.5 — peg the touch to Polymarket's executable bid/ask *(quick patch, keeps ZERO trades)*
+Refine the oracle + ladder so the resting touch sits on Polymarket's real bid/ask instead of `mid ± synthetic spread`:
+1. `price_oracle.fetch_bid_ask_micro(token_id)` → `(bid_micro, ask_micro)` from Polymarket CLOB `/price` (both sides) or `/book`; per-side `None` on missing/one-sided book; keep a mid fallback.
+2. `build_ladder` re-anchored from `(mid)` to explicit `(bid_anchor_micro, ask_anchor_micro)`: bids descend from `bid_anchor`, asks ascend from `ask_anchor`, walls unchanged; still strictly non-crossing (requires `bid_anchor < ask_anchor`; fall back to mid±tick if Polymarket's book is locked/crossed).
+3. Engine computes anchors = Polymarket bid/ask, **clamped against agentpit's own touch** (`engine_bid ≤ own_ask − tick`, `engine_ask ≥ own_bid + tick`) so it still never crosses a real-user order. Still **ZERO trades** (resting only). Verify: agentpit best_bid/ask ≈ stubbed Polymarket bid/ask; no `trades` rows.
+
+### Stage 2 — arbitrage-flavoured directional prints (the tape) *(next plan, after Stage 1.5 green)*
+The oracle already keeps the **quoted** book aligned. Stage 2 animates the **tape** and corrects the **traded** (last-trade) price using the arbitrage rule, throttled hard against the single-admin-lock budget:
+```
+F_bid, F_ask = Polymarket best bid/ask     # fair executable prices
+if agentpit.best_ask < F_bid:   a taker BUYs agentpit's ask   → price up toward fair
+if agentpit.best_bid > F_ask:   a taker SELLs into agentpit's bid → price down toward fair
+size = small (1-2 levels); taker account ≠ every maker it crosses (matcher excludes only same ORDER_ID);
+inspect OrderResponse.success (settlement failure does NOT raise) and reconcile; cap trades/tick.
+```
+Taker bots "profit" (buy below / sell above Polymarket fair value), so they're self-sustaining in fake apUSD rather than bleeding capital. Fill rate is a user decision (tape liveness vs tx budget) — confirm before building.
 
 ### Stage 3 — resolution cancel + redeem *(final plan, after Stage 2 green)*
 Poll `market_state` each tick (no event bus exists); on the unresolved→`RESOLVED` edge, **latch once** per market: (a) `cancel_market_orders` for every house account that quoted it, then (b) for each account with `ctf_balance(winning_token) > 0`, `PositionService.redeem(user, market_id)`. `report_payouts` is already called once by the sync mirror — the engine must **never** call it. Consider spreading ~100 redeems across ticks to avoid a tx burst.
