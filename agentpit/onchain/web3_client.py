@@ -4,6 +4,7 @@ from functools import lru_cache
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from web3 import Web3
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from agentpit.config import Settings
 from agentpit.onchain.deployment import Deployment
@@ -21,6 +22,13 @@ class Web3Client:
     def __init__(self, settings: Settings, deployment: Deployment):
         rpc_url = settings.rpc_url_override or deployment.rpc_url
         self.web3 = Web3(Web3.HTTPProvider(rpc_url))
+        # Polygon (the forked chain) is Proof-of-Authority: its block headers
+        # carry >32-byte extraData. Without this middleware web3 raises
+        # ExtraDataLengthError on any real Polygon block — e.g. the anvil
+        # fork-base block, which is `latest` right after a fork/restart until a
+        # local tx mines an anvil block. That breaks polymarket_sync and every
+        # on-chain op until the chain happens to advance.
+        self.web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.deployment = deployment
         self._send_lock = threading.Lock()
 
