@@ -161,9 +161,10 @@ broad `except`, work off the event loop via `to_thread`).
 | `MirrorFeed` | `agentpit/liquidity/feed.py` (new) | WSS connections, sharding, keepalive, watchdog, REST seed/resync, event routing. Pure-async; no DB. |
 | `BookReplica` | `agentpit/liquidity/replica.py` (new) | Pure data: per-market price→size maps (micro ints, from `Decimal(str)`), `apply_book`, `apply_price_change` (replace; 0=delete; filter by asset_id), `apply_tick_size_change` (epoch reset → needs_resync), non-crossed validation, snapshot export. No I/O — unit-testable. |
 | `reconcile_market` | `agentpit/liquidity/reconciler.py` (new) | Pure diff + applier: target levels (YES verbatim + NO complement) vs live house orders (one order per (token, side, price) level) → cancel list + place list; cancels before placements; inventory check/top-up; crossing guards (§5, §7). Diff itself is a pure function — unit-testable. |
-| `TapeMirror` | `agentpit/liquidity/tape.py` (new) | `last_trade_price` → synthetic `trades` row: `STATUS='MIRRORED'`, price/size/side/`MATCH_TIME` from the event, local `ASSET_ID`/`MARKET` via the token map, synthetic `TRADE_ID`/`TAKER_ORDER_ID`, house-account pair as `TAKER_API_KEY`/`MAKER_API_KEY`, `TRANSACTION_HASH=NULL`. |
-| `HouseAccounts` | `agentpit/liquidity/house_accounts.py` (kept) | Unchanged provisioning/re-onboarding. Account↔market assignment: round-robin, one account owns all mirror orders of its market(s). |
+| `TapeMirror` | `agentpit/liquidity/tape.py` (new) | `last_trade_price` → synthetic `trades` row: `STATUS='MIRRORED'`, price/size/side/`MATCH_TIME` from the event, local `ASSET_ID`/`MARKET` via the token map, synthetic `TRADE_ID`/`TAKER_ORDER_ID`, fabricated opaque `TAKER_API_KEY`/`MAKER_API_KEY` (no real accounts involved; `/data/trades` is key-scoped so the bot never sees them), `TRANSACTION_HASH=NULL`. |
+| `HouseAccounts` | `agentpit/liquidity/house_accounts.py` (kept, simplified) | **One "mirror account"** owns every mirror order on every market (`liquidity_house_account_count` default drops 100 → 1). The 100-account pool existed for Stage-2 taker≠maker separation and tape variety — both obsolete: the mirror never trades house-vs-house (§5), and tape attribution is synthetic (§9). Provisioning/re-onboarding machinery is reused as-is; startup cost collapses from hundreds of serialized admin txs to a handful, which also makes engine-on tests cheap. No account↔market assignment logic. |
 | Deleted | `ladder.py`, `price_oracle.py`, engine print/quote logic, their config fields and tests | Replaced by the mirror. The only surviving piece is a REST `/books` fetch helper, which moves into `feed.py` (seed + resync). |
+| Deleted (Task 0) | `agentpit_bots/`, `tests/bots/` | The attempt-1 external HTTP bots. Zero imports from `agentpit/` (verified 2026-06-10); referenced only by their own 68 tests, which run in every suite and exercise an API surface that keeps changing. Standalone removal commit before mirror work starts; history stays in git. |
 
 ### Token/ID mapping
 
@@ -198,9 +199,12 @@ Top-ups are admin txs behind `send_lock`: budget `MIRROR_MAX_SPLITS_PER_CYCLE` (
 per reconcile cycle. While inventory lags the target, ask levels are placed
 best-price-first until inventory runs out and the market is flagged "catching up" —
 the book converges over a few cycles. Real books hold millions of shares at extreme
-prices; with $1B apUSD per account this is ample ($1B ≈ 1e9 shares split budget), but
-per-market split sizing must use BIGINT-safe micro math (Phase-5a audit applies).
-BUY-side needs only USDC; $1B covers any realistic bid wall.
+prices; the single mirror account is funded with `liquidity_funding_drips` faucet drips
+($1B each — raise the default to cover all markets' splits plus all bid-side notional),
+and per-market split sizing must use BIGINT-safe micro math (Phase-5a audit applies).
+Bid-side notional is small (walls sit at extreme prices), so USDC is never the binding
+constraint; if total split demand approaches the funded amount, the account takes
+another drip (one admin tx) before splitting.
 
 ## 9. Tape mirror details
 
@@ -226,7 +230,8 @@ Removed: `liquidity_ladder_rungs_per_side`, `liquidity_wall_fraction`,
 `liquidity_split_per_market_usdc` (split size now derived from the replica).
 
 Kept: `liquidity_engine_enabled` (`LIQUIDITY_ENGINE`, master switch),
-`liquidity_house_account_count`, `liquidity_funding_drips`,
+`liquidity_house_account_count` (**default 100 → 1**, the single mirror account),
+`liquidity_funding_drips` (default raised so one account covers everything),
 `liquidity_interval_seconds` (reused as the reconcile loop idle poll).
 
 Added (defaults):
@@ -265,8 +270,10 @@ mirror_tape_enabled:                 bool  = True   # AGENTPIT_MIRROR_TAPE_ENABL
   replica for BOTH tokens; trade event → `MIRRORED` row + `last-trade-price` +
   price-history reflect it; bot resting order inside the spread → real fill when the
   replica moves through it (settlement path, `success=True`, level restored next cycle);
-  zero house-vs-house trades ever (assert no trades between house API keys); restart
-  idempotency (re-seed produces zero ops on an already-mirrored book).
+  zero house self-trades ever (assert no non-`MIRRORED` trades where both sides are the
+  mirror account — the matcher only excludes same ORDER_ID, so this guards the §5
+  invariant); restart idempotency (re-seed produces zero ops on an already-mirrored
+  book).
 - **Live smoke (manual/CI-optional)**: 60s against the real WSS with 2 markets — replica
   hash spot-check vs REST, and capture whether NO-side `last_trade_price` arrives (§9).
 
