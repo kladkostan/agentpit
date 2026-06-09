@@ -24,17 +24,29 @@ def _snap(price_micro: int) -> int:
 def _side_rungs(side, *, ceiling, wall_price, rungs_per_side, wall_size, spread_size):
     """Build one side. `ceiling` is the price closest to mid (inclusive);
     rungs march away from mid toward `wall_price`. The wall rung carries
-    `wall_size`; the remaining near-spread rungs split `spread_size` evenly."""
+    `wall_size`; the remaining near-spread rungs split `spread_size` evenly.
+
+    The wall is placed just beyond the furthest near-spread rung (clamped into
+    the valid band), so it is always strictly on the correct side of mid even
+    when mid is near the 0/1 edge.
+    """
     near_count = rungs_per_side - 1
+    sign = -1 if side == "BUY" else 1
     prices = [ceiling]
     if near_count > 1:
-        step = max(TICK, (abs(ceiling - wall_price)) // (rungs_per_side * 2))
-        sign = -1 if side == "BUY" else 1
+        step = max(TICK, abs(ceiling - wall_price) // (rungs_per_side * 2))
         for k in range(1, near_count):
             prices.append(_snap(ceiling + sign * step * k))
     each = spread_size // max(1, near_count)
     rungs = [Rung(side, _snap(p), each) for p in prices[:near_count]]
-    rungs.append(Rung(side, _snap(wall_price), wall_size))
+
+    # Clamp the wall so it is always beyond the furthest near-spread rung.
+    furthest_near = prices[near_count - 1]
+    if side == "BUY":
+        clamped_wall = max(TICK, min(wall_price, furthest_near - TICK))
+    else:
+        clamped_wall = min(MICRO - TICK, max(wall_price, furthest_near + TICK))
+    rungs.append(Rung(side, _snap(clamped_wall), wall_size))
     return rungs
 
 
