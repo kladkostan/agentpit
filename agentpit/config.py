@@ -65,3 +65,32 @@ class Settings(BaseSettings):
         default="dev-admin-token",
         validation_alias="AGENTPIT_ADMIN_TOKEN",
     )
+
+    # Liquidity Engine
+    liquidity_engine_enabled: bool = Field(
+        default=False, validation_alias="LIQUIDITY_ENGINE"
+    )
+    liquidity_interval_seconds: float = Field(
+        default=2.0, validation_alias="AGENTPIT_LIQUIDITY_INTERVAL_SECONDS"
+    )
+    liquidity_house_account_count: int = Field(
+        default=100, validation_alias="AGENTPIT_LIQUIDITY_HOUSE_ACCOUNTS"
+    )
+    liquidity_wallet_funding_usdc: int = Field(
+        default=1_000_000_000, validation_alias="AGENTPIT_LIQUIDITY_WALLET_FUNDING_USDC"
+    )
+    liquidity_split_per_market_usdc: int = Field(
+        default=10_000, validation_alias="AGENTPIT_LIQUIDITY_SPLIT_PER_MARKET_USDC"
+    )
+    liquidity_makers_per_market: int = Field(
+        default=16, validation_alias="AGENTPIT_LIQUIDITY_MAKERS_PER_MARKET"
+    )
+    liquidity_ladder_rungs_per_side: int = Field(
+        default=8, validation_alias="AGENTPIT_LIQUIDITY_LADDER_RUNGS"
+    )
+    liquidity_wall_fraction: float = Field(
+        default=0.6, validation_alias="AGENTPIT_LIQUIDITY_WALL_FRACTION"
+    )
+    liquidity_requote_threshold_micro: int = Field(
+        default=2_000, validation_alias="AGENTPIT_LIQUIDITY_REQUOTE_THRESHOLD"
+    )
