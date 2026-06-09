@@ -60,14 +60,25 @@ class LiquidityEngine:
         yes_token = market.erc1155_tokens[0][0]
         cond = market.condition_id.value
         size_per_side = self._cfg.liquidity_split_per_market_usdc * MICRO
-        for u in self._makers_for(market.market_id):
+        makers = self._makers_for(market.market_id)
+        # Pass 1: ensure inventory + cancel EVERY participating maker's stale
+        # quotes BEFORE placing any fresh ones, so a fresh maker cannot cross a
+        # not-yet-requoted maker's stale order when the mid has moved.
+        for u in makers:
             self._ensure_inventory(u, market)
             self._order.cancel_market_orders(u, market=cond, asset_id=None)
+        # Gap from agentpit's own touch (only non-engine orders remain now) so
+        # the engine never acts as a taker against a real resting order either.
+        best_bid, best_ask = self._order._best_bid_ask(yes_token)
+        # Pass 2: place fresh, non-crossing ladders, all pegged to the same mid.
+        for u in makers:
             rungs = build_ladder(
                 mid,
                 rungs_per_side=self._cfg.liquidity_ladder_rungs_per_side,
                 wall_fraction=self._cfg.liquidity_wall_fraction,
                 size_per_side_micro=size_per_side,
+                best_bid_micro=best_bid,
+                best_ask_micro=best_ask,
             )
             for r in rungs:
                 payload = PlaceOrderRequest(
