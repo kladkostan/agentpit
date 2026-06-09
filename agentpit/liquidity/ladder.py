@@ -51,33 +51,23 @@ def _side_rungs(side, *, ceiling, wall_price, rungs_per_side, wall_size, spread_
 
 
 def build_ladder(
-    mid_micro: int,
+    bid_anchor_micro: int,
+    ask_anchor_micro: int,
     *,
     rungs_per_side: int,
     wall_fraction: float,
     size_per_side_micro: int,
-    best_bid_micro: int | None = None,
-    best_ask_micro: int | None = None,
 ) -> list[Rung]:
-    """U-shaped, strictly non-crossing ladder straddling `mid_micro`.
-
-    Bids occupy (0, bid_ceiling], asks [ask_floor, MICRO); bid_ceiling is one
-    tick below the lower of mid and any existing best_ask, ask_floor one tick
-    above the higher of mid and any existing best_bid. `wall_fraction` of each
-    side's size piles into the outer wall rung; the rest spreads near the touch.
-    """
+    """U-shaped, strictly non-crossing ladder. Caller guarantees
+    0 < bid_anchor_micro < ask_anchor_micro < MICRO. The highest bid rung sits at
+    bid_anchor_micro, the lowest ask rung at ask_anchor_micro; rungs march out
+    toward the 0/1 walls. wall_fraction of each side's size piles into the wall."""
     wall_size = round(wall_fraction * size_per_side_micro)
     spread_size = size_per_side_micro - wall_size
-
-    bid_ceiling = _snap(min(mid_micro, best_ask_micro or mid_micro) - TICK)
-    ask_floor = _snap(max(mid_micro, best_bid_micro or mid_micro) + TICK)
-
-    bids = _side_rungs(
-        "BUY", ceiling=bid_ceiling, wall_price=_WALL_BID_PRICE,
-        rungs_per_side=rungs_per_side, wall_size=wall_size, spread_size=spread_size,
-    )
-    asks = _side_rungs(
-        "SELL", ceiling=ask_floor, wall_price=_WALL_ASK_PRICE,
-        rungs_per_side=rungs_per_side, wall_size=wall_size, spread_size=spread_size,
-    )
+    bid_ceiling = _snap(bid_anchor_micro)
+    ask_floor = _snap(ask_anchor_micro)
+    bids = _side_rungs("BUY", ceiling=bid_ceiling, wall_price=_WALL_BID_PRICE,
+                       rungs_per_side=rungs_per_side, wall_size=wall_size, spread_size=spread_size)
+    asks = _side_rungs("SELL", ceiling=ask_floor, wall_price=_WALL_ASK_PRICE,
+                       rungs_per_side=rungs_per_side, wall_size=wall_size, spread_size=spread_size)
     return bids + asks

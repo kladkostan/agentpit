@@ -8,7 +8,7 @@ from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.liquidity import price_oracle
-from agentpit.liquidity.ladder import MICRO, build_ladder
+from agentpit.liquidity.ladder import MICRO, TICK, build_ladder
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.order_service import OrderService
 
@@ -30,14 +30,16 @@ class LiquidityEngine:
     def tick(self) -> dict:
         with self._db.read() as conn:
             markets = TableRead.list_active_synced_markets(conn)
-        mids = price_oracle.fetch_mids_for_markets(markets)
         quoted = 0
         for m in markets:
-            mid = mids.get(m.market_id)
-            if mid is None or not self._moved(m.market_id, mid):
+            bid, ask = price_oracle.fetch_bid_ask_micro(m.polymarket_yes_token_id)
+            if bid is None or ask is None or bid >= ask:
+                continue
+            mid = (bid + ask) // 2
+            if not self._moved(m.market_id, mid):
                 continue
             try:
-                self._quote_market(m, mid)
+                self._quote_market(m, bid, ask)
                 self._last_mid[m.market_id] = mid
                 quoted += 1
             except Exception:
@@ -56,44 +58,46 @@ class LiquidityEngine:
         rotated = self._house[start:] + self._house[:start]
         return rotated[:n]
 
-    def _quote_market(self, market, mid: int) -> None:
+    def _quote_market(self, market, p_bid: int, p_ask: int) -> None:
         yes_token = market.erc1155_tokens[0][0]
         cond = market.condition_id.value
         size_per_side = self._cfg.liquidity_split_per_market_usdc * MICRO
         makers = self._makers_for(market.market_id)
-        # Pass 1: ensure inventory + cancel EVERY participating maker's stale
-        # quotes BEFORE placing any fresh ones, so a fresh maker cannot cross a
-        # not-yet-requoted maker's stale order when the mid has moved.
+        # Pass 1: ensure inventory + cancel every participating maker's stale quotes.
         for u in makers:
             self._ensure_inventory(u, market)
             self._order.cancel_market_orders(u, market=cond, asset_id=None)
-        # Gap from agentpit's own touch (only non-engine orders remain now) so
-        # the engine never acts as a taker against a real resting order either.
-        best_bid, best_ask = self._order._best_bid_ask(yes_token)
-        # Pass 2: place fresh, non-crossing ladders, all pegged to the same mid.
+        # Anchors = Polymarket touch, clamped against agentpit's own residual touch
+        # so the engine never crosses a real-user order.
+        own_bid, own_ask = self._order._best_bid_ask(yes_token)
+        bid_anchor, ask_anchor = p_bid, p_ask
+        if own_ask is not None:
+            bid_anchor = min(bid_anchor, own_ask - TICK)
+        if own_bid is not None:
+            ask_anchor = max(ask_anchor, own_bid + TICK)
+        if bid_anchor >= ask_anchor:
+            log.warning("market %s anchors crossed (bid=%s ask=%s) — skipping quote",
+                        market.market_id, bid_anchor, ask_anchor)
+            return
+        # Pass 2: place fresh non-crossing ladders anchored to the executable touch.
         for u in makers:
             rungs = build_ladder(
-                mid,
+                bid_anchor, ask_anchor,
                 rungs_per_side=self._cfg.liquidity_ladder_rungs_per_side,
                 wall_fraction=self._cfg.liquidity_wall_fraction,
                 size_per_side_micro=size_per_side,
-                best_bid_micro=best_bid,
-                best_ask_micro=best_ask,
             )
             for r in rungs:
                 payload = PlaceOrderRequest(
-                    token_id=yes_token,
-                    side=r.side,
+                    token_id=yes_token, side=r.side,
                     price=Decimal(r.price_micro) / MICRO,
                     size=Decimal(r.size_micro) / MICRO,
                     order_type="GTC",
                 )
                 resp = self._order.place_order(u, payload)
                 if resp.tradeIDs:
-                    log.error(
-                        "liquidity quote unexpectedly filled (market=%s side=%s price=%s)",
-                        market.market_id, r.side, r.price_micro,
-                    )
+                    log.error("liquidity quote unexpectedly filled (market=%s side=%s price=%s)",
+                              market.market_id, r.side, r.price_micro)
 
     def _ensure_inventory(self, user: User, market) -> None:
         yes_token_int = int(market.erc1155_tokens[0][0])

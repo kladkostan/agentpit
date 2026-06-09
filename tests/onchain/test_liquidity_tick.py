@@ -37,11 +37,10 @@ def test_one_tick_builds_two_sided_book_no_trades(monkeypatch):
         )
 
     house = HouseAccountProvisioner(db, admin, s).ensure_provisioned()
-    # Stub the real Polymarket mid at 0.50. Patch the module function the engine
-    # calls (NOT price_oracle.get — the getter default is bound at def time).
+    # Stub Polymarket executable bid/ask at 0.49 / 0.51.
     monkeypatch.setattr(
-        price_oracle, "fetch_mids_for_markets",
-        lambda markets, **kw: {mk.market_id: 500_000 for mk in markets},
+        price_oracle, "fetch_bid_ask_micro",
+        lambda tid, **kw: (490_000, 510_000),
     )
 
     LiquidityEngine(db, admin, s, house).tick()
@@ -54,7 +53,9 @@ def test_one_tick_builds_two_sided_book_no_trades(monkeypatch):
     assert book["bids"] and book["asks"]
     best_bid = max(float(b["price"]) for b in book["bids"])
     best_ask = min(float(a["price"]) for a in book["asks"])
-    assert best_bid < 0.5 < best_ask
+    # Touch must match the stubbed Polymarket executable bid/ask exactly.
+    assert best_bid == 0.49
+    assert best_ask == 0.51
 
     with db.read() as conn:
         n = conn.execute(
@@ -86,16 +87,16 @@ def test_requote_after_mid_move_no_trades(monkeypatch):
         )
 
     house = HouseAccountProvisioner(db, admin, s).ensure_provisioned()
-    mid_box = {"v": 500_000}
+    box = {"v": (490_000, 510_000)}
     monkeypatch.setattr(
-        price_oracle, "fetch_mids_for_markets",
-        lambda markets, **kw: {mk.market_id: mid_box["v"] for mk in markets},
+        price_oracle, "fetch_bid_ask_micro",
+        lambda tid, **kw: box["v"],
     )
 
     engine = LiquidityEngine(db, admin, s, house)
-    engine.tick()                # quote at 0.50
-    mid_box["v"] = 520_000       # move mid up well beyond threshold (2000µ)
-    engine.tick()                # requote — must NOT cross stale quotes
+    engine.tick()                        # quote at bid=0.49 / ask=0.51 (mid 500k)
+    box["v"] = (510_000, 530_000)        # mid 500k→520k, moved ≥ threshold (2000µ)
+    engine.tick()                        # requote — must NOT cross stale quotes
 
     with db.read() as conn:
         n = conn.execute(
