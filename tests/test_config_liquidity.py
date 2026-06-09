@@ -6,7 +6,7 @@ def test_liquidity_defaults():
     s = Settings()
     assert s.liquidity_engine_enabled is False
     assert s.liquidity_house_account_count == 100
-    assert s.liquidity_wallet_funding_usdc == 1_000_000_000
+    assert s.liquidity_funding_drips == 1
     assert s.liquidity_split_per_market_usdc == 10_000
     assert s.liquidity_makers_per_market == 16
     assert s.liquidity_ladder_rungs_per_side == 8

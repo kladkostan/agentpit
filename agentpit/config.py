@@ -76,8 +76,8 @@ class Settings(BaseSettings):
     liquidity_house_account_count: int = Field(
         default=100, validation_alias="AGENTPIT_LIQUIDITY_HOUSE_ACCOUNTS"
     )
-    liquidity_wallet_funding_usdc: int = Field(
-        default=1_000_000_000, validation_alias="AGENTPIT_LIQUIDITY_WALLET_FUNDING_USDC"
+    liquidity_funding_drips: int = Field(
+        default=1, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
     )
     liquidity_split_per_market_usdc: int = Field(
         default=10_000, validation_alias="AGENTPIT_LIQUIDITY_SPLIT_PER_MARKET_USDC"

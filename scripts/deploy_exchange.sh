@@ -13,8 +13,9 @@ AGENTPIT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$AGENTPIT_DIR/.env"
 CTF_EXCHANGE_DIR="${CTF_EXCHANGE_DIR:-$AGENTPIT_DIR/../ctf-exchange}"
 
-# Faucet drip amount: 1,000,000 apUSD (6 decimals) = 1_000_000_000_000.
-SIGNUP_GRANT_RAW="${SIGNUP_GRANT_RAW:-1000000000000}"
+# Faucet drip amount: 1,000,000,000 apUSD (6 decimals) = 1_000_000_000_000_000.
+# Deep grant so liquidity-engine house accounts get ample collateral in one drip.
+SIGNUP_GRANT_RAW="${SIGNUP_GRANT_RAW:-1000000000000000}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Error: $ENV_FILE not found. Copy .env.example and edit." >&2
