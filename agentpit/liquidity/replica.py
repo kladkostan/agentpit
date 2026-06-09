@@ -5,19 +5,24 @@ micro units (1_000_000 == $1.00 == 1 share), parsed from the feed's decimal
 STRINGS via Decimal — never through float.
 """
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, Overflow
 
 MICRO = 1_000_000
 TICK = 1_000  # 0.001 — the local book's price grid
 
 
 def to_micro(value) -> int | None:
-    """Decimal string -> integer micro units; None on garbage."""
+    """Decimal string -> integer micro units; None on garbage/non-finite."""
     if value is None:
         return None
     try:
-        return int((Decimal(str(value)) * MICRO).to_integral_value())
-    except (InvalidOperation, ValueError, TypeError):
+        d = Decimal(str(value))
+        if not d.is_finite():  # NaN / sNaN / ±Infinity
+            return None
+        if d.adjusted() > 18:  # pathological magnitude (> 1e18); reject
+            return None
+        return int((d * MICRO).to_integral_value())
+    except (InvalidOperation, ValueError, TypeError, Overflow):
         return None
 
 
@@ -52,11 +57,12 @@ class BookReplica:
         self.stale = False  # tick_size_change / watchdog: drop deltas, await snapshot
 
     def apply_book(self, msg: dict) -> bool:
-        """Full snapshot: REPLACES the book. Returns True if applied."""
+        """Full snapshot: REPLACES the book atomically. Returns True if applied."""
         if msg.get("asset_id") != self.asset_id:
             return False
-        self.bids = _clean_levels(msg.get("bids"))
-        self.asks = _clean_levels(msg.get("asks"))
+        bids = _clean_levels(msg.get("bids"))
+        asks = _clean_levels(msg.get("asks"))
+        self.bids, self.asks = bids, asks
         self.seeded = True
         self.stale = False
         return True

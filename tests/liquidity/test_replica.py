@@ -105,3 +105,20 @@ def test_one_sided_and_empty_books_are_valid():
     r.apply_book(_book_msg(bids=[("0.40", "1")], asks=[]))
     snap = r.snapshot()
     assert snap.bids == ((400_000, 1_000_000),) and snap.asks == ()
+
+
+def test_to_micro_rejects_non_finite_and_overflow():
+    assert to_micro("Infinity") is None
+    assert to_micro("inf") is None
+    assert to_micro("-Infinity") is None
+    assert to_micro("NaN") is None
+    assert to_micro("1e1000") is None
+
+
+def test_apply_book_with_infinity_level_does_not_corrupt_other_side():
+    r = BookReplica("A")
+    r.apply_book(_book_msg(bids=[("0.40", "10")], asks=[("0.60", "5")]))
+    r.apply_book(_book_msg(bids=[("0.45", "7")], asks=[("Infinity", "1")]))
+    snap = r.snapshot()
+    assert snap.asks == ()                       # bad level dropped, not stale-retained
+    assert snap.bids == ((450_000, 7_000_000),)  # and no exception escaped
