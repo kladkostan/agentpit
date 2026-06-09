@@ -23,7 +23,8 @@ def test_one_tick_builds_two_sided_book_no_trades(monkeypatch):
     cond = m["condition_id"]["value"]
 
     s = Settings(liquidity_house_account_count=3, liquidity_funding_drips=1,
-                 liquidity_makers_per_market=2, liquidity_split_per_market_usdc=50)
+                 liquidity_makers_per_market=2, liquidity_split_per_market_usdc=50,
+                 liquidity_taker_pool_size=0)
     d = Deployment.load(s.deployment_path)
     w = Web3Client(s, d)
     admin = OnchainAdmin(w, Contracts(w.web3, d))
@@ -73,7 +74,8 @@ def test_requote_after_mid_move_no_trades(monkeypatch):
     cond = m["condition_id"]["value"]
 
     s = Settings(liquidity_house_account_count=3, liquidity_funding_drips=1,
-                 liquidity_makers_per_market=2, liquidity_split_per_market_usdc=50)
+                 liquidity_makers_per_market=2, liquidity_split_per_market_usdc=50,
+                 liquidity_taker_pool_size=0)
     d = Deployment.load(s.deployment_path)
     w = Web3Client(s, d)
     admin = OnchainAdmin(w, Contracts(w.web3, d))

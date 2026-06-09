@@ -26,37 +26,53 @@ class LiquidityEngine:
         self._house = house_users
         self._order = OrderService(db, onchain)
         self._last_mid: dict[int, int] = {}
+        n_takers = min(settings.liquidity_taker_pool_size, max(0, len(house_users) - 1))
+        self._takers = house_users[:n_takers]
+        self._makers = house_users[n_takers:] or house_users
+        self._last_print_fair: dict[int, int] = {}
 
     def tick(self) -> dict:
         with self._db.read() as conn:
             markets = TableRead.list_active_synced_markets(conn)
-        quoted = 0
+        quoted = printed = 0
+        prints_left = self._cfg.liquidity_max_prints_per_tick
         for m in markets:
             bid, ask = price_oracle.fetch_bid_ask_micro(m.polymarket_yes_token_id)
             if bid is None or ask is None or bid >= ask:
                 continue
             mid = (bid + ask) // 2
-            if not self._moved(m.market_id, mid):
-                continue
-            try:
-                self._quote_market(m, bid, ask)
-                self._last_mid[m.market_id] = mid
-                quoted += 1
-            except Exception:
-                log.exception("quoting market %s failed", m.market_id)
-        return {"markets": len(markets), "quoted": quoted}
+            if self._moved(m.market_id, mid):
+                try:
+                    self._quote_market(m, bid, ask)
+                    self._last_mid[m.market_id] = mid
+                    quoted += 1
+                except Exception:
+                    log.exception("quoting market %s failed", m.market_id)
+            if prints_left > 0:
+                try:
+                    if self._maybe_print(m, bid, ask):
+                        printed += 1
+                        prints_left -= 1
+                except Exception:
+                    log.exception("arb print market %s failed", m.market_id)
+        return {"markets": len(markets), "quoted": quoted, "printed": printed}
 
     def _moved(self, market_id: int, mid: int) -> bool:
         prev = self._last_mid.get(market_id)
         return prev is None or abs(mid - prev) >= self._cfg.liquidity_requote_threshold_micro
 
     def _makers_for(self, market_id: int) -> list[User]:
-        if not self._house:
+        if not self._makers:
             return []
-        n = min(self._cfg.liquidity_makers_per_market, len(self._house))
-        start = (market_id * n) % len(self._house)
-        rotated = self._house[start:] + self._house[:start]
+        n = min(self._cfg.liquidity_makers_per_market, len(self._makers))
+        start = (market_id * n) % len(self._makers)
+        rotated = self._makers[start:] + self._makers[:start]
         return rotated[:n]
+
+    def _taker_for(self, market_id: int):
+        if not self._takers:
+            return None
+        return self._takers[market_id % len(self._takers)]
 
     def _quote_market(self, market, p_bid: int, p_ask: int) -> None:
         yes_token = market.erc1155_tokens[0][0]
@@ -98,6 +114,36 @@ class LiquidityEngine:
                 if resp.tradeIDs:
                     log.error("liquidity quote unexpectedly filled (market=%s side=%s price=%s)",
                               market.market_id, r.side, r.price_micro)
+
+    def _maybe_print(self, market, p_bid: int, p_ask: int) -> bool:
+        fair = (p_bid + p_ask) // 2
+        prev = self._last_print_fair.get(market.market_id)
+        if prev is not None and abs(fair - prev) < self._cfg.liquidity_print_threshold_micro:
+            return False
+        taker = self._taker_for(market.market_id)
+        if taker is None:
+            return False
+        yes_token = market.erc1155_tokens[0][0]
+        own_bid, own_ask = self._order._best_bid_ask(yes_token)
+        up = prev is None or fair > prev
+        size = Decimal(self._cfg.liquidity_print_size_shares)
+        if up:
+            if own_ask is None:
+                return False
+            side, price = "BUY", Decimal(own_ask) / MICRO
+        else:
+            if own_bid is None:
+                return False
+            self._ensure_inventory(taker, market)   # taker needs YES to sell
+            side, price = "SELL", Decimal(own_bid) / MICRO
+        resp = self._order.place_order(taker, PlaceOrderRequest(
+            token_id=yes_token, side=side, price=price, size=size, order_type="FAK"))
+        if not resp.success or not resp.tradeIDs:
+            log.warning("arb print did not fill (market=%s side=%s success=%s)",
+                        market.market_id, side, resp.success)
+            return False
+        self._last_print_fair[market.market_id] = fair
+        return True
 
     def _ensure_inventory(self, user: User, market) -> None:
         yes_token_int = int(market.erc1155_tokens[0][0])
