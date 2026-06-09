@@ -7,6 +7,9 @@ os.environ.setdefault("AGENTPIT_DATABASE_URL", "postgresql:///agentpit_test")
 os.environ.setdefault("AGENTPIT_POOL_MIN_SIZE", "0")  # leaked create_app pools hold 0 conns
 os.environ.setdefault("AGENTPIT_POOL_MAX_IDLE", "5")  # shed idle connections fast in tests
 os.environ.setdefault("SYNC", "false")
+# The liquidity engine provisions ~100 on-chain house accounts at startup; never
+# let a developer's .env (LIQUIDITY_ENGINE=true) leak in and do that per test.
+os.environ.setdefault("LIQUIDITY_ENGINE", "false")
 os.environ.setdefault("JWT_SECRET", "test-only-secret")
 
 import psycopg
