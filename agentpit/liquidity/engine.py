@@ -50,11 +50,14 @@ class LiquidityEngine:
                     log.exception("quoting market %s failed", m.market_id)
             if prints_left > 0:
                 try:
-                    if self._maybe_print(m, bid, ask):
-                        printed += 1
-                        prints_left -= 1
+                    res = self._maybe_print(m, bid, ask)
                 except Exception:
                     log.exception("arb print market %s failed", m.market_id)
+                    res = "skipped"
+                if res != "skipped":
+                    prints_left -= 1          # an on-chain attempt was made
+                    if res == "filled":
+                        printed += 1
         return {"markets": len(markets), "quoted": quoted, "printed": printed}
 
     def _moved(self, market_id: int, mid: int) -> bool:
@@ -115,39 +118,52 @@ class LiquidityEngine:
                     log.error("liquidity quote unexpectedly filled (market=%s side=%s price=%s)",
                               market.market_id, r.side, r.price_micro)
 
-    def _maybe_print(self, market, p_bid: int, p_ask: int) -> bool:
+    def _maybe_print(self, market, p_bid: int, p_ask: int) -> str:
+        """Return 'skipped', 'filled', or 'failed'.
+
+        'skipped'  — a gate check failed; no on-chain attempt was made.
+        'filled'   — place_order succeeded and produced at least one trade.
+        'failed'   — place_order was called but settlement failed or produced no fills.
+        """
         fair = (p_bid + p_ask) // 2
         prev = self._last_print_fair.get(market.market_id)
         if prev is not None and abs(fair - prev) < self._cfg.liquidity_print_threshold_micro:
-            return False
+            return "skipped"
         taker = self._taker_for(market.market_id)
         if taker is None:
-            return False
+            return "skipped"
         yes_token = market.erc1155_tokens[0][0]
         own_bid, own_ask = self._order._best_bid_ask(yes_token)
         up = prev is None or fair > prev
         size = Decimal(self._cfg.liquidity_print_size_shares)
         if up:
             if own_ask is None:
-                return False
+                return "skipped"
             side, price = "BUY", Decimal(own_ask) / MICRO
         else:
             if own_bid is None:
-                return False
+                return "skipped"
             self._ensure_inventory(taker, market)   # taker needs YES to sell
             side, price = "SELL", Decimal(own_bid) / MICRO
+        # Latch fair before the on-chain attempt so a persistently-failing market
+        # won't retry every tick; also counts this market against prints_left.
+        self._last_print_fair[market.market_id] = fair
         resp = self._order.place_order(taker, PlaceOrderRequest(
             token_id=yes_token, side=side, price=price, size=size, order_type="FAK"))
+        # FAK is not enforced by the matcher — kill any unfilled remainder so the
+        # taker never leaves a resting order a later print could self-cross.
+        if resp.orderID:
+            self._order.cancel_orders(taker, [resp.orderID])
         if not resp.success or not resp.tradeIDs:
             log.warning("arb print did not fill (market=%s side=%s success=%s)",
                         market.market_id, side, resp.success)
-            return False
-        self._last_print_fair[market.market_id] = fair
-        return True
+            return "failed"
+        return "filled"
 
     def _ensure_inventory(self, user: User, market) -> None:
         yes_token_int = int(market.erc1155_tokens[0][0])
-        target = self._cfg.liquidity_split_per_market_usdc * MICRO
+        target = max(self._cfg.liquidity_split_per_market_usdc,
+                     self._cfg.liquidity_print_size_shares) * MICRO
         held = self._onchain.ctf_balance(user.eth_address, yes_token_int)
         if held >= target:
             return

@@ -15,7 +15,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.services.order_service import OrderService
 
 
-def _setup(monkeypatch, box):
+def _setup(monkeypatch, box, *, split_per_market_usdc=200, print_size_shares=10):
     app = create_app()
     client = TestClient(app)
     m = client.post("/markets", json={
@@ -29,8 +29,8 @@ def _setup(monkeypatch, box):
         liquidity_funding_drips=1,
         liquidity_makers_per_market=2,
         liquidity_taker_pool_size=2,
-        liquidity_split_per_market_usdc=200,
-        liquidity_print_size_shares=10,
+        liquidity_split_per_market_usdc=split_per_market_usdc,
+        liquidity_print_size_shares=print_size_shares,
         liquidity_print_threshold_micro=5_000,
     )
     d = Deployment.load(s.deployment_path)
@@ -89,3 +89,27 @@ def test_no_print_when_fair_stable(monkeypatch):
     assert _trade_count(db, cond) == n1, (
         f"stable fair produced extra print: {_trade_count(db, cond)} != {n1}"
     )
+
+
+def test_print_larger_than_depth_no_self_trade(monkeypatch):
+    # print_size bigger than a single resting level: the taker's FAK remainder
+    # must be cancelled, so an opposite-direction print never self-crosses.
+    box = {"v": (490_000, 510_000)}
+    db, admin, s, house, cond, m = _setup(monkeypatch, box,
+        split_per_market_usdc=5, print_size_shares=20)   # print > book depth
+    engine = LiquidityEngine(db, admin, s, house)
+    engine.tick()                       # BUY print, partial fill, remainder cancelled
+    box["v"] = (390_000, 410_000)       # big down-move -> SELL print
+    engine.tick()
+    with db.read() as conn:
+        failed = conn.execute(
+            "SELECT COUNT(*) AS C FROM trades WHERE MARKET=%s AND STATUS='FAILED'", (cond,)
+        ).fetchone()["C"]
+    assert failed == 0                  # no self-trade revert
+    # and the takers left no resting orders
+    with db.read() as conn:
+        live_taker = conn.execute(
+            "SELECT COUNT(*) AS C FROM orders WHERE STATUS='live' AND API_KEY = ANY(%s)",
+            ([t.api_key for t in engine._takers],),
+        ).fetchone()["C"]
+    assert live_taker == 0
