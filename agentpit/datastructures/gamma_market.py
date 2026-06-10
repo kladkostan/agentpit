@@ -14,6 +14,9 @@ class GammaMarket(BaseModel):
     question: str
     slug: str
     description: str
+    # Short per-outcome name shown inside an event grouping (e.g. "Spain");
+    # null for standalone markets. Gamma's own field name + casing.
+    groupItemTitle: str | None = None
     outcomes: str            # JSON-encoded array, e.g. '["Yes","No"]'
     outcomePrices: str       # JSON-encoded array, e.g. '["0.5","0.5"]'
     clobTokenIds: str        # JSON-encoded array of token ids

@@ -24,7 +24,7 @@ export function gammaToMarket(g: GammaMarket): Market {
     polymarket_id: null,
     condition_id: g.conditionId,
     event_id: null,
-    outcome_label: null,
+    outcome_label: g.groupItemTitle ?? null,
     icon_url: g.icon,
   };
 }

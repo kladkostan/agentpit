@@ -43,6 +43,7 @@ def to_gamma_market(market: Market) -> GammaMarket:
         question=market.question,
         slug=market.slug,
         description=market.description,
+        groupItemTitle=market.outcome_label,
         outcomes=_json_arr(labels),
         outcomePrices=_json_arr(["0.5" for _ in labels]),
         clobTokenIds=_json_arr(token_ids),

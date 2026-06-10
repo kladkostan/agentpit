@@ -7,7 +7,7 @@ from agentpit.datastructures.market_state import MarketState
 from agentpit.polymarket.gamma import to_gamma_market, to_gamma_event
 
 
-def _market(state=MarketState.ACTIVE) -> Market:
+def _market(state=MarketState.ACTIVE, outcome_label=None) -> Market:
     return Market(
         question="Will it rain?",
         slug="will-it-rain",
@@ -19,7 +19,17 @@ def _market(state=MarketState.ACTIVE) -> Market:
         end_date=1_800_000_000,
         market_state=state,
         resolved_outcome=0 if state == MarketState.RESOLVED else None,
+        outcome_label=outcome_label,
     )
+
+
+def test_to_gamma_market_emits_group_item_title_from_outcome_label():
+    # `groupItemTitle` is the short per-outcome name shown inside an event
+    # (e.g. "Spain") — Gamma's own field, mirrored from the stored outcome_label.
+    g = to_gamma_market(_market(outcome_label="Spain"))
+    assert g.groupItemTitle == "Spain"
+    # Absent for standalone markets (no event short name).
+    assert to_gamma_market(_market()).groupItemTitle is None
 
 
 def test_to_gamma_market_shape_and_encoding():

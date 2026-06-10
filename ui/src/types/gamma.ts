@@ -4,6 +4,8 @@ export interface GammaMarket {
   question: string;
   slug: string;
   description: string;
+  /** Short per-outcome name inside an event (e.g. "Spain"); null if standalone. */
+  groupItemTitle: string | null;
   outcomes: string; // JSON-encoded array, e.g. '["Yes","No"]'
   outcomePrices: string;
   clobTokenIds: string;
