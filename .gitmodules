@@ -1,0 +1,3 @@
+[submodule "vendor/ctf-exchange"]
+	path = vendor/ctf-exchange
+	url = https://github.com/yavrsky/ctf-exchange.git
