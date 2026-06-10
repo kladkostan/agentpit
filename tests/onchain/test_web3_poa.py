@@ -1,27 +1,24 @@
-"""Regression: the web3 client must handle Polygon's PoA block headers.
+"""Regression: the web3 client must install the PoA extraData middleware.
 
-Polygon (the forked chain) carries >32-byte `extraData` in its block headers.
-web3 v7 raises `ExtraDataLengthError` on such blocks unless
-`ExtraDataToPOAMiddleware` is injected. This bites on-chain ops (e.g.
-polymarket_sync's tx building) whenever web3 reads a real Polygon block — most
-notably the anvil fork-base block, which is `latest` right after a fork/restart
-until a local tx mines an anvil block, causing "Synced 0/N, N failed".
+Real Polygon block headers carry >32-byte `extraData`; without
+`ExtraDataToPOAMiddleware` web3 v7 raises `ExtraDataLengthError` when the
+polymarket-sync path reads a real Polygon block. The local node is no longer a
+Polygon fork, so we assert the middleware is installed on our Web3Client
+directly rather than by fetching a historical Polygon block.
 """
+
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from agentpit.config import Settings
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 
-# A block well below the anvil fork point (~88M) → a real Polygon header with
-# large extraData, served through the fork. Reading it exercises PoA handling.
-_HISTORICAL_POLYGON_BLOCK = 80_000_000
 
-
-def test_web3_client_reads_poa_polygon_block():
+def test_web3_client_installs_poa_middleware():
     settings = Settings()
     deployment = Deployment.load(settings.deployment_path)
     client = Web3Client(settings, deployment)
 
-    # Without the POA middleware this raises web3.exceptions.ExtraDataLengthError.
-    block = client.web3.eth.get_block(_HISTORICAL_POLYGON_BLOCK)
-    assert block.number == _HISTORICAL_POLYGON_BLOCK
+    # Without the inject() call in Web3Client.__init__ this is False, and reading
+    # any real Polygon block would raise web3.exceptions.ExtraDataLengthError.
+    assert ExtraDataToPOAMiddleware in client.web3.middleware_onion
