@@ -95,3 +95,30 @@ def test_cap_sells_keeps_best_prices_first():
     assert Placement(YES, "SELL", 700_000, 6) not in got   # inventory exhausted (8 < 5+6)
     assert Placement(NO, "SELL", 500_000, 4) not in got    # zero NO inventory
     assert Placement(YES, "BUY", 400_000, 99) in got
+
+
+def test_cap_sells_skip_but_continue_when_best_does_not_fit():
+    # Greedy best-effort: a too-big best ask is dropped, a worse-priced
+    # smaller ask still fits (continue, not break).
+    places = [
+        Placement(YES, "SELL", 600_000, 10),  # best price, too big for inventory
+        Placement(YES, "SELL", 700_000, 3),   # worse price, fits
+    ]
+    got = cap_sells_to_inventory(places, {YES: 5})
+    assert Placement(YES, "SELL", 600_000, 10) not in got
+    assert Placement(YES, "SELL", 700_000, 3) in got
+
+
+def test_desired_levels_never_mint_or_merge_across_tokens():
+    # Matcher MINT fires when BUY(YES) + BUY(NO) prices sum >= 1.0 and MERGE
+    # when SELL+SELL sum <= 1.0 (inclusive!). A strictly non-crossed snapshot
+    # must keep every cross-token pair strictly outside both boundaries.
+    snap = _snap(bids=[(400_000, 1), (399_000, 2)],
+                 asks=[(401_000, 1), (900_000, 3)])   # tightest spread: 1 tick
+    desired = desired_levels(snap, YES, NO)
+    yes_buys = [d.price_micro for d in desired if d.token_id == YES and d.side == "BUY"]
+    no_buys = [d.price_micro for d in desired if d.token_id == NO and d.side == "BUY"]
+    yes_sells = [d.price_micro for d in desired if d.token_id == YES and d.side == "SELL"]
+    no_sells = [d.price_micro for d in desired if d.token_id == NO and d.side == "SELL"]
+    assert all(b + nb < MICRO for b in yes_buys for nb in no_buys)
+    assert all(s + ns > MICRO for s in yes_sells for ns in no_sells)

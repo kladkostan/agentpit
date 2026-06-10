@@ -75,9 +75,10 @@ def split_target_micro(snap: BookSnapshot) -> int:
 def cap_sells_to_inventory(
     places: list[Placement], inventory_micro: dict[str, int]
 ) -> list[Placement]:
-    """Drop SELL placements that exceed held CTF inventory, keeping the best
-    (lowest-priced) asks. BUYs pass through (USDC is never the binding
-    constraint). Result preserves no particular order."""
+    """Fill SELL placements lowest-price-first, skipping any that exceed
+    remaining per-token inventory (greedy best-effort — a too-big best ask is
+    dropped, smaller worse-priced asks may still fit). BUYs pass through (USDC
+    is never the binding constraint). Result preserves no particular order."""
     remaining = dict(inventory_micro)
     out = [p for p in places if p.side == "BUY"]
     sells = sorted((p for p in places if p.side == "SELL"), key=lambda p: p.price_micro)
