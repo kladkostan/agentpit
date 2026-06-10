@@ -40,7 +40,12 @@ def _clean_levels(levels) -> dict[int, int]:
         if not isinstance(lvl, dict):
             continue
         p, s = to_micro(lvl.get("price")), to_micro(lvl.get("size"))
-        if p is None or s is None or s <= 0:
+        if p is None or s is None:
+            continue
+        s -= s % TICK  # snap size DOWN to the 0.001-share grid: the order
+        # service re-derives PRICE from HALF_UP-rounded amounts, so off-grid
+        # sizes drift off the desired tick and churn cancel/replace forever
+        if s <= 0:
             continue
         if not (0 < p < MICRO) or p % TICK:
             continue  # outside (0,1) or off the local 0.001 grid
@@ -78,6 +83,8 @@ class BookReplica:
             return False
         if not (0 < p < MICRO) or p % TICK:
             return False
+        s -= s % TICK  # same 0.001-share size snap as _clean_levels; a
+        # dust-only level snaps to 0 and is removed
         book = self.bids if side == "BUY" else self.asks
         if s == 0:
             book.pop(p, None)

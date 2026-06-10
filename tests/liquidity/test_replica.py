@@ -122,3 +122,14 @@ def test_apply_book_with_infinity_level_does_not_corrupt_other_side():
     snap = r.snapshot()
     assert snap.asks == ()                       # bad level dropped, not stale-retained
     assert snap.bids == ((450_000, 7_000_000),)  # and no exception escaped
+
+
+def test_sizes_snapped_down_to_milli_share_grid():
+    r = BookReplica("A")
+    r.apply_book(_book_msg(bids=[("0.40", "10.1234567"), ("0.30", "0.0009")],
+                           asks=[("0.60", "5")]))
+    snap = r.snapshot()
+    assert snap.bids == ((400_000, 10_123_000),)   # snapped down; dust level dropped
+    assert r.apply_price_change_entry(
+        {"asset_id": "A", "side": "SELL", "price": "0.61", "size": "2.0006"})
+    assert dict(r.snapshot().asks)[610_000] == 2_000_000

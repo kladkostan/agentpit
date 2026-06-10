@@ -106,7 +106,7 @@ def _ensure_inventory(
     """Split-mint CTF inventory up to the snapshot's ask-side need × buffer.
     Returns the number of split txs performed (0 or 1 per call — splits are
     admin txs behind the global send_lock, budgeted by the caller)."""
-    need = int(split_target_micro(snap) * cfg.mirror_inventory_buffer)
+    need = int(Decimal(str(cfg.mirror_inventory_buffer)) * split_target_micro(snap))
     if need <= 0:
         return 0
     held_yes = onchain.ctf_balance(user.eth_address, int(ref.yes_token))
@@ -125,6 +125,21 @@ def _crosses(p: Placement, foreign_bid: int | None, foreign_ask: int | None) -> 
     return foreign_bid is not None and p.price_micro <= foreign_bid
 
 
+def _merge_touch(own: tuple[int | None, int | None],
+                 comp: tuple[int | None, int | None]) -> tuple[int | None, int | None]:
+    """Effective foreign touch on one token: its own orders PLUS the
+    complement token's same-side orders mapped through 1-p (the matcher's
+    MINT/MERGE paths treat those as crossable at the same inclusive
+    boundary)."""
+    own_bid, own_ask = own
+    comp_bid, comp_ask = comp
+    via_bid = MICRO - comp_ask if comp_ask is not None else None   # comp SELL ⇒ effective BUY
+    via_ask = MICRO - comp_bid if comp_bid is not None else None   # comp BUY ⇒ effective SELL
+    bids = [b for b in (own_bid, via_bid) if b is not None]
+    asks = [a for a in (own_ask, via_ask) if a is not None]
+    return (max(bids) if bids else None, min(asks) if asks else None)
+
+
 def reconcile_market(
     db: DbSession,
     order: OrderService,
@@ -136,8 +151,14 @@ def reconcile_market(
 ) -> dict:
     """Converge the local books (YES + NO complement) to the snapshot.
     Cancels strictly before placements (spec §5). Placements that would cross
-    a NON-house order are intentional bot fills (spec §7) — they run last,
-    capped at cfg.mirror_max_settlements_per_cycle real settlements."""
+    a NON-house order — directly or via the complement token's MINT/MERGE
+    boundary — are intentional bot fills (spec §7): they run last, capped at
+    cfg.mirror_max_settlements_per_cycle ATTEMPTED settlements per cycle.
+
+    Returned stats: "cancelled" counts ATTEMPTED cancels, "placed" counts
+    SUCCESSFUL placements; "deferred" is hot placements skipped over budget
+    and "failed" is placements that errored or raised — both mean the cycle
+    is incomplete and a later cycle must converge the remainder."""
     tokens = [ref.yes_token, ref.no_token]
     with db.read() as conn:
         rows = TableRead.list_live_order_levels(conn, user.api_key, tokens)
@@ -159,34 +180,70 @@ def reconcile_market(
         ref.yes_token: onchain.ctf_balance(user.eth_address, int(ref.yes_token)),
         ref.no_token: onchain.ctf_balance(user.eth_address, int(ref.no_token)),
     }
+    # KEPT resting SELLs already reserve inventory; only the surplus may back
+    # new asks (negative remainder ⇒ the cap places nothing for that token).
+    cancel_set = set(cancels)
+    for o in current:
+        if o.side == "SELL" and o.order_id not in cancel_set:
+            inventory[o.token_id] = inventory.get(o.token_id, 0) - o.size_micro
     places = cap_sells_to_inventory(places, inventory)
 
     if cancels:
         order.cancel_orders(user, cancels)
 
-    # Non-crossing placements first; crossing ones (real settlements) last + capped.
-    calm = [p for p in places if not _crosses(p, *foreign[p.token_id])]
-    hot = [p for p in places if _crosses(p, *foreign[p.token_id])]
-    placed = fills = 0
-    for p in calm + hot:
-        if p in hot and fills >= cfg.mirror_max_settlements_per_cycle:
-            continue           # defer to a later cycle — keeps the loop unblocked
-        resp = order.place_order(user, PlaceOrderRequest(
-            token_id=p.token_id, side=p.side,
-            price=Decimal(p.price_micro) / MICRO,
-            size=Decimal(p.size_micro) / MICRO,
-            order_type="GTC",
-        ))
+    # Classify against the EFFECTIVE foreign touch: a foreign order on the
+    # complement token is crossable through the matcher's MINT/MERGE paths
+    # exactly as if it rested at 1-p on this token.
+    eff = {
+        ref.yes_token: _merge_touch(foreign[ref.yes_token], foreign[ref.no_token]),
+        ref.no_token: _merge_touch(foreign[ref.no_token], foreign[ref.yes_token]),
+    }
+    calm = [p for p in places if not _crosses(p, *eff[p.token_id])]
+    hot = [p for p in places if _crosses(p, *eff[p.token_id])]
+
+    placed = fills = deferred = failed = 0
+
+    def _try_place(p: Placement, *, expect_fill: bool) -> None:
+        nonlocal placed, fills, failed
+        try:
+            resp = order.place_order(user, PlaceOrderRequest(
+                token_id=p.token_id, side=p.side,
+                price=Decimal(p.price_micro) / MICRO,
+                size=Decimal(p.size_micro) / MICRO,
+                order_type="GTC",
+            ))
+        except Exception:
+            log.warning("mirror placement raised (market=%s %s@%s)",
+                        ref.market_id, p.side, p.price_micro, exc_info=True)
+            failed += 1
+            return
         if not resp.success:
-            log.warning("mirror placement settlement failed (market=%s %s@%s): %s",
+            log.warning("mirror placement failed (market=%s %s@%s): %s",
                         ref.market_id, p.side, p.price_micro, resp.errorMsg)
-            continue
+            failed += 1
+            return
         placed += 1
         if resp.tradeIDs:
             fills += 1
-            if p in calm:
-                log.error("mirror placement unexpectedly filled — foreign-touch "
-                          "guard missed (market=%s %s@%s)",
-                          ref.market_id, p.side, p.price_micro)
+            if not expect_fill:
+                log.warning("mirror calm placement filled — a foreign order "
+                            "arrived between the touch read and placement "
+                            "(benign TOCTOU race; market=%s %s@%s)",
+                            ref.market_id, p.side, p.price_micro)
+
+    # Phase 1: calm placements (DB-only; an unexpected fill is a benign race).
+    for p in calm:
+        _try_place(p, expect_fill=False)
+
+    # Phase 2: hot placements (real settlements), budgeted by ATTEMPT — a
+    # failed settlement still consumed chain time and must count.
+    attempted = 0
+    for p in hot:
+        if attempted >= cfg.mirror_max_settlements_per_cycle:
+            deferred += 1      # defer to a later cycle — keeps the loop unblocked
+            continue
+        attempted += 1
+        _try_place(p, expect_fill=True)
+
     return {"placed": placed, "cancelled": len(cancels), "fills": fills,
-            "splits": splits}
+            "splits": splits, "deferred": deferred, "failed": failed}

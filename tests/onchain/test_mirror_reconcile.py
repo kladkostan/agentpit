@@ -59,7 +59,8 @@ def test_reconcile_mirrors_both_books_and_is_idempotent():
     assert no_bids == {0.4: 7.0} and no_asks == {0.6: 10.0, 0.7: 5.0}
 
     stats2 = reconcile_market(db, order, admin, user, ref, snap, s)
-    assert (stats2["placed"], stats2["cancelled"], stats2["fills"]) == (0, 0, 0)
+    assert (stats2["placed"], stats2["cancelled"], stats2["fills"],
+            stats2["deferred"], stats2["failed"]) == (0, 0, 0, 0, 0)
 
     with db.read() as conn:
         n = conn.execute("SELECT COUNT(*) AS C FROM trades WHERE MARKET = %s",
@@ -81,7 +82,7 @@ def test_reconcile_level_change_minimal_ops():
     assert yes_bids == {0.41: 10.0}
 
 
-def test_reconcile_fills_bot_order_when_price_passes_through():
+def test_reconcile_fills_bot_order_when_price_passes_through(caplog):
     s, db, admin, client, ref, user = _rig()
     order = OrderService(db, admin)
     reconcile_market(db, order, admin, user, ref,
@@ -99,13 +100,26 @@ def test_reconcile_fills_bot_order_when_price_passes_through():
     assert bot_order.success and not bot_order.tradeIDs
 
     # ...and the real market moves DOWN through it: new ask 0.50 < bot bid 0.55.
-    stats = reconcile_market(db, order, admin, user, ref,
-                             _snap(bids=[(400_000, 10_000_000)],
-                                   asks=[(500_000, 7_000_000)]), s)
-    assert stats["fills"] >= 1     # the bot got its (deserved) fill, settled on-chain
+    # BOTH the direct SELL YES @0.50 (NORMAL cross) and the complement
+    # BUY NO @0.50 (MINT cross via 1-p) must be classified HOT; with the
+    # default budget of 1 settlement/cycle, one fills and one is deferred.
+    with caplog.at_level("ERROR", logger="agentpit.liquidity.reconciler"):
+        stats = reconcile_market(db, order, admin, user, ref,
+                                 _snap(bids=[(400_000, 10_000_000)],
+                                       asks=[(500_000, 7_000_000)]), s)
+    assert stats["fills"] == 1
+    assert stats["deferred"] == 1
+    assert not [r for r in caplog.records if r.levelname == "ERROR"], \
+        "no 'guard missed' ERROR may fire — both crossers must be classified hot"
 
     with db.read() as conn:
         n = conn.execute(
             "SELECT COUNT(*) AS C FROM trades WHERE MARKET = %s AND STATUS != 'FAILED'",
             (ref.condition_id,)).fetchone()["C"]
     assert n >= 1
+
+    # The deferred crossing placement converges on the next cycle.
+    stats2 = reconcile_market(db, order, admin, user, ref,
+                              _snap(bids=[(400_000, 10_000_000)],
+                                    asks=[(500_000, 7_000_000)]), s)
+    assert stats2["deferred"] == 0
