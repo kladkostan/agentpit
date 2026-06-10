@@ -286,8 +286,14 @@ mirror_tape_enabled:                 bool  = True   # AGENTPIT_MIRROR_TAPE_ENABL
 2. **No order-level identity**: the real book aggregates many makers per level; we place
    one order per level. Invisible through the book API (aggregated by price), visible
    only in house-account order lists. Accepted.
-3. **NO-side `last_trade_price` on YES-only subscription** — pinned by live capture in
-   the first implementation task (§9).
+3. **NO-side `last_trade_price` on YES-only subscription** — RESOLVED by live capture
+   2026-06-10 (`scripts/mirror_smoke.py`): two independent 60-second runs across 5
+   top-volume YES token ids each produced zero `last_trade_price` events in either
+   category (subscribed=0, sibling=0). The market channel was live and active — both
+   runs received healthy `book` (2–3) and `price_change` (20–23) events, and all
+   replicas seeded successfully — but no trades executed in those windows. The sibling
+   question remains empirically unresolved due to quiet trade windows; V1 policy (drop
+   non-YES asset_ids in the tape writer) is correct either way and requires no change.
 4. **Public tape endpoint**: `GET /data/trades` is API-key-scoped; if the UI gains a
    public activity feed later, `MIRRORED` rows are already shaped for it. Check what the
    UI event page actually reads when wiring tests (non-blocking).
