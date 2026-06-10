@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import { useBook } from "@/api/orders";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -12,8 +13,6 @@ interface OrderbookProps {
   outcome: string;
 }
 
-const DEPTH = 8;
-
 // Price is already dollars in [0, 1] → convert to cents with 1 decimal.
 const formatCents = (dollars: number): string => (dollars * 100).toFixed(1);
 
@@ -24,6 +23,23 @@ const formatShares = (shares: number): string => {
 
 export function Orderbook({ tokenId, outcome }: OrderbookProps) {
   const { data, isLoading, error, isStale } = useBook(tokenId);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const spreadRef = useRef<HTMLDivElement>(null);
+  const centeredFor = useRef<string | null>(null);
+
+  // Center the spread (the touch) in the scroll viewport once per market, so
+  // the best bid/ask is visible by default; the user scrolls up for deeper
+  // asks and down for deeper bids. Runs only on first data for a token so it
+  // never fights the user's own scroll on subsequent polls.
+  useLayoutEffect(() => {
+    if (!data || centeredFor.current === tokenId) return;
+    const sc = scrollRef.current;
+    const sp = spreadRef.current;
+    if (!sc || !sp) return;
+    sc.scrollTop = sp.offsetTop - sc.clientHeight / 2 + sp.offsetHeight / 2;
+    centeredFor.current = tokenId;
+  }, [tokenId, data]);
 
   if (isLoading) {
     return (
@@ -44,13 +60,14 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
     );
   }
 
+  // Full book, both sides — the scroll container lets the user reach the
+  // outermost ask (top) and bid (bottom). Asks display highest→lowest (best
+  // ask at the bottom, by the spread); bids display highest→lowest (best bid
+  // at the top, by the spread).
   const asks = levelsFrom(data.asks)
     .sort((a, b) => a.price - b.price)
-    .slice(0, DEPTH)
     .reverse();
-  const bids = levelsFrom(data.bids)
-    .sort((a, b) => b.price - a.price)
-    .slice(0, DEPTH);
+  const bids = levelsFrom(data.bids).sort((a, b) => b.price - a.price);
 
   // TOTAL column: cumulative notional from the touch (spread) outward, per side.
   const askTotals = cumulativeTotals(asks, "ask");
@@ -101,62 +118,70 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
       </header>
 
       <div className="overflow-hidden rounded-2xl border bg-card">
-        <div className="grid grid-cols-[1fr_1fr_1fr] border-b bg-muted/30 px-5 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          <span>Price</span>
-          <span className="text-right">Shares</span>
-          <span className="text-right">Total</span>
-        </div>
+        <div
+          ref={scrollRef}
+          className="relative max-h-[420px] overflow-y-auto"
+        >
+          <div className="sticky top-0 z-10 grid grid-cols-[1fr_1fr_1fr] border-b bg-card px-5 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            <span>Price</span>
+            <span className="text-right">Shares</span>
+            <span className="text-right">Total</span>
+          </div>
 
-        {asks.length === 0 ? (
-          <p className="px-5 py-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            no asks
-          </p>
-        ) : (
-          asks.map((entry, i) => (
-            <Row
-              key={`ask-${entry.price}`}
-              entry={entry}
-              kind="ask"
-              total={askTotals[i]!}
-              maxTotal={maxAskTotal}
-            />
-          ))
-        )}
+          {asks.length === 0 ? (
+            <p className="px-5 py-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              no asks
+            </p>
+          ) : (
+            asks.map((entry, i) => (
+              <Row
+                key={`ask-${entry.price}`}
+                entry={entry}
+                kind="ask"
+                total={askTotals[i]!}
+                maxTotal={maxAskTotal}
+              />
+            ))
+          )}
 
-        <div className="flex items-center justify-between border-y bg-muted/20 px-5 py-2 font-mono text-[11px] tabular-nums">
-          <span className="uppercase tracking-[0.2em] text-muted-foreground">
-            spread
-          </span>
-          <span className="flex items-center gap-4">
-            {mid !== null ? (
-              <span className="text-muted-foreground">
-                mid{" "}
-                <span className="text-foreground">
-                  {(mid * 100).toFixed(1)}¢
-                </span>
-              </span>
-            ) : null}
-            <span className="text-foreground">
-              {spread !== null ? `${(spread * 100).toFixed(1)}¢` : "—"}
+          <div
+            ref={spreadRef}
+            className="flex items-center justify-between border-y bg-muted/20 px-5 py-2 font-mono text-[11px] tabular-nums"
+          >
+            <span className="uppercase tracking-[0.2em] text-muted-foreground">
+              spread
             </span>
-          </span>
-        </div>
+            <span className="flex items-center gap-4">
+              {mid !== null ? (
+                <span className="text-muted-foreground">
+                  mid{" "}
+                  <span className="text-foreground">
+                    {(mid * 100).toFixed(1)}¢
+                  </span>
+                </span>
+              ) : null}
+              <span className="text-foreground">
+                {spread !== null ? `${(spread * 100).toFixed(1)}¢` : "—"}
+              </span>
+            </span>
+          </div>
 
-        {bids.length === 0 ? (
-          <p className="px-5 py-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            no bids
-          </p>
-        ) : (
-          bids.map((entry, i) => (
-            <Row
-              key={`bid-${entry.price}`}
-              entry={entry}
-              kind="bid"
-              total={bidTotals[i]!}
-              maxTotal={maxBidTotal}
-            />
-          ))
-        )}
+          {bids.length === 0 ? (
+            <p className="px-5 py-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              no bids
+            </p>
+          ) : (
+            bids.map((entry, i) => (
+              <Row
+                key={`bid-${entry.price}`}
+                entry={entry}
+                kind="bid"
+                total={bidTotals[i]!}
+                maxTotal={maxBidTotal}
+              />
+            ))
+          )}
+        </div>
       </div>
     </section>
   );
