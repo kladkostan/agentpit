@@ -97,6 +97,11 @@ if [ -z "$CTF" ] || [ "$CTF" = "null" ]; then
   echo "Error: ConditionalTokens deploy failed (no contractAddress)." >&2
   exit 1
 fi
+# cast returns a lowercase (non-EIP-55) address; checksum it so every address in
+# local.json is uniformly EIP-55, matching the forge-returned usd/faucet/exchange.
+# (web3.py rejects a non-checksummed address wherever deployment.ctf is used raw
+# as a call argument — e.g. allowance(_, deployment.ctf) in the onchain tests.)
+CTF="$(cast to-check-sum-address "$CTF")"
 echo "ConditionalTokens deployed: $CTF"
 
 # --- 2. Deploy AgentpitUSD + Faucet + CTFExchange via the forge script --------
