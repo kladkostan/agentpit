@@ -127,3 +127,40 @@ async def test_run_connection_subscribes_routes_pings_then_watchdog_stales():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+class ChattyWs:
+    """Hostile server: sprays PONG frames faster than ping_interval forever."""
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, msg):
+        self.sent.append(msg)
+
+    async def recv(self):
+        await asyncio.sleep(0.02)
+        return "PONG"
+
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): return False
+
+
+@pytest.mark.asyncio
+async def test_watchdog_trips_on_wall_clock_despite_chatty_garbage_frames():
+    ref = _ref()
+    st = MirrorState([ref])
+    st.handle_event({"event_type": "book", "asset_id": "PM-YES",
+                     "bids": [{"price": "0.4", "size": "1"}], "asks": []})
+    ws = ChattyWs()
+
+    task = asyncio.create_task(run_connection(
+        st, ["PM-YES"], connect=lambda url: ws,
+        ping_interval=0.05, watchdog_seconds=0.3, reconnect_delay=10.0))
+    await asyncio.sleep(0.7)
+    # No real EVENTS for 0.3s of wall-clock → watchdog must trip even though
+    # garbage frames keep every recv() from timing out.
+    assert st.replicas["PM-YES"].stale
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

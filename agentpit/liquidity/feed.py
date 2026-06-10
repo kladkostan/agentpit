@@ -106,17 +106,22 @@ def fetch_books_rest(
 ) -> list[dict]:
     """Batch REST seed via POST /books (rate limit 500 req/10s — fine).
     Returns raw book payloads (same shape as the WSS 'book' event)."""
-    cl = client or httpx.Client(headers=_HEADERS, timeout=15.0)
+    own = client is None
+    cl = client if client is not None else httpx.Client(headers=_HEADERS, timeout=15.0)
     out: list[dict] = []
-    for batch in shard(asset_ids, batch_size):
-        try:
-            resp = cl.post(CLOB_BOOKS_URL, json=[{"token_id": a} for a in batch])
-            resp.raise_for_status()
-            body = resp.json()
-        except Exception:
-            log.exception("REST /books seed failed for a batch of %d", len(batch))
-            continue
-        out.extend(b for b in body if isinstance(b, dict))
+    try:
+        for batch in shard(asset_ids, batch_size):
+            try:
+                resp = cl.post(CLOB_BOOKS_URL, json=[{"token_id": a} for a in batch])
+                resp.raise_for_status()
+                body = resp.json()
+            except Exception:
+                log.exception("REST /books seed failed for a batch of %d", len(batch))
+                continue
+            out.extend(b for b in body if isinstance(b, dict))
+    finally:
+        if own:
+            cl.close()
     return out
 
 
@@ -139,17 +144,20 @@ async def run_connection(
         try:
             async with connect(WSS_URL) as ws:
                 await ws.send(json.dumps({"assets_ids": asset_ids, "type": "market"}))
-                idle = 0.0
-                while idle < watchdog_seconds:
+                loop = asyncio.get_running_loop()
+                last_event = loop.time()
+                last_ping = loop.time()
+                while loop.time() - last_event < watchdog_seconds:
+                    if loop.time() - last_ping >= ping_interval:
+                        await ws.send("PING")
+                        last_ping = loop.time()
                     try:
                         raw = await asyncio.wait_for(ws.recv(), timeout=ping_interval)
                     except TimeoutError:
-                        idle += ping_interval
-                        await ws.send("PING")
                         continue
                     events = parse_events(raw)
                     if events:
-                        idle = 0.0
+                        last_event = loop.time()
                         for ev in events:
                             state.handle_event(ev)
                 log.warning(
