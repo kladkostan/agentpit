@@ -442,6 +442,42 @@ class TableRead:
         return [_row_to_market(row) for row in rows]
 
     @staticmethod
+    def list_live_order_levels(
+        db: psycopg.Connection, api_key: str, token_ids: list[str]
+    ) -> list[dict]:
+        """The mirror account's live orders on the given tokens — the
+        'current' side of the reconciler diff."""
+        if not token_ids:
+            return []
+        placeholders = ",".join("%s" for _ in token_ids)
+        return db.execute(
+            "SELECT ORDER_ID, TOKEN_ID, SIDE, PRICE, REMAINING_AMOUNT FROM orders "
+            f"WHERE API_KEY = %s AND STATUS = 'live' AND TOKEN_ID IN ({placeholders})",
+            [api_key, *token_ids],
+        ).fetchall()
+
+    @staticmethod
+    def foreign_touch(
+        db: psycopg.Connection, own_api_key: str, token_id: str
+    ) -> tuple[int | None, int | None]:
+        """(best_bid, best_ask) among OTHER owners' live orders on one token.
+        The reconciler uses this to budget placements that would cross a real
+        user's order (an intentional fill — spec §7)."""
+        rows = db.execute(
+            "SELECT SIDE, MAX(PRICE) AS MX, MIN(PRICE) AS MN FROM orders "
+            "WHERE TOKEN_ID = %s AND STATUS = 'live' AND API_KEY != %s "
+            "GROUP BY SIDE",
+            (token_id, own_api_key),
+        ).fetchall()
+        bid = ask = None
+        for r in rows:
+            if r["SIDE"] == "BUY":
+                bid = int(r["MX"])
+            elif r["SIDE"] == "SELL":
+                ask = int(r["MN"])
+        return bid, ask
+
+    @staticmethod
     def list_trades_for_api_key(
         db: psycopg.Connection,
         api_key: str,
