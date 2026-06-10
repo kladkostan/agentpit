@@ -42,6 +42,33 @@ export function deriveNoAsk(
   return yesBidPrice !== null ? 1 - yesBidPrice : null;
 }
 
+/** Cumulative notional ($) per level, accumulated from the touch (the price
+ *  nearest the spread) outward — this is the order book's TOTAL column, and
+ *  matches Polymarket's semantics. `levels` is in DISPLAY order (top→bottom).
+ *  For asks the touch is the LAST element (best/lowest ask sits next to the
+ *  spread), so totals grow upward; for bids the touch is the FIRST element
+ *  (best/highest bid), so totals grow downward. Returns totals aligned to
+ *  `levels` (totals[i] is the running sum through level i from the touch). */
+export function cumulativeTotals(
+  levels: OrderbookLevel[],
+  side: "ask" | "bid",
+): number[] {
+  const totals = new Array<number>(levels.length).fill(0);
+  let run = 0;
+  if (side === "ask") {
+    for (let i = levels.length - 1; i >= 0; i--) {
+      run += levels[i]!.price * levels[i]!.size;
+      totals[i] = run;
+    }
+  } else {
+    for (let i = 0; i < levels.length; i++) {
+      run += levels[i]!.price * levels[i]!.size;
+      totals[i] = run;
+    }
+  }
+  return totals;
+}
+
 /** Display shares from dollar amount at a price. Returns 0 for invalid inputs. */
 export function sharesFromDollars(amount: number, price: number): number {
   if (amount <= 0 || price <= 0) return 0;

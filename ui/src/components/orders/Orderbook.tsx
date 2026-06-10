@@ -2,6 +2,7 @@ import { useBook } from "@/api/orders";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
+  cumulativeTotals,
   levelsFrom,
   type OrderbookLevel,
 } from "@/components/orders/orderMath";
@@ -57,6 +58,10 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
     ...bids.map((e) => e.size),
   );
 
+  // TOTAL column: cumulative notional from the touch (spread) outward, per side.
+  const askTotals = cumulativeTotals(asks, "ask");
+  const bidTotals = cumulativeTotals(bids, "bid");
+
   const bestAskPrice = asks.length ? asks[asks.length - 1]!.price : null;
   const bestBidPrice = bids.length ? bids[0]!.price : null;
   const spread =
@@ -108,12 +113,13 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
             no asks
           </p>
         ) : (
-          asks.map((entry) => (
+          asks.map((entry, i) => (
             <Row
               key={`ask-${entry.price}`}
               entry={entry}
               kind="ask"
               maxSize={maxSize}
+              total={askTotals[i]!}
             />
           ))
         )}
@@ -142,12 +148,13 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
             no bids
           </p>
         ) : (
-          bids.map((entry) => (
+          bids.map((entry, i) => (
             <Row
               key={`bid-${entry.price}`}
               entry={entry}
               kind="bid"
               maxSize={maxSize}
+              total={bidTotals[i]!}
             />
           ))
         )}
@@ -160,15 +167,17 @@ function Row({
   entry,
   kind,
   maxSize,
+  total,
 }: {
   entry: OrderbookLevel;
   kind: "ask" | "bid";
   maxSize: number;
+  total: number;
 }) {
   const price = formatCents(entry.price);
   const size = formatSize(entry.size);
-  // price is dollars, size is display shares → total in dollars
-  const total = (entry.price * entry.size).toFixed(2);
+  // Cumulative notional ($) from the touch outward (computed per side above).
+  const totalLabel = total.toFixed(2);
   const depthPct = Math.min(100, (entry.size / maxSize) * 100);
   return (
     <div className="relative grid grid-cols-[1fr_1fr_1fr] px-5 py-1.5 font-mono text-[13px] tabular-nums">
@@ -194,7 +203,7 @@ function Row({
       </span>
       <span className="relative text-right">{size}</span>
       <span className="relative text-right text-muted-foreground">
-        ${total}
+        ${totalLabel}
       </span>
     </div>
   );

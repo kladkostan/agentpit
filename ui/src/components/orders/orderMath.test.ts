@@ -4,6 +4,7 @@ import {
   bestBid,
   computeMarketBuy,
   computeMarketSell,
+  cumulativeTotals,
   deriveNoAsk,
   dollarsFromShares,
   levelsFrom,
@@ -52,6 +53,39 @@ describe("deriveNoAsk", () => {
 
   it("returns null when neither side is known", () => {
     expect(deriveNoAsk([], [])).toBeNull();
+  });
+});
+
+describe("cumulativeTotals", () => {
+  // Numbers taken verbatim from a live Polymarket book (Spain @ 16%).
+  it("accumulates ask notional from the touch (bottom row) upward", () => {
+    // display order top→bottom; 16.3¢ (last) is the best ask at the spread.
+    const asks = [
+      { price: 0.165, size: 124315.47 },
+      { price: 0.164, size: 67344.34 },
+      { price: 0.163, size: 164674.77 },
+    ];
+    const totals = cumulativeTotals(asks, "ask");
+    expect(totals[2]).toBeCloseTo(26841.99, 1); // touch alone
+    expect(totals[1]).toBeCloseTo(37886.46, 1); // + 16.4¢
+    expect(totals[0]).toBeCloseTo(58398.51, 1); // + 16.5¢
+  });
+
+  it("accumulates bid notional from the touch (top row) downward", () => {
+    // display order top→bottom; 16.2¢ (first) is the best bid at the spread.
+    const bids = [
+      { price: 0.162, size: 514436.58 },
+      { price: 0.161, size: 180674.75 },
+      { price: 0.16, size: 873480.63 },
+    ];
+    const totals = cumulativeTotals(bids, "bid");
+    expect(totals[0]).toBeCloseTo(83338.73, 1); // touch alone
+    expect(totals[1]).toBeCloseTo(112427.36, 1); // + 16.1¢
+    expect(totals[2]).toBeCloseTo(252184.26, 1); // + 16.0¢
+  });
+
+  it("returns an empty array for an empty side", () => {
+    expect(cumulativeTotals([], "ask")).toEqual([]);
   });
 });
 
