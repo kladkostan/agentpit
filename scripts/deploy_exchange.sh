@@ -108,7 +108,7 @@ OUTPUT="$(cd "$CTF_EXCHANGE_DIR" && forge script ExchangeDeployment \
     -s "deployAgentpitStack(address,address,address,address,uint256)" \
     "$ADMIN" "$CTF" "$PROXY_FACTORY" "$SAFE_FACTORY" "$SIGNUP_GRANT_RAW")"
 
-RETURNS_JSON="$(echo "$OUTPUT" | grep -E '^\{' | jq -c 'select(.returns)' 2>/dev/null | head -n1)"
+RETURNS_JSON="$(echo "$OUTPUT" | grep -E '^\{' | jq -c 'select(.returns)' 2>/dev/null | head -n1 || true)"
 if [ -z "$RETURNS_JSON" ]; then
   echo "Failed to parse forge output." >&2
   echo "$OUTPUT" >&2
@@ -120,7 +120,7 @@ FAUCET="$(echo "$RETURNS_JSON" | jq -r '.returns.faucet.value')"
 EXCHANGE="$(echo "$RETURNS_JSON" | jq -r '.returns.exchange.value')"
 
 for var in USD FAUCET EXCHANGE; do
-  if [ -z "${!var}" ] || [ "${!var}" = "null" ]; then
+  if [ -z "${!var:-}" ] || [ "${!var:-}" = "null" ]; then
     echo "Failed to extract $var from forge output." >&2
     echo "$OUTPUT" >&2
     exit 1
