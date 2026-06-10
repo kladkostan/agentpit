@@ -15,6 +15,11 @@ _EMAIL = "house-bot-{i}@agentpit.local"
 _PASSWORD = "house-bot-fixed-secret-pw"  # house accounts never log in via HTTP
 
 
+def email_for(i: int) -> str:
+    """Deterministic house-account email; index 0 is the mirror account."""
+    return _EMAIL.format(i=i)
+
+
 class HouseAccountProvisioner:
     def __init__(self, db: DbSession, onchain: OnchainAdmin, settings: Settings):
         self._db = db
@@ -31,7 +36,7 @@ class HouseAccountProvisioner:
 
         users: list[User] = list(existing.values())
         for i in range(target):
-            email = _EMAIL.format(i=i)
+            email = email_for(i)
             if email in existing:
                 continue
             users.append(self._create_and_onboard(email))

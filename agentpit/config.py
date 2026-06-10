@@ -66,49 +66,43 @@ class Settings(BaseSettings):
         validation_alias="AGENTPIT_ADMIN_TOKEN",
     )
 
-    # Liquidity Engine
+    # Liquidity Engine (Phase 5c: Polymarket book mirror)
     liquidity_engine_enabled: bool = Field(
         default=False, validation_alias="LIQUIDITY_ENGINE"
     )
     liquidity_interval_seconds: float = Field(
         default=2.0, validation_alias="AGENTPIT_LIQUIDITY_INTERVAL_SECONDS"
     )
+    # ONE mirror account owns every mirror order (spec §6). >1 is unused but
+    # kept for provisioning flexibility.
     liquidity_house_account_count: int = Field(
-        default=100, validation_alias="AGENTPIT_LIQUIDITY_HOUSE_ACCOUNTS"
+        default=1, validation_alias="AGENTPIT_LIQUIDITY_HOUSE_ACCOUNTS"
     )
+    # 1 faucet drip = $1B apUSD. 4 drips cover splits + bids across all markets.
     liquidity_funding_drips: int = Field(
-        default=1, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
+        default=4, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
     )
-    liquidity_split_per_market_usdc: int = Field(
-        default=10_000, validation_alias="AGENTPIT_LIQUIDITY_SPLIT_PER_MARKET_USDC"
+    mirror_assets_per_connection: int = Field(
+        default=200, validation_alias="AGENTPIT_MIRROR_ASSETS_PER_CONNECTION"
     )
-    liquidity_makers_per_market: int = Field(
-        default=16, validation_alias="AGENTPIT_LIQUIDITY_MAKERS_PER_MARKET"
+    mirror_reconcile_min_interval_seconds: float = Field(
+        default=0.5, validation_alias="AGENTPIT_MIRROR_RECONCILE_MIN_INTERVAL_SECONDS"
     )
-    liquidity_ladder_rungs_per_side: int = Field(
-        default=8, validation_alias="AGENTPIT_LIQUIDITY_LADDER_RUNGS"
-    )
-    liquidity_wall_fraction: float = Field(
-        default=0.6, validation_alias="AGENTPIT_LIQUIDITY_WALL_FRACTION"
-    )
-    liquidity_requote_threshold_micro: int = Field(
-        default=2_000, validation_alias="AGENTPIT_LIQUIDITY_REQUOTE_THRESHOLD"
-    )
-    liquidity_taker_pool_size: int = Field(
-        default=8, validation_alias="AGENTPIT_LIQUIDITY_TAKER_POOL_SIZE"
-    )
-    liquidity_print_threshold_micro: int = Field(
-        default=5_000, validation_alias="AGENTPIT_LIQUIDITY_PRINT_THRESHOLD"
-    )
-    liquidity_print_size_shares: int = Field(
-        default=100, validation_alias="AGENTPIT_LIQUIDITY_PRINT_SIZE_SHARES"
-    )
-    liquidity_max_prints_per_tick: int = Field(
-        default=5, validation_alias="AGENTPIT_LIQUIDITY_MAX_PRINTS_PER_TICK"
+    mirror_watchdog_seconds: float = Field(
+        default=120.0, validation_alias="AGENTPIT_MIRROR_WATCHDOG_SECONDS"
     )
     mirror_inventory_buffer: float = Field(
         default=1.2, validation_alias="AGENTPIT_MIRROR_INVENTORY_BUFFER"
     )
+    mirror_max_splits_per_cycle: int = Field(
+        default=2, validation_alias="AGENTPIT_MIRROR_MAX_SPLITS_PER_CYCLE"
+    )
     mirror_max_settlements_per_cycle: int = Field(
         default=1, validation_alias="AGENTPIT_MIRROR_MAX_SETTLEMENTS_PER_CYCLE"
+    )
+    mirror_tape_enabled: bool = Field(
+        default=True, validation_alias="AGENTPIT_MIRROR_TAPE_ENABLED"
+    )
+    mirror_target_refresh_seconds: float = Field(
+        default=60.0, validation_alias="AGENTPIT_MIRROR_TARGET_REFRESH_SECONDS"
     )

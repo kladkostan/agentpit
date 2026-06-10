@@ -36,8 +36,8 @@ from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
-from agentpit.liquidity.engine import LiquidityEngine
-from agentpit.liquidity.house_accounts import HouseAccountProvisioner
+from agentpit.liquidity.house_accounts import HouseAccountProvisioner, email_for
+from agentpit.liquidity.mirror import MirrorEngine
 from agentpit.polymarket.polymarket_sync import fetch_and_sync_polymarket_markets
 from agentpit.services.event_service import EventService
 from agentpit.services.snapshot_service import SnapshotService
@@ -96,22 +96,6 @@ async def _snapshot_loop(
             raise
         except Exception:
             log.exception("Snapshot tick failed")
-        await asyncio.sleep(interval_seconds)
-
-
-def _run_liquidity_tick(engine: LiquidityEngine) -> dict:
-    return engine.tick()
-
-
-async def _liquidity_engine_loop(engine: LiquidityEngine, interval_seconds: float) -> None:
-    while True:
-        try:
-            stats = await asyncio.to_thread(_run_liquidity_tick, engine)
-            log.info("Liquidity tick: %s", stats)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("Liquidity tick failed")
         await asyncio.sleep(interval_seconds)
 
 
@@ -195,26 +179,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Snapshot loop disabled (set SNAPSHOT_ENABLED=true to enable)"
             )
 
-        engine_task: asyncio.Task | None = None
+        mirror_tasks: list[asyncio.Task] = []
         if settings.liquidity_engine_enabled:
-            log.info(
-                "Liquidity engine enabled (interval=%ss, accounts=%d)",
-                settings.liquidity_interval_seconds,
-                settings.liquidity_house_account_count,
-            )
+            log.info("Liquidity mirror enabled (reconcile interval=%ss)",
+                     settings.mirror_reconcile_min_interval_seconds)
             provisioner = HouseAccountProvisioner(db_session, onchain_admin, settings)
             house_users = await asyncio.to_thread(provisioner.ensure_provisioned)
-            engine = LiquidityEngine(db_session, onchain_admin, settings, house_users)
-            engine_task = asyncio.create_task(
-                _liquidity_engine_loop(engine, settings.liquidity_interval_seconds)
-            )
+            mirror_user = next(
+                (u for u in house_users if u.email == email_for(0)), house_users[0])
+            mirror = MirrorEngine(db_session, onchain_admin, settings, mirror_user)
+            mirror_tasks = [
+                asyncio.create_task(mirror.run_feed()),
+                asyncio.create_task(mirror.run_reconciler()),
+            ]
         else:
-            log.info("Liquidity engine disabled (set LIQUIDITY_ENGINE=true to enable)")
+            log.info("Liquidity mirror disabled (set LIQUIDITY_ENGINE=true to enable)")
 
         try:
             yield
         finally:
-            for task in (sync_task, snapshot_task, engine_task):
+            for task in (sync_task, snapshot_task, *mirror_tasks):
                 if task is None:
                     continue
                 task.cancel()

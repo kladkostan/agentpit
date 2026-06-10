@@ -1,20 +1,19 @@
-import os
 from agentpit.config import Settings
 
 
 def test_liquidity_defaults():
     s = Settings()
     assert s.liquidity_engine_enabled is False
-    assert s.liquidity_house_account_count == 100
-    assert s.liquidity_funding_drips == 1
-    assert s.liquidity_split_per_market_usdc == 10_000
-    assert s.liquidity_makers_per_market == 16
-    assert s.liquidity_ladder_rungs_per_side == 8
-    assert abs(s.liquidity_wall_fraction - 0.6) < 1e-9
-    assert s.liquidity_taker_pool_size == 8
-    assert s.liquidity_print_threshold_micro == 5_000
-    assert s.liquidity_print_size_shares == 100
-    assert s.liquidity_max_prints_per_tick == 5
+    assert s.liquidity_house_account_count == 1
+    assert s.liquidity_funding_drips == 4
+    assert s.mirror_assets_per_connection == 200
+    assert abs(s.mirror_reconcile_min_interval_seconds - 0.5) < 1e-9
+    assert abs(s.mirror_watchdog_seconds - 120.0) < 1e-9
+    assert abs(s.mirror_inventory_buffer - 1.2) < 1e-9
+    assert s.mirror_max_splits_per_cycle == 2
+    assert s.mirror_max_settlements_per_cycle == 1
+    assert s.mirror_tape_enabled is True
+    assert abs(s.mirror_target_refresh_seconds - 60.0) < 1e-9
 
 
 def test_liquidity_env_override(monkeypatch):
