@@ -106,3 +106,9 @@ class Settings(BaseSettings):
     liquidity_max_prints_per_tick: int = Field(
         default=5, validation_alias="AGENTPIT_LIQUIDITY_MAX_PRINTS_PER_TICK"
     )
+    mirror_inventory_buffer: float = Field(
+        default=1.2, validation_alias="AGENTPIT_MIRROR_INVENTORY_BUFFER"
+    )
+    mirror_max_settlements_per_cycle: int = Field(
+        default=1, validation_alias="AGENTPIT_MIRROR_MAX_SETTLEMENTS_PER_CYCLE"
+    )
