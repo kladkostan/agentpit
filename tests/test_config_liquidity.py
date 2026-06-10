@@ -10,7 +10,6 @@ def test_liquidity_defaults():
     assert abs(s.mirror_reconcile_min_interval_seconds - 0.5) < 1e-9
     assert abs(s.mirror_watchdog_seconds - 120.0) < 1e-9
     assert abs(s.mirror_inventory_buffer - 1.2) < 1e-9
-    assert s.mirror_max_splits_per_cycle == 2
     assert s.mirror_max_settlements_per_cycle == 1
     assert s.mirror_tape_enabled is True
     assert abs(s.mirror_target_refresh_seconds - 60.0) < 1e-9

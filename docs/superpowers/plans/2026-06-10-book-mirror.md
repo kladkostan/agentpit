@@ -1419,9 +1419,6 @@ Replace the whole `# Liquidity Engine` block (everything from `liquidity_engine_
     mirror_inventory_buffer: float = Field(
         default=1.2, validation_alias="AGENTPIT_MIRROR_INVENTORY_BUFFER"
     )
-    mirror_max_splits_per_cycle: int = Field(
-        default=2, validation_alias="AGENTPIT_MIRROR_MAX_SPLITS_PER_CYCLE"
-    )
     mirror_max_settlements_per_cycle: int = Field(
         default=1, validation_alias="AGENTPIT_MIRROR_MAX_SETTLEMENTS_PER_CYCLE"
     )

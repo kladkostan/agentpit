@@ -122,10 +122,11 @@ safety by ordering: **all cancels first, then all placements**, per market per c
 Polymarket's published book is never crossed (single matching engine), so the target
 state is always safe; the cancel-first rule covers the transitions.
 
-Residual guard (belt and braces): before each placement the reconciler compares against
-the current local house touch; a placement that would cross a *house* order is skipped
-and logged (self-heals next cycle). A placement that crosses a **non-house** order is
-intentional — see §7.
+The structural invariant (non-crossed snapshot ⇒ non-crossed desired levels per token
+and across the complement map, combined with cancels strictly before placements) makes
+a runtime house-touch guard redundant — it was not implemented. The foreign-touch check
+that IS implemented exists only to classify intentional bot-fill crossings (§7), not to
+prevent self-matching.
 
 ## 6. Architecture
 
@@ -195,16 +196,17 @@ SELL orders require on-chain CTF inventory (per-order `.call()` check). A split 
 YES and NO equally, and the NO ask side is the complement of the YES bid side, so the
 split target per market is `max(Σ YES-ask sizes, Σ NO-ask sizes) ×
 MIRROR_INVENTORY_BUFFER` (default 1.2) — one split top-up covers both books.
-Top-ups are admin txs behind `send_lock`: budget `MIRROR_MAX_SPLITS_PER_CYCLE` (default 2)
-per reconcile cycle. While inventory lags the target, ask levels are placed
-best-price-first until inventory runs out and the market is flagged "catching up" —
-the book converges over a few cycles. Real books hold millions of shares at extreme
-prices; the single mirror account is funded with `liquidity_funding_drips` faucet drips
-($1B each — raise the default to cover all markets' splits plus all bid-side notional),
-and per-market split sizing must use BIGINT-safe micro math (Phase-5a audit applies).
-Bid-side notional is small (walls sit at extreme prices), so USDC is never the binding
-constraint; if total split demand approaches the funded amount, the account takes
-another drip (one admin tx) before splitting.
+The reconciler performs at most one split per market per reconcile cycle; any shortfall
+converges over subsequent cycles as the dirty-market loop re-queues the market.
+Top-ups are admin txs behind `send_lock`. While inventory lags the target, ask levels
+are placed best-price-first until inventory runs out and the market is flagged "catching
+up" — the book converges over a few cycles. Real books hold millions of shares at
+extreme prices; the single mirror account is funded with `liquidity_funding_drips`
+faucet drips ($1B each — raise the default to cover all markets' splits plus all
+bid-side notional), and per-market split sizing must use BIGINT-safe micro math
+(Phase-5a audit applies). Bid-side notional is small (walls sit at extreme prices), so
+USDC is never the binding constraint; if total split demand approaches the funded
+amount, the account takes another drip (one admin tx) before splitting.
 
 ## 9. Tape mirror details
 
@@ -240,7 +242,6 @@ mirror_assets_per_connection:        int   = 200    # AGENTPIT_MIRROR_ASSETS_PER
 mirror_reconcile_min_interval_secs:  float = 0.5    # AGENTPIT_MIRROR_RECONCILE_MIN_INTERVAL_SECONDS
 mirror_watchdog_seconds:             float = 120.0  # AGENTPIT_MIRROR_WATCHDOG_SECONDS
 mirror_inventory_buffer:             float = 1.2    # AGENTPIT_MIRROR_INVENTORY_BUFFER
-mirror_max_splits_per_cycle:         int   = 2      # AGENTPIT_MIRROR_MAX_SPLITS_PER_CYCLE
 mirror_max_settlements_per_cycle:    int   = 1      # AGENTPIT_MIRROR_MAX_SETTLEMENTS_PER_CYCLE
 mirror_tape_enabled:                 bool  = True   # AGENTPIT_MIRROR_TAPE_ENABLED
 ```

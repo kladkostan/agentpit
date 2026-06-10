@@ -189,4 +189,8 @@ class MirrorEngine:
                         conn, condition_id=ref.condition_id,
                         local_token_id=ref.yes_token, price_micro=price,
                         size_micro=size, side=side, match_time_s=ts_s)
-            await asyncio.to_thread(_write)
+            try:
+                await asyncio.to_thread(_write)
+            except Exception:
+                log.exception("mirror tape write failed (market=%s) — dropping event",
+                              ref.market_id)
