@@ -17,7 +17,7 @@ const DEPTH = 8;
 // Price is already dollars in [0, 1] → convert to cents with 1 decimal.
 const formatCents = (dollars: number): string => (dollars * 100).toFixed(1);
 
-const formatSize = (shares: number): string => {
+const formatShares = (shares: number): string => {
   if (shares >= 1000) return `${(shares / 1000).toFixed(1)}k`;
   return shares.toFixed(2);
 };
@@ -52,15 +52,14 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
     .sort((a, b) => b.price - a.price)
     .slice(0, DEPTH);
 
-  const maxSize = Math.max(
-    1,
-    ...asks.map((e) => e.size),
-    ...bids.map((e) => e.size),
-  );
-
   // TOTAL column: cumulative notional from the touch (spread) outward, per side.
   const askTotals = cumulativeTotals(asks, "ask");
   const bidTotals = cumulativeTotals(bids, "bid");
+
+  // Depth bar scales with cumulative TOTAL (a depth chart), normalised per side
+  // so each side's outermost (deepest) level fills the bar.
+  const maxAskTotal = Math.max(1, ...askTotals);
+  const maxBidTotal = Math.max(1, ...bidTotals);
 
   const bestAskPrice = asks.length ? asks[asks.length - 1]!.price : null;
   const bestBidPrice = bids.length ? bids[0]!.price : null;
@@ -104,7 +103,7 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
       <div className="overflow-hidden rounded-2xl border bg-card">
         <div className="grid grid-cols-[1fr_1fr_1fr] border-b bg-muted/30 px-5 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           <span>Price</span>
-          <span className="text-right">Size</span>
+          <span className="text-right">Shares</span>
           <span className="text-right">Total</span>
         </div>
 
@@ -118,8 +117,8 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
               key={`ask-${entry.price}`}
               entry={entry}
               kind="ask"
-              maxSize={maxSize}
               total={askTotals[i]!}
+              maxTotal={maxAskTotal}
             />
           ))
         )}
@@ -153,8 +152,8 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
               key={`bid-${entry.price}`}
               entry={entry}
               kind="bid"
-              maxSize={maxSize}
               total={bidTotals[i]!}
+              maxTotal={maxBidTotal}
             />
           ))
         )}
@@ -166,19 +165,20 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
 function Row({
   entry,
   kind,
-  maxSize,
   total,
+  maxTotal,
 }: {
   entry: OrderbookLevel;
   kind: "ask" | "bid";
-  maxSize: number;
   total: number;
+  maxTotal: number;
 }) {
   const price = formatCents(entry.price);
-  const size = formatSize(entry.size);
+  const shares = formatShares(entry.size);
   // Cumulative notional ($) from the touch outward (computed per side above).
   const totalLabel = total.toFixed(2);
-  const depthPct = Math.min(100, (entry.size / maxSize) * 100);
+  // Depth bar scales with cumulative total, not the single-level size.
+  const depthPct = Math.min(100, (total / maxTotal) * 100);
   return (
     <div className="relative grid grid-cols-[1fr_1fr_1fr] px-5 py-1.5 font-mono text-[13px] tabular-nums">
       <span
@@ -201,7 +201,7 @@ function Row({
       >
         {price}¢
       </span>
-      <span className="relative text-right">{size}</span>
+      <span className="relative text-right">{shares}</span>
       <span className="relative text-right text-muted-foreground">
         ${totalLabel}
       </span>
