@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Deploy the agentpit local stack (AgentpitUSD + Faucet + CTFExchange) to the local forked node.
+# Deploy the full agentpit stack from scratch to the local clean node:
+#   ConditionalTokens (CTF) + AgentpitUSD + Faucet + CTFExchange.
 # Usage: ./scripts/deploy_exchange.sh
 #
-# Requires the node from run_node.sh to be running on RPC_URL.
-# Writes all resulting addresses to agentpit/deployments/local.json so the
-# Python side can load them.
+# Requires the node from run_node.sh running on RPC_URL. Nothing is inherited
+# from Polygon — the CTF is deployed here from a committed artifact. Writes all
+# resulting addresses to agentpit/deployments/local.json for the Python side.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTPIT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$AGENTPIT_DIR/.env"
-CTF_EXCHANGE_DIR="${CTF_EXCHANGE_DIR:-$AGENTPIT_DIR/../ctf-exchange}"
+CTF_EXCHANGE_DIR="${CTF_EXCHANGE_DIR:-$AGENTPIT_DIR/vendor/ctf-exchange}"
 
 # Faucet drip amount: 1,000,000,000 apUSD (6 decimals) = 1_000_000_000_000_000.
-# Deep grant so liquidity-engine house accounts get ample collateral in one drip.
 SIGNUP_GRANT_RAW="${SIGNUP_GRANT_RAW:-1000000000000000}"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -25,39 +25,81 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
-for var in PK ADMIN RPC_URL CTF PROXY_FACTORY SAFE_FACTORY; do
+# EOA-only signatures → the proxy/safe factories are never invoked. Force them
+# to 0x0 AFTER sourcing .env so any stale PROXY_FACTORY/SAFE_FACTORY left in the
+# env file cannot leak into the deploy or local.json.
+ZERO_ADDR="0x0000000000000000000000000000000000000000"
+PROXY_FACTORY="$ZERO_ADDR"
+SAFE_FACTORY="$ZERO_ADDR"
+
+for var in PK ADMIN RPC_URL; do
   if [ -z "${!var:-}" ]; then
     echo "Error: $var is not set in $ENV_FILE" >&2
     exit 1
   fi
 done
 
-if [ ! -d "$CTF_EXCHANGE_DIR" ]; then
-  echo "Error: ctf-exchange repo not found at $CTF_EXCHANGE_DIR" >&2
-  echo "Clone it as a sibling of agentpit, or set CTF_EXCHANGE_DIR." >&2
-  exit 1
+for bin in forge cast jq; do
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "Error: $bin not found." >&2
+    exit 1
+  fi
+done
+
+# --- Ensure the vendored contract submodule (+ its 4 libs) is checked out -----
+# Only auto-init when using the default vendored path; an overridden
+# CTF_EXCHANGE_DIR is the caller's responsibility.
+if [ "$CTF_EXCHANGE_DIR" = "$AGENTPIT_DIR/vendor/ctf-exchange" ]; then
+  if [ ! -f "$CTF_EXCHANGE_DIR/foundry.toml" ]; then
+    echo "Initializing vendor/ctf-exchange submodule..."
+    git -C "$AGENTPIT_DIR" submodule update --init vendor/ctf-exchange
+  fi
+  for lib in forge-std openzeppelin-contracts solmate solady; do
+    if [ -z "$(ls -A "$CTF_EXCHANGE_DIR/lib/$lib" 2>/dev/null)" ]; then
+      git -C "$CTF_EXCHANGE_DIR" submodule update --init "lib/$lib"
+    fi
+  done
 fi
 
-if ! command -v forge >/dev/null 2>&1; then
-  echo "Error: forge not found. Install Foundry: https://book.getfoundry.sh/getting-started/installation" >&2
+if [ ! -d "$CTF_EXCHANGE_DIR" ]; then
+  echo "Error: ctf-exchange not found at $CTF_EXCHANGE_DIR" >&2
   exit 1
 fi
 
 DEPLOYER="$(cast wallet address --private-key "$PK")"
 
-echo "Deploying agentpit stack to $RPC_URL"
+echo "Deploying agentpit stack from scratch to $RPC_URL"
 echo "  deployer:      $DEPLOYER"
 echo "  admin:         $ADMIN"
-echo "  ctf:           $CTF"
-echo "  proxy_factory: $PROXY_FACTORY"
-echo "  safe_factory:  $SAFE_FACTORY"
+echo "  proxy_factory: $PROXY_FACTORY (stub)"
+echo "  safe_factory:  $SAFE_FACTORY (stub)"
 echo "  signup grant:  $SIGNUP_GRANT_RAW raw apUSD"
 echo
 
-# Fund the deployer with 10,000 native MATIC on the local fork so it has gas.
-# 0x21E19E0C9BAB2400000 == 10_000 * 1e18.
+# Fund the deployer with 10,000 native (0x21E19E0C9BAB2400000 == 10_000 * 1e18).
 cast rpc anvil_setBalance "$DEPLOYER" 0x21E19E0C9BAB2400000 --rpc-url "$RPC_URL" >/dev/null
 
+# --- 1. Deploy ConditionalTokens from its committed creation bytecode ---------
+CTF_ARTIFACT="$CTF_EXCHANGE_DIR/artifacts/ConditionalTokens.json"
+CTF_BYTECODE="$(jq -r 'if (.bytecode | type) == "object" then .bytecode.object else .bytecode end' "$CTF_ARTIFACT")"
+if [ -z "$CTF_BYTECODE" ] || [ "$CTF_BYTECODE" = "null" ]; then
+  echo "Error: could not read bytecode from $CTF_ARTIFACT" >&2
+  exit 1
+fi
+
+CTF="$(cast send \
+  --private-key "$PK" \
+  --rpc-url "$RPC_URL" \
+  --json \
+  --create "$CTF_BYTECODE" | jq -r .contractAddress)"
+
+if [ -z "$CTF" ] || [ "$CTF" = "null" ]; then
+  echo "Error: ConditionalTokens deploy failed (no contractAddress)." >&2
+  exit 1
+fi
+echo "ConditionalTokens deployed: $CTF"
+
+# --- 2. Deploy AgentpitUSD + Faucet + CTFExchange via the forge script --------
 OUTPUT="$(cd "$CTF_EXCHANGE_DIR" && forge script ExchangeDeployment \
     --private-key "$PK" \
     --rpc-url "$RPC_URL" \
@@ -66,13 +108,9 @@ OUTPUT="$(cd "$CTF_EXCHANGE_DIR" && forge script ExchangeDeployment \
     -s "deployAgentpitStack(address,address,address,address,uint256)" \
     "$ADMIN" "$CTF" "$PROXY_FACTORY" "$SAFE_FACTORY" "$SIGNUP_GRANT_RAW")"
 
-# The script returns (address usd, address faucet, address exchange).
-# forge --json prints the returns map; pick fields by their declared names.
 RETURNS_JSON="$(echo "$OUTPUT" | grep -E '^\{' | jq -c 'select(.returns)' 2>/dev/null | head -n1)"
-
 if [ -z "$RETURNS_JSON" ]; then
   echo "Failed to parse forge output." >&2
-  echo "Raw output:" >&2
   echo "$OUTPUT" >&2
   exit 1
 fi
@@ -84,7 +122,6 @@ EXCHANGE="$(echo "$RETURNS_JSON" | jq -r '.returns.exchange.value')"
 for var in USD FAUCET EXCHANGE; do
   if [ -z "${!var}" ] || [ "${!var}" = "null" ]; then
     echo "Failed to extract $var from forge output." >&2
-    echo "Raw output:" >&2
     echo "$OUTPUT" >&2
     exit 1
   fi
