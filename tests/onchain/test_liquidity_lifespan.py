@@ -15,8 +15,13 @@ def test_mirror_disabled_by_default():
 
 
 def test_mirror_enabled_spawns_and_cancels_cleanly(monkeypatch):
-    # Stub the feed: a connection task that idles forever (no network).
+    import time
+    import uuid
+
+    calls = []
+
     async def fake_connection(state, assets, **kw):
+        calls.append(list(assets))
         await asyncio.Event().wait()
 
     monkeypatch.setattr(feed, "run_connection", fake_connection)
@@ -28,4 +33,22 @@ def test_mirror_enabled_spawns_and_cancels_cleanly(monkeypatch):
     with TestClient(app) as client:
         r = client.get("/markets")        # API serves while the mirror idles
         assert r.status_code == 200
+        # Give the engine a synced market; the 0.1s target refresh must pick it
+        # up and spawn a (stubbed) feed connection for its Polymarket asset.
+        m = client.post("/markets", json={
+            "question": f"LS {uuid.uuid4().hex[:6]}?", "description": "x",
+            "outcome_labels": ["YES", "NO"]}).json()
+        from agentpit.db.session import DbSession
+        db = DbSession(s.database_url)
+        with db.write() as conn:
+            conn.execute(
+                "UPDATE markets SET MARKET_STATE='ACTIVE', "
+                "POLYMARKET_CONDITION_ID=%s, POLYMARKET_YES_TOKEN_ID=%s "
+                "WHERE CONDITION_ID=%s",
+                ("0xpm-ls", "PM-LS", m["condition_id"]["value"]))
+        deadline = time.time() + 5.0
+        while time.time() < deadline and not calls:
+            time.sleep(0.05)
+        assert calls and calls[0] == ["PM-LS"], \
+            "target refresh must spawn a feed connection for the synced market"
     # Clean shutdown (no hang, no unraised CancelledError) is the assertion.

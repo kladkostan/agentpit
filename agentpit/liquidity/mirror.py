@@ -18,7 +18,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.liquidity import feed, tape
 from agentpit.liquidity.feed import MarketRef, MirrorState
 from agentpit.liquidity.reconciler import reconcile_market
-from agentpit.liquidity.replica import to_micro
+from agentpit.liquidity.replica import MICRO, to_micro
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.order_service import OrderService
 
@@ -52,36 +52,43 @@ class MirrorEngine:
         self._order = OrderService(db, onchain)
         self.state = MirrorState([])
         self._resubscribe = asyncio.Event()
+        self._pending_cancel: list[MarketRef] = []
 
     # ---- feed side -------------------------------------------------------
 
     async def run_feed(self) -> None:
         while True:
-            assets = list(self.state.replicas)
-            self._resubscribe.clear()
-            if not assets:
-                await self._wait_resubscribe(self._cfg.mirror_target_refresh_seconds)
-                continue
-            books = await asyncio.to_thread(feed.fetch_books_rest, assets)
-            for b in books:
-                self.state.handle_event({**b, "event_type": "book"})
-            conns = [
-                asyncio.create_task(feed.run_connection(
-                    self.state, shard_assets,
-                    watchdog_seconds=self._cfg.mirror_watchdog_seconds))
-                for shard_assets in feed.shard(
-                    assets, self._cfg.mirror_assets_per_connection)
-            ]
             try:
-                await self._resubscribe.wait()   # target set changed — rebuild
-            finally:
-                for t in conns:
-                    t.cancel()
-                for t in conns:
-                    try:
-                        await t
-                    except asyncio.CancelledError:
-                        pass
+                assets = list(self.state.replicas)
+                self._resubscribe.clear()
+                if not assets:
+                    await self._wait_resubscribe(self._cfg.mirror_target_refresh_seconds)
+                    continue
+                books = await asyncio.to_thread(feed.fetch_books_rest, assets)
+                for b in books:
+                    self.state.handle_event({**b, "event_type": "book"})
+                conns = [
+                    asyncio.create_task(feed.run_connection(
+                        self.state, shard_assets,
+                        watchdog_seconds=self._cfg.mirror_watchdog_seconds))
+                    for shard_assets in feed.shard(
+                        assets, self._cfg.mirror_assets_per_connection)
+                ]
+                try:
+                    await self._resubscribe.wait()   # target set changed — rebuild
+                finally:
+                    for t in conns:
+                        t.cancel()
+                    for t in conns:
+                        try:
+                            await t
+                        except asyncio.CancelledError:
+                            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("mirror feed cycle failed — retrying")
+                await asyncio.sleep(2.0)
 
     async def _wait_resubscribe(self, timeout: float) -> None:
         try:
@@ -135,20 +142,34 @@ class MirrorEngine:
     async def _refresh_targets(self) -> None:
         refs = await asyncio.to_thread(_load_refs, self._db)
         added, removed = self.state.set_targets(refs)
-        for ref in removed:    # resolution/cancel edge: pull our orders
-            log.info("market %s left the active set — cancelling mirror orders",
-                     ref.market_id)
-            await asyncio.to_thread(
-                self._order.cancel_market_orders, self._user,
-                ref.condition_id, None)
         if added or removed:
+            # Signal BEFORE any fallible work — a lost signal would leave new
+            # markets unsubscribed until the next unrelated target change.
             self._resubscribe.set()
+        self._pending_cancel.extend(removed)
+        if not self._pending_cancel:
+            return
+        still_pending: list[MarketRef] = []
+        for ref in self._pending_cancel:
+            try:
+                await asyncio.to_thread(
+                    self._order.cancel_market_orders, self._user,
+                    ref.condition_id, None)
+                log.info("market %s left the active set — mirror orders cancelled",
+                         ref.market_id)
+            except Exception:
+                log.exception("cancel for removed market %s failed — will retry",
+                              ref.market_id)
+                still_pending.append(ref)
+        self._pending_cancel = still_pending
 
     async def _drain_tape(self) -> None:
         if not self._cfg.mirror_tape_enabled:
             self.state.trades.clear()
             return
-        while self.state.trades:
+        for _ in range(200):
+            if not self.state.trades:
+                break
             ev = self.state.trades.popleft()
             ref = self.state.by_asset.get(ev.get("asset_id"))
             price = to_micro(ev.get("price"))
@@ -159,7 +180,8 @@ class MirrorEngine:
             except (TypeError, ValueError):
                 ts_s = 0
             if ref is None or price is None or size is None or size <= 0 \
-                    or side not in ("BUY", "SELL") or ts_s <= 0:
+                    or side not in ("BUY", "SELL") or ts_s <= 0 \
+                    or not (0 < price < MICRO):
                 continue
             def _write(ref=ref, price=price, size=size, side=side, ts_s=ts_s):
                 with self._db.write() as conn:
