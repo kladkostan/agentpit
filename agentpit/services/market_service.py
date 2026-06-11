@@ -11,6 +11,7 @@ from agentpit.datastructures.list_markets_response import ListMarketsResponse
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
 from agentpit.polymarket.gamma import to_gamma_market
+from agentpit.polymarket.pricing import prices_for_markets
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
@@ -76,10 +77,16 @@ class MarketService:
                 clob_token_ids=clob_token_ids,
                 polymarket_condition_id=polymarket_condition_id,
             )
-        return [to_gamma_market(m) for m in markets]
+            prices = prices_for_markets(conn, markets)
+        return [to_gamma_market(m, prices.get(m.market_id)) for m in markets]
 
     def get_market_gamma(self, market_id: int) -> GammaMarket:
-        return to_gamma_market(self.get_market(market_id))
+        with self._db.read() as conn:
+            market = TableRead.read_market(conn, market_id)
+            if market is None:
+                raise MarketNotFoundError(market_id)
+            prices = prices_for_markets(conn, [market])
+        return to_gamma_market(market, prices.get(market.market_id))
 
     def create_market(self, payload: CreateMarketRequest) -> Market:
         # Local creation runs on-chain prepareCondition + registerToken so that

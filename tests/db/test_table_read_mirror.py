@@ -19,6 +19,51 @@ def _insert_order(conn, *, api_key, token, side, price, remaining, status="live"
     )
 
 
+def _insert_trade(conn, *, asset, price, match_time, status="MATCHED"):
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, ASSET_ID, PRICE, MATCH_TIME, STATUS) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (uuid.uuid4().hex, asset, price, match_time, status),
+    )
+
+
+def test_book_tops_for_tokens_batches_best_bid_ask():
+    db = DbSession(Settings().database_url)
+    with db.write() as conn:
+        _insert_order(conn, api_key="m", token="A", side="BUY",
+                      price=140_000, remaining=5)
+        _insert_order(conn, api_key="m", token="A", side="BUY",
+                      price=130_000, remaining=5)   # lower bid
+        _insert_order(conn, api_key="m", token="A", side="SELL",
+                      price=150_000, remaining=5)
+        _insert_order(conn, api_key="m", token="A", side="SELL",
+                      price=160_000, remaining=5)   # higher ask
+        _insert_order(conn, api_key="m", token="A", side="SELL",
+                      price=145_000, remaining=5, status="cancelled")  # not live
+        _insert_order(conn, api_key="m", token="B", side="BUY",
+                      price=900_000, remaining=5)   # bids only
+    with db.read() as conn:
+        tops = TableRead.book_tops_for_tokens(conn, ["A", "B", "C"])
+        assert TableRead.book_tops_for_tokens(conn, []) == {}
+    assert tops["A"] == (140_000, 150_000)  # max live BUY, min live SELL
+    assert tops["B"] == (900_000, None)     # one-sided book
+    assert "C" not in tops                  # no orders -> absent
+
+
+def test_last_trade_prices_for_tokens_latest_non_failed():
+    db = DbSession(Settings().database_url)
+    with db.write() as conn:
+        _insert_trade(conn, asset="A", price=300_000, match_time=100)
+        _insert_trade(conn, asset="A", price=320_000, match_time=200)   # latest ok
+        _insert_trade(conn, asset="A", price=999_000, match_time=300,
+                      status="FAILED")                                  # ignored
+        _insert_trade(conn, asset="B", price=500_000, match_time=50)
+    with db.read() as conn:
+        lasts = TableRead.last_trade_prices_for_tokens(conn, ["A", "B", "C"])
+        assert TableRead.last_trade_prices_for_tokens(conn, []) == {}
+    assert lasts == {"A": 320_000, "B": 500_000}
+
+
 def test_list_live_order_levels_scopes_by_key_token_and_status():
     db = DbSession(Settings().database_url)
     with db.write() as conn:

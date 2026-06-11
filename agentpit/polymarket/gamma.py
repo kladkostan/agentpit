@@ -1,8 +1,9 @@
 """Serialize agentpit Market/Event domain objects into Gamma wire models.
 
-Price/volume fields emit neutral placeholders here; spec Phase 3/4 wires real
-book/trade-derived values (bestBid/bestAsk/lastTradePrice/spread/outcomePrices/
-volume/liquidity).
+Price fields (outcomePrices/bestBid/bestAsk/lastTradePrice/spread) are filled
+from a MarketPrices when the caller supplies one (derived from the local book +
+trade tape); without it they fall back to neutral placeholders (0.5 / 0.0).
+volume/liquidity remain placeholders pending their own wiring.
 """
 
 import json
@@ -12,6 +13,8 @@ from agentpit.datastructures.event import Event
 from agentpit.datastructures.gamma_market import GammaEvent, GammaMarket
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
+from agentpit.polymarket.format import price_to_decimal_str, price_to_float
+from agentpit.polymarket.pricing import MarketPrices
 
 _CLOSED_STATES = (MarketState.CLOSED, MarketState.RESOLVED, MarketState.CANCELLED)
 
@@ -31,7 +34,41 @@ def _json_arr(items: list[str]) -> str:
     return json.dumps(items, separators=(",", ":"))
 
 
-def to_gamma_market(market: Market) -> GammaMarket:
+def _price_fields(prices: "MarketPrices | None", labels: list[str]) -> dict:
+    """The price-derived GammaMarket fields. With no prices — or an outcome
+    count that doesn't match — fall back to neutral placeholders (0.5 / 0.0)."""
+    if prices is None or len(prices.outcome_prices) != len(labels):
+        return {
+            "outcomePrices": _json_arr(["0.5" for _ in labels]),
+            "bestBid": 0.0,
+            "bestAsk": 0.0,
+            "lastTradePrice": 0.0,
+            "spread": 0.0,
+        }
+    best_bid = price_to_float(prices.best_bid) if prices.best_bid is not None else 0.0
+    best_ask = price_to_float(prices.best_ask) if prices.best_ask is not None else 0.0
+    spread = (
+        round(best_ask - best_bid, 6)
+        if prices.best_bid is not None and prices.best_ask is not None
+        else 0.0
+    )
+    last_trade = (
+        price_to_float(prices.last_trade) if prices.last_trade is not None else 0.0
+    )
+    return {
+        "outcomePrices": _json_arr(
+            [price_to_decimal_str(p) for p in prices.outcome_prices]
+        ),
+        "bestBid": best_bid,
+        "bestAsk": best_ask,
+        "lastTradePrice": last_trade,
+        "spread": spread,
+    }
+
+
+def to_gamma_market(
+    market: Market, prices: "MarketPrices | None" = None
+) -> GammaMarket:
     labels = [label for _token_id, label in market.erc1155_tokens]
     token_ids = [token_id for token_id, _label in market.erc1155_tokens]
     active = market.market_state == MarketState.ACTIVE
@@ -45,7 +82,6 @@ def to_gamma_market(market: Market) -> GammaMarket:
         description=market.description,
         groupItemTitle=market.outcome_label,
         outcomes=_json_arr(labels),
-        outcomePrices=_json_arr(["0.5" for _ in labels]),
         clobTokenIds=_json_arr(token_ids),
         active=active,
         closed=closed,
@@ -57,14 +93,16 @@ def to_gamma_market(market: Market) -> GammaMarket:
         image=market.icon_url,
         volume="0",
         liquidity="0",
-        bestBid=0.0,
-        bestAsk=0.0,
-        lastTradePrice=0.0,
-        spread=0.0,
+        **_price_fields(prices, labels),
     )
 
 
-def to_gamma_event(event: Event, markets: list[Market]) -> GammaEvent:
+def to_gamma_event(
+    event: Event,
+    markets: list[Market],
+    prices_by_market: "dict[int, MarketPrices] | None" = None,
+) -> GammaEvent:
+    pbm = prices_by_market or {}
     return GammaEvent(
         id=str(event.event_id),
         slug=event.slug,
@@ -75,5 +113,5 @@ def to_gamma_event(event: Event, markets: list[Market]) -> GammaEvent:
         startDate=_iso(event.start_date),
         endDate=_iso(event.end_date),
         volume24hr=str(event.volume_24hr if event.volume_24hr is not None else 0),
-        markets=[to_gamma_market(m) for m in markets],
+        markets=[to_gamma_market(m, pbm.get(m.market_id)) for m in markets],
     )

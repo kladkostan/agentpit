@@ -450,6 +450,51 @@ class TableRead:
         return [_row_to_market(row) for row in rows]
 
     @staticmethod
+    def book_tops_for_tokens(
+        db: psycopg.Connection, token_ids: "list[str]"
+    ) -> "dict[str, tuple[int | None, int | None]]":
+        """Best bid / best ask (scaled price ints) per token from the live book.
+
+        One aggregate query over `orders` for every token in `token_ids`, so a
+        page of markets costs a single round-trip. Tokens with no resting orders
+        are absent from the result; a present token may still be None on a side
+        that has no orders.
+        """
+        if not token_ids:
+            return {}
+        rows = db.execute(
+            "SELECT TOKEN_ID, "
+            "MAX(PRICE) FILTER (WHERE SIDE = 'BUY')  AS BEST_BID, "
+            "MIN(PRICE) FILTER (WHERE SIDE = 'SELL') AS BEST_ASK "
+            "FROM orders WHERE STATUS = 'live' AND TOKEN_ID = ANY(%s) "
+            "GROUP BY TOKEN_ID",
+            (list(token_ids),),
+        ).fetchall()
+        out: "dict[str, tuple[int | None, int | None]]" = {}
+        for r in rows:
+            bid, ask = r["BEST_BID"], r["BEST_ASK"]
+            out[r["TOKEN_ID"]] = (
+                int(bid) if bid is not None else None,
+                int(ask) if ask is not None else None,
+            )
+        return out
+
+    @staticmethod
+    def last_trade_prices_for_tokens(
+        db: psycopg.Connection, token_ids: "list[str]"
+    ) -> "dict[str, int]":
+        """Most-recent non-failed trade price (scaled int) per token, batched."""
+        if not token_ids:
+            return {}
+        rows = db.execute(
+            "SELECT DISTINCT ON (ASSET_ID) ASSET_ID, PRICE FROM trades "
+            "WHERE STATUS != 'FAILED' AND ASSET_ID = ANY(%s) "
+            "ORDER BY ASSET_ID, MATCH_TIME DESC",
+            (list(token_ids),),
+        ).fetchall()
+        return {r["ASSET_ID"]: int(r["PRICE"]) for r in rows}
+
+    @staticmethod
     def list_unresolved_ended_markets(
         db: psycopg.Connection, now: int
     ) -> "list[Market]":

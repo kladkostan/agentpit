@@ -8,6 +8,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import EventNotFoundError, InvalidPaginationError
 from agentpit.polymarket.gamma import to_gamma_event
+from agentpit.polymarket.pricing import prices_for_markets
 
 
 class EventService:
@@ -39,7 +40,9 @@ class EventService:
             pairs, _total = TableRead.list_events_with_markets(
                 conn, limit=limit, offset=offset
             )
-        return [to_gamma_event(event, markets) for event, markets in pairs]
+            all_markets = [m for _event, markets in pairs for m in markets]
+            prices = prices_for_markets(conn, all_markets)
+        return [to_gamma_event(event, markets, prices) for event, markets in pairs]
 
     def get_event_gamma(self, slug: str) -> GammaEvent:
         with self._db.read() as conn:
@@ -47,7 +50,8 @@ class EventService:
             if event is None:
                 raise EventNotFoundError(slug)
             markets = TableRead.list_markets_by_event_id(conn, event.event_id)
-        return to_gamma_event(event, markets)
+            prices = prices_for_markets(conn, markets)
+        return to_gamma_event(event, markets, prices)
 
     def get_event_by_slug(self, slug: str) -> EventWithMarkets:
         with self._db.read() as conn:

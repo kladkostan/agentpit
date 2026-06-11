@@ -67,3 +67,49 @@ def test_to_gamma_event_nests_markets():
     assert g.slug == "weather"
     assert len(g.markets) == 1
     assert g.markets[0].conditionId == "0x" + "ab" * 32
+
+
+def test_to_gamma_market_uses_prices_when_given():
+    from agentpit.polymarket.pricing import PRICE_ONE, MarketPrices
+
+    prices = MarketPrices(
+        best_bid=140_000,
+        best_ask=150_000,
+        last_trade=145_000,
+        outcome_prices=[145_000, PRICE_ONE - 145_000],
+    )
+    g = to_gamma_market(_market(), prices)
+    assert g.outcomePrices == '["0.145","0.855"]'
+    assert g.bestBid == 0.14
+    assert g.bestAsk == 0.15
+    assert g.lastTradePrice == 0.145
+    assert g.spread == 0.01
+
+
+def test_to_gamma_market_placeholder_without_prices():
+    # No MarketPrices -> the neutral 0.5 / 0.0 fallback (unchanged behaviour).
+    g = to_gamma_market(_market())
+    assert g.outcomePrices == '["0.5","0.5"]'
+    assert g.bestBid == 0.0 and g.bestAsk == 0.0
+    assert g.lastTradePrice == 0.0 and g.spread == 0.0
+
+
+def test_to_gamma_event_threads_prices_by_market_id():
+    from agentpit.polymarket.pricing import PRICE_ONE, MarketPrices
+
+    m = _market()
+    prices = {
+        m.market_id: MarketPrices(
+            best_bid=600_000,
+            best_ask=620_000,
+            last_trade=None,
+            outcome_prices=[610_000, PRICE_ONE - 610_000],
+        )
+    }
+    g = to_gamma_event(
+        Event(event_id=3, slug="weather", title="Weather", description="d"),
+        [m],
+        prices,
+    )
+    assert g.markets[0].outcomePrices == '["0.61","0.39"]'
+    assert g.markets[0].bestBid == 0.6
