@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,30 @@ class Settings(BaseSettings):
     sync_interval_seconds: int = Field(
         default=60 * 60, validation_alias="AGENTPIT_SYNC_INTERVAL_SECONDS"
     )
+    # Trending sync (top-N by 24h volume) + decoupled resolution/redeem loop
+    sync_max_markets: int = Field(
+        default=300, validation_alias="SYNC_MAX_MARKETS"
+    )
+    sync_liquidity_min: float = Field(
+        default=0.0, validation_alias="SYNC_LIQUIDITY_MIN"
+    )
+    resolution_mirror_enabled: bool | None = Field(
+        default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
+    )
+    resolution_mirror_interval_seconds: int = Field(
+        default=300, validation_alias="RESOLUTION_MIRROR_INTERVAL_SECONDS"
+    )
+    auto_redeem_enabled: bool = Field(
+        default=True, validation_alias="AUTO_REDEEM_ENABLED"
+    )
+
+    @model_validator(mode="after")
+    def _default_resolution_mirror_enabled(self) -> "Settings":
+        # When RESOLUTION_MIRROR_ENABLED is unset, follow SYNC.
+        if self.resolution_mirror_enabled is None:
+            self.resolution_mirror_enabled = self.sync_enabled
+        return self
+
     snapshot_enabled: bool = Field(default=False, validation_alias="SNAPSHOT_ENABLED")
     snapshot_interval_seconds: int = Field(
         default=15 * 60, validation_alias="AGENTPIT_SNAPSHOT_INTERVAL_SECONDS"
