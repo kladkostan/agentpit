@@ -571,6 +571,15 @@ def create_polygon_market_if_does_not_exist(
         bind_existing_market_to_upstream_event(
             db, polymarket_id=request.polymarket_id, pm_market=pm_market
         )
+        # Backfill the upstream token-id cross-reference for markets synced
+        # before positional capture existed (Up/Down windows had null ids), so
+        # the book mirror can resolve them. No-op once populated.
+        TableWrite.update_market_polymarket_tokens(
+            db,
+            polymarket_id=request.polymarket_id,
+            yes_token_id=request.polymarket_yes_token_id,
+            no_token_id=request.polymarket_no_token_id,
+        )
         return None
 
     # New market: mirror onto the local CTF + Exchange so it's tradeable. This
@@ -789,12 +798,25 @@ def sync_market_state(db, condition_id: ConditionId) -> None:
     return None
 
 
+def _token_id_of(t: object) -> str | None:
+    """Pull a token id from a Polymarket tokens-list entry (snake or camel)."""
+    if not isinstance(t, dict):
+        return None
+    tid = t.get("token_id") or t.get("tokenId")
+    return str(tid) if tid is not None else None
+
+
 def _extract_yes_no_token_ids(pm_market: dict) -> tuple[str | None, str | None]:
     """Return (yes_token_id, no_token_id) from a Polymarket market's tokens list.
 
-    Polymarket binary markets list two tokens — one with outcome "Yes" and one
-    with outcome "No". We match case-insensitively. Returns (None, None) if
-    either side is missing or the market isn't binary.
+    Polymarket binary markets list two tokens. Yes/No markets are matched by
+    label (case-insensitive). For binary markets whose outcomes aren't literally
+    Yes/No (e.g. *Up/Down*), fall back to **positional** mapping — slot 0 is the
+    yes-side, slot 1 the no-side — which is the same index convention used by the
+    erc1155 token order and the resolution payout vector. This positional id is
+    what lets the book mirror resolve an upstream token for these markets
+    (the mirror skips any market with a null yes-token). Returns (None, None)
+    for non-binary markets.
     """
     tokens = pm_market.get("tokens") or []
     yes_id: str | None = None
@@ -802,14 +824,20 @@ def _extract_yes_no_token_ids(pm_market: dict) -> tuple[str | None, str | None]:
     for t in tokens:
         if not isinstance(t, dict):
             continue
-        tid = t.get("token_id") or t.get("tokenId")
+        tid = _token_id_of(t)
         outcome = (t.get("outcome") or t.get("label") or "").strip().lower()
         if tid is None:
             continue
         if outcome == "yes":
-            yes_id = str(tid)
+            yes_id = tid
         elif outcome == "no":
-            no_id = str(tid)
+            no_id = tid
+
+    if (yes_id is None or no_id is None) and len(tokens) == 2:
+        if yes_id is None:
+            yes_id = _token_id_of(tokens[0])
+        if no_id is None:
+            no_id = _token_id_of(tokens[1])
     return yes_id, no_id
 
 

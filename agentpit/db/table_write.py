@@ -220,6 +220,33 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_market_polymarket_tokens(
+        db: psycopg.Connection,
+        *,
+        polymarket_id: int,
+        yes_token_id: str | None,
+        no_token_id: str | None,
+    ) -> None:
+        """Backfill the upstream Polymarket token-id cross-reference on an
+        already-synced market (matched by polymarket_id).
+
+        COALESCE so a None never clobbers an existing id; no-op when both are
+        None. Lets the book mirror resolve markets synced before positional
+        token capture existed (e.g. Up/Down windows, whose yes/no ids were null).
+        """
+        if yes_token_id is None and no_token_id is None:
+            return
+        db.execute(
+            """
+            UPDATE markets
+            SET POLYMARKET_YES_TOKEN_ID = COALESCE(%s, POLYMARKET_YES_TOKEN_ID),
+                POLYMARKET_NO_TOKEN_ID  = COALESCE(%s, POLYMARKET_NO_TOKEN_ID)
+            WHERE POLYMARKET_ID = %s
+            """,
+            (yes_token_id, no_token_id, polymarket_id),
+        )
+
+    @staticmethod
     def attach_market_to_event(
         db: psycopg.Connection,
         *,
