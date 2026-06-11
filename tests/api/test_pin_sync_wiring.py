@@ -1,37 +1,54 @@
+from contextlib import contextmanager
+
 import agentpit.api.app as app_mod
 
 
-def test_run_pin_sync_calls_sync_inside_write(monkeypatch):
-    calls = {"n": 0, "conn": None, "pinned": None, "now": None}
+class _FakeDb:
+    """DbSession stub whose write()/read() both yield a sentinel connection."""
 
-    class FakeSettings:
-        pinned_series = [("btc-updown-5m", 300)]
+    def write(self):
+        @contextmanager
+        def _cm():
+            yield "CONN"
 
-    class FakeDb:
-        def write(self):
-            from contextlib import contextmanager
+        return _cm()
 
-            @contextmanager
-            def _cm():
-                yield "CONN"
+    def read(self):
+        @contextmanager
+        def _cm():
+            yield "CONN"
 
-            return _cm()
+        return _cm()
+
+
+class _FakeSettings:
+    pinned_series = [("btc-updown-5m", 300)]
+
+
+def test_run_pin_sync_syncs_then_returns_current_window_ids(monkeypatch):
+    calls = {"sync": 0, "ids": 0, "sync_conn": None, "ids_conn": None}
 
     def fake_sync(conn, admin, pinned, now):
-        calls["n"] += 1
-        calls["conn"] = conn
-        calls["pinned"] = pinned
-        calls["now"] = now
+        calls["sync"] += 1
+        calls["sync_conn"] = conn
+        assert pinned == [("btc-updown-5m", 300)]
+        assert isinstance(now, int)
         return ["m1", "m2", "m3"]
 
-    monkeypatch.setattr(app_mod, "sync_pinned_series", fake_sync)
+    def fake_ids(conn, pinned, now):
+        calls["ids"] += 1
+        calls["ids_conn"] = conn
+        return [10, 20]
 
-    count = app_mod._run_pin_sync(
-        FakeDb(), admin="ADMIN", settings=FakeSettings()  # type: ignore[arg-type]
+    monkeypatch.setattr(app_mod, "sync_pinned_series", fake_sync)
+    monkeypatch.setattr(app_mod, "current_window_market_ids", fake_ids)
+
+    ids = app_mod._run_pin_sync(
+        _FakeDb(), admin="ADMIN", settings=_FakeSettings()  # type: ignore[arg-type]
     )
 
-    assert count == 3
-    assert calls["n"] == 1
-    assert calls["conn"] == "CONN"
-    assert calls["pinned"] == [("btc-updown-5m", 300)]
-    assert isinstance(calls["now"], int)
+    # Returns the current-window ids (for the immediate fill), not a count.
+    assert ids == [10, 20]
+    assert calls["sync"] == 1 and calls["ids"] == 1
+    assert calls["sync_conn"] == "CONN"  # sync ran inside db.write()
+    assert calls["ids_conn"] == "CONN"  # lookup ran inside db.read()

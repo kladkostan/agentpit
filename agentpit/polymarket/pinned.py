@@ -14,6 +14,7 @@ import logging
 from py_clob_client.http_helpers.helpers import get
 
 from agentpit.datastructures.market import Market
+from agentpit.db.table_read import TableRead
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _normalize_market_fields,
@@ -156,3 +157,23 @@ def sync_pinned_series(
         except Exception:
             logger.exception("pin-sync: series %s failed", base)
     return created
+
+
+def current_window_market_ids(
+    conn, pinned: list[tuple[str, int]], now: int
+) -> list[int]:
+    """Market ids of each pinned series' CURRENT live window (whether created
+    this pass or pre-existing).
+
+    The window market's slug equals ``current_window_slug``, so look it up
+    directly. Used to fill liquidity onto the just-synced live window at once,
+    rather than waiting for the mirror's discovery loop to reach a market that
+    is only live for ~5 minutes.
+    """
+    ids: list[int] = []
+    for base, interval in pinned:
+        slug = current_window_slug(base, interval, now)
+        markets = TableRead.list_markets_filtered(conn, slug=slug, limit=1)
+        if markets:
+            ids.append(markets[0].market_id)
+    return ids

@@ -39,7 +39,11 @@ from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 from agentpit.liquidity.house_accounts import HouseAccountProvisioner, email_for
 from agentpit.liquidity.mirror import MirrorEngine
-from agentpit.polymarket.pinned import next_wake_delay, sync_pinned_series
+from agentpit.polymarket.pinned import (
+    current_window_market_ids,
+    next_wake_delay,
+    sync_pinned_series,
+)
 from agentpit.polymarket.polymarket_sync import (
     auto_redeem_resolved_markets,
     fetch_and_sync_polymarket_markets,
@@ -117,23 +121,35 @@ async def _resolution_mirror_loop(
         await asyncio.sleep(settings.resolution_mirror_interval_seconds)
 
 
-def _run_pin_sync(db: DbSession, admin: OnchainAdmin, settings: Settings) -> int:
+def _run_pin_sync(db: DbSession, admin: OnchainAdmin, settings: Settings) -> list[int]:
+    """Sync the current window of each pinned series; return the live-window
+    market ids (created or pre-existing) for an immediate liquidity fill."""
     now = int(time.time())
     with db.write() as conn:
-        created = sync_pinned_series(conn, admin, settings.pinned_series, now)
-    return len(created)
+        sync_pinned_series(conn, admin, settings.pinned_series, now)
+    with db.read() as conn:
+        return current_window_market_ids(conn, settings.pinned_series, now)
 
 
 async def _pin_sync_loop(
-    db: DbSession, admin: OnchainAdmin, settings: Settings
+    db: DbSession,
+    admin: OnchainAdmin,
+    settings: Settings,
+    mirror: "MirrorEngine | None",
 ) -> None:
     # Align to the smallest configured interval; wake `offset` seconds after
     # each boundary so the now-live window is synced promptly.
     align = min(interval for _, interval in settings.pinned_series)
     while True:
         try:
-            count = await asyncio.to_thread(_run_pin_sync, db, admin, settings)
-            log.info("Pin-sync: synced %d current window(s)", count)
+            ids = await asyncio.to_thread(_run_pin_sync, db, admin, settings)
+            log.info("Pin-sync: %d current window(s)", len(ids))
+            # Couple sync -> fill: a rotating window is live only ~5 min, far
+            # too short for the mirror's discovery loop, so fill it immediately
+            # (off-thread, so the API stays responsive).
+            if mirror is not None and ids:
+                placed = await mirror.fill_markets(ids)
+                log.info("Pin-sync: filled %d order(s) on current windows", placed)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -245,6 +261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
         mirror_tasks: list[asyncio.Task] = []
+        mirror_engine: MirrorEngine | None = None
         if settings.liquidity_engine_enabled:
             log.info("Liquidity mirror enabled (reconcile interval=%ss)",
                      settings.mirror_reconcile_min_interval_seconds)
@@ -252,10 +269,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             house_users = await asyncio.to_thread(provisioner.ensure_provisioned)
             mirror_user = next(
                 (u for u in house_users if u.email == email_for(0)), house_users[0])
-            mirror = MirrorEngine(db_session, onchain_admin, settings, mirror_user)
+            mirror_engine = MirrorEngine(
+                db_session, onchain_admin, settings, mirror_user)
             mirror_tasks = [
-                asyncio.create_task(mirror.run_feed()),
-                asyncio.create_task(mirror.run_reconciler()),
+                asyncio.create_task(mirror_engine.run_feed()),
+                asyncio.create_task(mirror_engine.run_reconciler()),
             ]
         else:
             log.info("Liquidity mirror disabled (set LIQUIDITY_ENGINE=true to enable)")
@@ -286,7 +304,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings.pin_sync_offset_seconds,
             )
             pin_task = asyncio.create_task(
-                _pin_sync_loop(db_session, onchain_admin, settings)
+                _pin_sync_loop(db_session, onchain_admin, settings, mirror_engine)
             )
         else:
             log.info(

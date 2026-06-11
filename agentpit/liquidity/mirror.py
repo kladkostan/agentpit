@@ -18,28 +18,31 @@ from agentpit.db.table_read import TableRead
 from agentpit.liquidity import feed, tape
 from agentpit.liquidity.feed import MarketRef, MirrorState
 from agentpit.liquidity.reconciler import reconcile_market
-from agentpit.liquidity.replica import MICRO, to_micro
+from agentpit.liquidity.replica import MICRO, BookReplica, to_micro
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.order_service import OrderService
 
 log = logging.getLogger(__name__)
 
 
+def _ref_of(m) -> "MarketRef | None":
+    """Build a MarketRef from a Market, or None if it can't be mirrored (no
+    upstream token, or not binary)."""
+    if m is None or not m.polymarket_yes_token_id or len(m.erc1155_tokens) < 2:
+        return None
+    return MarketRef(
+        market_id=m.market_id,
+        condition_id=m.condition_id.value,
+        yes_token=m.erc1155_tokens[0][0],
+        no_token=m.erc1155_tokens[1][0],
+        pm_yes_token=m.polymarket_yes_token_id,
+    )
+
+
 def _load_refs(db: DbSession) -> list[MarketRef]:
     with db.read() as conn:
         markets = TableRead.list_active_synced_markets(conn)
-    refs = []
-    for m in markets:
-        if not m.polymarket_yes_token_id or len(m.erc1155_tokens) < 2:
-            continue
-        refs.append(MarketRef(
-            market_id=m.market_id,
-            condition_id=m.condition_id.value,
-            yes_token=m.erc1155_tokens[0][0],
-            no_token=m.erc1155_tokens[1][0],
-            pm_yes_token=m.polymarket_yes_token_id,
-        ))
-    return refs
+    return [r for r in (_ref_of(m) for m in markets) if r is not None]
 
 
 class MirrorEngine:
@@ -64,9 +67,7 @@ class MirrorEngine:
                 if not assets:
                     await self._wait_resubscribe(self._cfg.mirror_target_refresh_seconds)
                     continue
-                books = await asyncio.to_thread(feed.fetch_books_rest, assets)
-                for b in books:
-                    self.state.handle_event({**b, "event_type": "book"})
+                await self._seed_books(assets)
                 conns = [
                     asyncio.create_task(feed.run_connection(
                         self.state, shard_assets,
@@ -89,6 +90,68 @@ class MirrorEngine:
             except Exception:
                 log.exception("mirror feed cycle failed — retrying")
                 await asyncio.sleep(2.0)
+
+    async def _seed_books(self, assets: list[str]) -> None:
+        """REST-seed book snapshots for `assets` into the shared feed state,
+        marking each fresh book dirty for the reconciler. Used for the initial
+        seed on every (re)subscribe."""
+        if not assets:
+            return
+        books = await asyncio.to_thread(feed.fetch_books_rest, assets)
+        for b in books:
+            self.state.handle_event({**b, "event_type": "book"})
+
+    async def fill_markets(self, market_ids: list[int]) -> int:
+        """Immediately seed + reconcile the given markets (off-thread), so a
+        freshly-synced market is liquid at once instead of waiting for the
+        discovery loop to reach it.
+
+        Couples market sync to the liquidity fill — what makes fast-rotating
+        windows (live for only ~5 min) tradeable the moment they sync. Runs
+        entirely in one worker thread (DB read, REST book fetch, order
+        placement), so the event loop / API stay responsive. Self-contained:
+        builds its own replicas/snapshots and does not touch the live feed
+        state, which independently maintains the markets thereafter. Returns the
+        number of orders placed.
+        """
+        if not market_ids:
+            return 0
+
+        def _work() -> int:
+            with self._db.read() as conn:
+                refs = [
+                    ref
+                    for ref in (
+                        _ref_of(TableRead.read_market(conn, mid))
+                        for mid in market_ids
+                    )
+                    if ref is not None
+                ]
+            if not refs:
+                return 0
+            by_asset = {
+                b.get("asset_id"): b
+                for b in feed.fetch_books_rest([r.pm_yes_token for r in refs])
+            }
+            placed = 0
+            for ref in refs:
+                book = by_asset.get(ref.pm_yes_token)
+                if book is None:
+                    continue  # upstream window not (yet) tradeable — nothing to mirror
+                rep = BookReplica(ref.pm_yes_token)
+                rep.apply_book({**book, "event_type": "book"})
+                snap = rep.snapshot()
+                if snap is None:
+                    continue
+                stats = reconcile_market(
+                    self._db, self._order, self._onchain, self._user, ref, snap,
+                    self._cfg)
+                placed += stats["placed"]
+                if stats["placed"] or stats["cancelled"]:
+                    log.info("fill market %s: %s", ref.market_id, stats)
+            return placed
+
+        return await asyncio.to_thread(_work)
 
     async def _wait_resubscribe(self, timeout: float) -> None:
         try:

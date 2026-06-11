@@ -97,3 +97,102 @@ async def test_drain_tape_validates_price_range_and_caps(monkeypatch):
     await eng._drain_tape()
     assert len(written) == 1 + 200, "drain capped at 200/cycle"
     assert len(eng.state.trades) == 50, "remainder stays queued for next cycle"
+
+
+# ---- _ref_of + fill_markets (sync->fill coupling) -------------------------
+
+
+class _Cond:
+    value = "0xcond7"
+
+
+def test_ref_of_filters_and_builds():
+    from agentpit.liquidity.mirror import _ref_of
+
+    assert _ref_of(None) is None
+
+    class _NoToken:
+        polymarket_yes_token_id = None
+        erc1155_tokens = [("y", "Up"), ("n", "Down")]
+
+    assert _ref_of(_NoToken()) is None  # no upstream token -> not mirrorable
+
+    class _NotBinary:
+        polymarket_yes_token_id = "PM"
+        erc1155_tokens = [("y", "Up")]
+
+    assert _ref_of(_NotBinary()) is None
+
+    class _Ok:
+        market_id = 7
+        polymarket_yes_token_id = "PM7"
+        erc1155_tokens = [("y7", "Up"), ("n7", "Down")]
+        condition_id = _Cond()
+
+    r = _ref_of(_Ok())
+    assert (r.market_id, r.pm_yes_token, r.yes_token, r.no_token, r.condition_id) == (
+        7,
+        "PM7",
+        "y7",
+        "n7",
+        "0xcond7",
+    )
+
+
+class _ReadDb:
+    def read(self):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _cm():
+            yield "CONN"
+
+        return _cm()
+
+
+async def test_fill_markets_empty_is_noop():
+    eng = MirrorEngine.__new__(MirrorEngine)
+    assert await eng.fill_markets([]) == 0
+
+
+async def test_fill_markets_seeds_then_reconciles(monkeypatch):
+    eng = MirrorEngine.__new__(MirrorEngine)
+    eng._db = _ReadDb()
+    eng._order = object()
+    eng._onchain = object()
+    eng._user = object()
+    eng._cfg = object()
+
+    ref = _ref(7, "PM7")
+    monkeypatch.setattr(mirror, "_ref_of", lambda m: ref)
+    monkeypatch.setattr(mirror.TableRead, "read_market", lambda conn, mid: "MARKET")
+    monkeypatch.setattr(
+        mirror.feed,
+        "fetch_books_rest",
+        lambda assets: [{"asset_id": "PM7", "bids": [], "asks": []}],
+    )
+
+    class _Rep:
+        def __init__(self, asset):
+            pass
+
+        def apply_book(self, ev):
+            return True
+
+        def snapshot(self):
+            return "SNAP"
+
+    monkeypatch.setattr(mirror, "BookReplica", _Rep)
+
+    seen = {}
+
+    def fake_reconcile(db, order, onchain, user, r, snap, cfg):
+        seen["ref"] = r
+        seen["snap"] = snap
+        return {"placed": 5, "cancelled": 0}
+
+    monkeypatch.setattr(mirror, "reconcile_market", fake_reconcile)
+
+    placed = await eng.fill_markets([7])
+    assert placed == 5
+    assert seen["ref"] is ref and seen["snap"] == "SNAP"

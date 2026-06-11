@@ -7,8 +7,40 @@ import secrets
 import agentpit.polymarket.pinned as pinned
 import agentpit.polymarket.polymarket_sync as sync
 from agentpit.datastructures.condition_id import ConditionId
+from agentpit.datastructures.create_market_request import CreateMarketRequest
+from agentpit.datastructures.market_state import MarketState
 from agentpit.db.table_read import TableRead
+from agentpit.db.table_write import TableWrite
+from agentpit.polymarket.pinned import (
+    current_window_market_ids,
+    current_window_slug,
+)
 from tests.db_helpers import fresh_test_conn
+
+
+def test_current_window_market_ids_finds_live_window():
+    """The just-synced live window's market id is returned (matched by slug),
+    so the pin loop can fill liquidity onto it immediately; a series with no
+    synced window contributes nothing."""
+    conn = fresh_test_conn()
+    now = 1781193601
+    slug = current_window_slug("btc-updown-5m", 300, now)  # btc-updown-5m-1781193600
+    req = CreateMarketRequest(
+        question="BTC Up or Down window",
+        description="d",
+        erc1155_tokens=[("u", "Up"), ("d", "Down")],
+        slug=slug,
+        condition_id=ConditionId("0x" + secrets.token_hex(32)),
+        state=MarketState.ACTIVE,
+    )
+    market = TableWrite.create_market(conn, req, is_polygon_market=False)
+
+    assert current_window_market_ids(conn, [("btc-updown-5m", 300)], now) == [
+        market.market_id
+    ]
+    # A pinned series with no synced current window yields nothing.
+    assert current_window_market_ids(conn, [("eth-updown-5m", 300)], now) == []
+    conn.close()
 
 
 def _window_event(window_ts: int) -> dict:
