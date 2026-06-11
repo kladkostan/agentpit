@@ -53,7 +53,13 @@ class OrderService:
 
     # --- public API -----------------------------------------------------
 
-    def place_order(self, user: User, payload: PlaceOrderRequest) -> OrderResponse:
+    def place_order(
+        self,
+        user: User,
+        payload: PlaceOrderRequest,
+        *,
+        balance_hint: int | None = None,
+    ) -> OrderResponse:
         token_id_int, _token_id_str = self._resolve_token(payload)
         size_micro = decimal_str_to_size_micro(str(payload.size))
         maker_amount, taker_amount = self._amounts_from_price_size(
@@ -61,7 +67,13 @@ class OrderService:
         )
 
         # Pre-flight balance check — reject obvious losers before signing.
-        self._check_balance(user.eth_address, payload.side, maker_amount, token_id_int)
+        # `balance_hint` lets a batch caller (the mirror) supply the relevant
+        # balance it already read this cycle, so we skip the on-chain read —
+        # the dominant per-order cost when replicating a deep book.
+        self._check_balance(
+            user.eth_address, payload.side, maker_amount, token_id_int,
+            balance_hint=balance_hint,
+        )
 
         order = OrderData(
             salt=secrets.randbits(256),
@@ -449,14 +461,32 @@ class OrderService:
         return int(size), collateral_int
 
     def _check_balance(
-        self, eth_address: str, side: str, maker_amount: int, token_id_int: int
+        self,
+        eth_address: str,
+        side: str,
+        maker_amount: int,
+        token_id_int: int,
+        *,
+        balance_hint: int | None = None,
     ) -> None:
+        # `balance_hint`, when given, is a same-cycle cached balance for this
+        # side/token; used instead of an on-chain read (the per-order read is
+        # the bottleneck when the mirror replicates a deep book — resting
+        # orders never move the balance, so one read per cycle is exact).
         if side == "BUY":
-            bal = self._onchain.usd_balance(eth_address)
+            bal = (
+                balance_hint
+                if balance_hint is not None
+                else self._onchain.usd_balance(eth_address)
+            )
             if bal < maker_amount:
                 raise InsufficientBalanceError(f"need {maker_amount} apUSD, have {bal}")
         else:
-            bal = self._onchain.ctf_balance(eth_address, token_id_int)
+            bal = (
+                balance_hint
+                if balance_hint is not None
+                else self._onchain.ctf_balance(eth_address, token_id_int)
+            )
             if bal < maker_amount:
                 raise InsufficientBalanceError(
                     f"need {maker_amount} outcome tokens, have {bal}"

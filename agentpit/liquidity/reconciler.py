@@ -180,6 +180,11 @@ def reconcile_market(
         ref.yes_token: onchain.ctf_balance(user.eth_address, int(ref.yes_token)),
         ref.no_token: onchain.ctf_balance(user.eth_address, int(ref.no_token)),
     }
+    # Cache this cycle's house balances for the placement loop below: calm
+    # (resting) placements never move them, so one read per balance replaces one
+    # on-chain read per order — the dominant cost when replicating a deep book.
+    raw_ctf = dict(inventory)
+    house_usd = onchain.usd_balance(user.eth_address)
     # KEPT resting SELLs already reserve inventory; only the surplus may back
     # new asks (negative remainder ⇒ the cap places nothing for that token).
     cancel_set = set(cancels)
@@ -205,13 +210,19 @@ def reconcile_market(
 
     def _try_place(p: Placement, *, expect_fill: bool) -> None:
         nonlocal placed, fills, failed
+        # Calm placements don't settle this cycle, so the cached balances are
+        # exact; a hot placement may settle and shift balances, so pass no hint
+        # (None) and let place_order re-read fresh.
+        hint = None if expect_fill else (
+            house_usd if p.side == "BUY" else raw_ctf.get(p.token_id)
+        )
         try:
             resp = order.place_order(user, PlaceOrderRequest(
                 token_id=p.token_id, side=p.side,
                 price=Decimal(p.price_micro) / MICRO,
                 size=Decimal(p.size_micro) / MICRO,
                 order_type="GTC",
-            ))
+            ), balance_hint=hint)
         except Exception:
             log.warning("mirror placement raised (market=%s %s@%s)",
                         ref.market_id, p.side, p.price_micro, exc_info=True)
