@@ -112,3 +112,93 @@ def test_fetch_event_by_slug_returns_first(monkeypatch):
 def test_fetch_event_by_slug_none_on_empty(monkeypatch):
     monkeypatch.setattr(pinned, "get", lambda url: [])
     assert fetch_event_by_slug("s") is None
+
+
+# ----- sync_pinned_series (unit, monkeypatched) -------------------------------
+
+def _fake_window_event(window_ts: int, *, pmid: int, cond: str) -> dict:
+    """A window event shaped like live Gamma: market carries clobTokenIds (not
+    `tokens`) and no `events`; the event carries a `series`."""
+    return {
+        "id": f"win-{window_ts}",
+        "slug": f"btc-updown-5m-{window_ts}",
+        "title": f"Bitcoin Up or Down - window {window_ts}",
+        "series": [
+            {
+                "id": "10684",
+                "slug": "btc-up-or-down-5m",
+                "title": "BTC Up or Down 5m",
+            }
+        ],
+        "markets": [
+            {
+                "id": pmid,
+                "conditionId": cond,
+                "question": f"Bitcoin Up or Down - window {window_ts}",
+                "description": "d",
+                "slug": f"btc-updown-5m-{window_ts}",
+                "active": True,
+                "closed": False,
+                "startDate": "2026-06-11T16:00:00Z",
+                "endDate": "2026-06-11T16:05:00Z",
+                "clobTokenIds": '["111","222"]',
+                "outcomes": '["Up","Down"]',
+            }
+        ],
+    }
+
+
+def test_sync_pinned_series_injects_series_and_normalizes_tokens(monkeypatch):
+    captured = {}
+
+    def fake_fetch(slug):
+        return _fake_window_event(1781193600, pmid=42, cond="0x" + "ab" * 32)
+
+    def fake_create(conn, prepared, admin):
+        captured["prepared"] = prepared
+        return [f"market-{i}" for i in range(len(prepared))]
+
+    monkeypatch.setattr(pinned, "fetch_event_by_slug", fake_fetch)
+    monkeypatch.setattr(pinned, "create_polymarket_markets_if_needed", fake_create)
+
+    created = pinned.sync_pinned_series(
+        conn="CONN", admin="ADMIN", pinned=[("btc-updown-5m", 300)], now=1781193601
+    )
+
+    assert created == ["market-0"]
+    prepared = captured["prepared"]
+    assert len(prepared) == 1
+    # Series grouping injected (id 10684 — NOT the per-window win-... id).
+    assert prepared[0]["events"][0]["id"] == "10684"
+    # clobTokenIds normalized into a tokens list.
+    assert [t["token_id"] for t in prepared[0]["tokens"]] == ["111", "222"]
+    assert [t["outcome"] for t in prepared[0]["tokens"]] == ["Up", "Down"]
+
+
+def test_sync_pinned_series_skips_missing_event(monkeypatch):
+    monkeypatch.setattr(pinned, "fetch_event_by_slug", lambda slug: None)
+    spy = {"n": 0}
+    monkeypatch.setattr(
+        pinned,
+        "create_polymarket_markets_if_needed",
+        lambda *a, **k: spy.__setitem__("n", spy["n"] + 1) or [],
+    )
+    out = pinned.sync_pinned_series("CONN", "ADMIN", [("btc-updown-5m", 300)], 1)
+    assert out == []
+    assert spy["n"] == 0  # never reached creation
+
+
+def test_sync_pinned_series_isolates_failing_series(monkeypatch):
+    def fake_fetch(slug):
+        if slug.startswith("bad"):
+            raise RuntimeError("boom")
+        return _fake_window_event(1781193600, pmid=7, cond="0x" + "cd" * 32)
+
+    monkeypatch.setattr(pinned, "fetch_event_by_slug", fake_fetch)
+    monkeypatch.setattr(
+        pinned, "create_polymarket_markets_if_needed", lambda c, p, a: ["ok"]
+    )
+    out = pinned.sync_pinned_series(
+        "CONN", "ADMIN", [("bad-series", 300), ("btc-updown-5m", 300)], 1781193601
+    )
+    assert out == ["ok"]  # bad series swallowed, good one still synced

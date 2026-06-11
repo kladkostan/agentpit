@@ -105,3 +105,48 @@ def series_event_metadata(event: dict) -> dict | None:
     if not isinstance(series, list) or not series or not isinstance(series[0], dict):
         return None
     return _event_entry(series[0])
+
+
+def sync_pinned_series(
+    conn,
+    admin,
+    pinned: list[tuple[str, int]],
+    now: int,
+) -> list[Market]:
+    """Force-sync the current live window of each pinned series.
+
+    For each ``(base, interval)``: resolve the current window slug, fetch its
+    event, normalize the window market(s) (build ``tokens`` from ``clobTokenIds``),
+    inject the SERIES event metadata so all windows group under one agentpit event,
+    then reuse ``create_polymarket_markets_if_needed`` (on-chain prepare + dedup +
+    event binding). Per-series try/except so one bad series never blocks the rest.
+    """
+    created: list[Market] = []
+    for base, interval in pinned:
+        try:
+            slug = current_window_slug(base, interval, now)
+            event = fetch_event_by_slug(slug)
+            if event is None:
+                logger.info("pin-sync: no event for slug %s (skip)", slug)
+                continue
+            raw_markets = event.get("markets") or []
+            if not raw_markets:
+                logger.info("pin-sync: event %s has no markets (skip)", slug)
+                continue
+            # Series entry groups windows under one card; fall back to the
+            # per-window event entry if the series is absent.
+            group = series_event_metadata(event) or _event_entry(event)
+            if group is None:
+                logger.warning("pin-sync: event %s has no bindable metadata", slug)
+            prepared: list[dict] = []
+            for raw in raw_markets:
+                market = _normalize_market_fields(dict(raw))
+                if group is not None:
+                    market["events"] = [group]
+                prepared.append(market)
+            created.extend(
+                create_polymarket_markets_if_needed(conn, prepared, admin)
+            )
+        except Exception:
+            logger.exception("pin-sync: series %s failed", base)
+    return created
