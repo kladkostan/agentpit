@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { formatProbabilityPct } from "./format";
+import { formatProbabilityPct, parseVolume } from "./format";
+
+describe("parseVolume", () => {
+  it("returns null for absent, zero, or unparseable input", () => {
+    expect(parseVolume(null)).toBeNull();
+    expect(parseVolume(undefined)).toBeNull();
+    expect(parseVolume("")).toBeNull();
+    expect(parseVolume("0")).toBeNull();
+    expect(parseVolume("nope")).toBeNull();
+  });
+
+  it("parses a positive numeric string", () => {
+    expect(parseVolume("14646954.7")).toBeCloseTo(14646954.7);
+    expect(parseVolume("850")).toBe(850);
+  });
+});
 
 describe("formatProbabilityPct", () => {
   it("renders an em dash for a null mid", () => {

@@ -10,6 +10,8 @@ export interface Event {
   start_date: number | null;
   end_date: number | null;
   polymarket_event_id: string | null;
+  /** Upstream 24h volume in USD; null when never synced from upstream. */
+  volume_24hr: number | null;
 }
 
 export interface EventWithMarkets {

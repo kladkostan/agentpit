@@ -4,6 +4,7 @@ import type { GammaEvent } from "@/types/gamma";
 import type { Event, EventWithMarkets, ListEventsResponse } from "@/types/event";
 import { gammaToMarket } from "@/api/markets";
 import { isoToUnix } from "@/api/gamma-utils";
+import { parseVolume } from "@/lib/format";
 
 export const EVENTS_PAGE_SIZE = 20;
 
@@ -23,6 +24,7 @@ function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
     start_date: isoToUnix(g.startDate),
     end_date: isoToUnix(g.endDate),
     polymarket_event_id: null,
+    volume_24hr: parseVolume(g.volume24hr),
   };
   return { event, markets: g.markets.map(gammaToMarket) };
 }

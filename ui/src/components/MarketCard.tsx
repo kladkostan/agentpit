@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
-import { formatProbabilityPct, formatShortDate } from "@/lib/format";
+import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
 import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
@@ -12,6 +12,8 @@ interface MarketCardProps {
   /** When provided, the card links to /events/:slug instead of /markets/:id.
    * Used for singleton-market events so the URL surface stays event-centric. */
   eventSlug?: string;
+  /** Parent event's upstream 24h volume (USD); null hides the stat. */
+  volume24hr?: number | null;
 }
 
 const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
@@ -25,7 +27,7 @@ const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
   CANCELLED: { dot: "bg-rose-500", label: "text-rose-700 dark:text-rose-400" },
 };
 
-export function MarketCard({ market, eventSlug }: MarketCardProps) {
+export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
   const { mid: yesMid } = useOutcomeMid(yesTokenId);
   const { data: spark } = usePricesHistory(yesTokenId);
@@ -105,6 +107,14 @@ export function MarketCard({ market, eventSlug }: MarketCardProps) {
           </div>
         </div>
 
+        {volume24hr != null ? (
+          <div className="flex items-center gap-1.5 border-t pt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            <span className="tabular-nums text-foreground/70">
+              {formatVolume(volume24hr)}
+            </span>
+            <span>24h vol</span>
+          </div>
+        ) : null}
       </article>
     </Link>
   );

@@ -39,6 +39,7 @@ export function EventGrid({
               key={event.event_id}
               market={markets[0]!}
               eventSlug={event.slug}
+              volume24hr={event.volume_24hr}
             />
           ) : (
             <MultiMarketEventCard

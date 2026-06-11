@@ -5,9 +5,11 @@ import { EventChart } from "@/components/EventChart";
 import { EventLeaderboardRow } from "@/components/EventLeaderboardRow";
 import { Orderbook } from "@/components/orders/Orderbook";
 import { OrderTicket } from "@/components/orders/OrderTicket";
+import { RotatingSeriesPanel } from "@/components/RotatingSeriesPanel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
+import { detectRotatingSeries } from "@/lib/rotatingSeries";
 import { formatLongDate } from "@/lib/format";
 import { useYesMidMap } from "@/lib/useYesMid";
 import type { MarketState } from "@/types/market";
@@ -49,17 +51,29 @@ export function EventDetailPage() {
     [data, midByMarket],
   );
 
-  // Default-select the top-ranked outcome's YES once data is loaded — but
-  // ONLY the first time per slug, so user toggles can actually deselect.
+  // A recurring "rotating series" (e.g. BTC Up or Down 5m) gets a dedicated
+  // live-window view instead of the probability leaderboard. Detected from the
+  // markets' disjoint sequential time windows.
+  const series = useMemo(
+    () =>
+      data
+        ? detectRotatingSeries(data.markets, Math.floor(Date.now() / 1000))
+        : null,
+    [data],
+  );
+
+  // Default-select once per slug, so user toggles can actually deselect. For a
+  // rotating series, select the LIVE window (not the top-probability one, which
+  // is often the just-closed window); otherwise the top-ranked outcome.
   useEffect(() => {
     if (!slug || autoSelectedSlugRef.current === slug) return;
-    const first = ordered[0];
+    const first = series?.live ?? ordered[0];
     if (!first) return;
-    const yesLabel = first.erc1155_tokens[0]?.[1];
-    if (!yesLabel) return;
+    const label = first.erc1155_tokens[0]?.[1];
+    if (!label) return;
     autoSelectedSlugRef.current = slug;
-    setSelection({ marketId: first.market_id, outcome: yesLabel });
-  }, [ordered, slug]);
+    setSelection({ marketId: first.market_id, outcome: label });
+  }, [ordered, series, slug]);
 
   if (isLoading) return <EventDetailSkeleton />;
 
@@ -138,7 +152,11 @@ export function EventDetailPage() {
               <span className="text-foreground/40">Closes</span> {endLabel}
             </span>
           ) : null}
-          {!isSingleMarket ? (
+          {series ? (
+            <span>
+              <span className="text-foreground/40">Rotating</span> live windows
+            </span>
+          ) : !isSingleMarket ? (
             <span>
               <span className="text-foreground/40">Sorted by</span> highest chance
             </span>
@@ -148,7 +166,11 @@ export function EventDetailPage() {
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-8">
-          <EventChart markets={markets} midByMarket={midByMarket} />
+          {/* A rotating series has no useful long-range chart (each window is
+              minutes long); the live-window panel is the hero instead. */}
+          {series ? null : (
+            <EventChart markets={markets} midByMarket={midByMarket} />
+          )}
 
           {isSingleMarket && onlyMarket ? (
             <div className="rounded-2xl border bg-card/40 px-5 py-5">
@@ -164,6 +186,15 @@ export function EventDetailPage() {
                 }
               />
             </div>
+          ) : series ? (
+            <RotatingSeriesPanel
+              series={series}
+              selectedMarketId={selection?.marketId ?? null}
+              selectedOutcome={selection?.outcome ?? null}
+              onSelectWindow={(marketId, outcome) =>
+                setSelection({ marketId, outcome })
+              }
+            />
           ) : (
             <div className="rounded-2xl border bg-card/40">
               {ordered.map((market, idx) => {

@@ -29,6 +29,35 @@ export function formatLongDate(seconds: number | null): string | null {
   return LONG_DATE_FMT.format(new Date(seconds * 1000));
 }
 
+const CLOCK_FMT = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** "12:50 PM" — used to label rotating-series time windows. */
+export function formatClock(seconds: number | null): string | null {
+  if (seconds === null) return null;
+  return CLOCK_FMT.format(new Date(seconds * 1000));
+}
+
+/** "4:03" — a mm:ss countdown from a non-negative second count. */
+export function formatCountdown(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${String(rem).padStart(2, "0")}`;
+}
+
+/** Parse a stringified upstream volume ("0", "14646954.7", "") into a number.
+ *  Returns null for absent/zero/unparseable values so call sites can hide the
+ *  stat rather than render a misleading "$0". */
+export function parseVolume(raw: string | null | undefined): number | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 /** Compact dollar formatter — $850, $12.4K, $8.1M, $1.2B. */
 export function formatVolume(usd: number): string {
   if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`;
