@@ -553,6 +553,7 @@ def create_polygon_market_if_does_not_exist(
 ) -> Market | None:
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
+    assert request.polymarket_id is not None  # narrowed by check_state above
 
     # Cheap path first: a market already synced for this polymarket_id needs no
     # on-chain prepare — just keep its event grouping current and return.

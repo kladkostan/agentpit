@@ -16,7 +16,7 @@ def _insert(conn, *, cid, state, end_date):
     )
 
 
-def test_mirror_only_fetches_ended_unresolved(monkeypatch):
+def test_mirror_only_fetches_ended_unresolved():
     conn = fresh_test_conn()
     _insert(conn, cid="0xaa", state="ACTIVE", end_date=500)   # ended -> candidate
     _insert(conn, cid="0xbb", state="ACTIVE", end_date=9000)  # not ended
@@ -28,8 +28,9 @@ def test_mirror_only_fetches_ended_unresolved(monkeypatch):
         fetched.append(polymarket_condition_id)
         return None  # upstream not resolved -> mirror does nothing further
 
+    # admin is never used on the not-resolved path (fetcher returns None).
     resolved = sync.mirror_polymarket_resolutions(
-        conn, admin=None, fetcher=fake_fetcher, now=1000
+        conn, admin=None, fetcher=fake_fetcher, now=1000  # type: ignore[arg-type]
     )
 
     assert resolved == 0
