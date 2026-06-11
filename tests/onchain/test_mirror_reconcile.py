@@ -156,3 +156,21 @@ def test_place_resting_orders_skips_underfunded():
     assert ids == []
     _, yes_asks = _levels(client, ref.yes_token)
     assert yes_asks == {}
+
+
+def test_replace_resting_orders_cancels_and_places_atomically():
+    _s, db, admin, client, ref, user = _rig()
+    order = OrderService(db, admin)
+    first = order.place_resting_orders(user, [
+        PlaceOrderRequest(token_id=ref.yes_token, side="BUY",
+                          price=Decimal("0.40"), size=Decimal("10"), order_type="GTC"),
+    ])
+    assert len(first) == 1
+    # Cancel the old bid and place a new one at a different level, atomically.
+    ids = order.replace_resting_orders(user, first, [
+        PlaceOrderRequest(token_id=ref.yes_token, side="BUY",
+                          price=Decimal("0.41"), size=Decimal("10"), order_type="GTC"),
+    ])
+    assert len(ids) == 1
+    yes_bids, _ = _levels(client, ref.yes_token)
+    assert yes_bids == {0.41: 10.0}   # old 0.40 cancelled, new 0.41 live — only one

@@ -202,9 +202,6 @@ def reconcile_market(
             inventory[o.token_id] = inventory.get(o.token_id, 0) - o.size_micro
     places = cap_sells_to_inventory(places, inventory)
 
-    if cancels:
-        order.cancel_orders(user, cancels)
-
     # Classify against the EFFECTIVE foreign touch: a foreign order on the
     # complement token is crossable through the matcher's MINT/MERGE paths
     # exactly as if it rested at 1-p on this token.
@@ -251,31 +248,34 @@ def reconcile_market(
                             "(benign TOCTOU race; market=%s %s@%s)",
                             ref.market_id, p.side, p.price_micro)
 
-    # Phase 1: calm placements — one bulk insert in a single transaction.
-    # They are non-crossing by classification, so no matching/settlement is
-    # needed; this replaces ~3 DB round-trips per order with one for the batch.
-    if calm:
-        calm_reqs = [
-            PlaceOrderRequest(
-                token_id=p.token_id, side=p.side,
-                price=Decimal(p.price_micro) / MICRO,
-                size=Decimal(p.size_micro) / MICRO,
-                order_type="GTC",
-            )
-            for p in calm
-        ]
-        calm_hints = [
-            house_usd if p.side == "BUY" else raw_ctf.get(p.token_id)
-            for p in calm
-        ]
-        try:
-            ids = order.place_resting_orders(user, calm_reqs, balance_hints=calm_hints)
-            placed += len(ids)
-            failed += len(calm) - len(ids)  # skipped (unknown token / underfunded)
-        except Exception:
-            log.warning("mirror batch placement raised (market=%s)",
-                        ref.market_id, exc_info=True)
-            failed += len(calm)
+    # Phase 1: atomically cancel the stale orders AND place the new calm
+    # (non-crossing) ones in ONE transaction, so a concurrent /book read never
+    # catches the empty gap between cancel and replace (which made the book
+    # flicker full<->empty during fast re-quoting). Always runs — even with no
+    # calm placements it still applies the cancels. Non-crossing by
+    # classification, so no matching/settlement.
+    calm_reqs = [
+        PlaceOrderRequest(
+            token_id=p.token_id, side=p.side,
+            price=Decimal(p.price_micro) / MICRO,
+            size=Decimal(p.size_micro) / MICRO,
+            order_type="GTC",
+        )
+        for p in calm
+    ]
+    calm_hints = [
+        house_usd if p.side == "BUY" else raw_ctf.get(p.token_id)
+        for p in calm
+    ]
+    try:
+        ids = order.replace_resting_orders(
+            user, cancels, calm_reqs, balance_hints=calm_hints)
+        placed += len(ids)
+        failed += len(calm) - len(ids)  # skipped (unknown token / underfunded)
+    except Exception:
+        log.warning("mirror batch replace raised (market=%s)",
+                    ref.market_id, exc_info=True)
+        failed += len(calm)
 
     # Phase 2: hot placements (real settlements), budgeted by ATTEMPT — a
     # failed settlement still consumed chain time and must count.

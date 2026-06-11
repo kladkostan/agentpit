@@ -157,37 +157,24 @@ class OrderService:
             tradeIDs=[m["trade_id"] for m in matches],
         )
 
-    def place_resting_orders(
+    def _prepare_resting_orders(
         self,
         user: User,
         payloads: "list[PlaceOrderRequest]",
-        *,
-        balance_hints: "list[int | None] | None" = None,
-    ) -> "list[str]":
-        """Insert many NON-CROSSING resting orders in a single transaction.
-
-        For a trusted batch caller (the liquidity mirror) whose orders are
-        already classified as non-crossing: a resting non-crossing order
-        matches nothing, so we skip the per-order match/settle and the
-        per-order transactions — one signing pass + one bulk INSERT instead of
-        ~3 DB round-trips per order. Returns the inserted order_ids; payloads
-        with an unknown token or a failed balance check are skipped (omitted).
-
-        NOT for crossing/taker orders — those must go through place_order so
-        they match and settle on-chain.
-        """
+        balance_hints: "list[int | None] | None",
+    ) -> "list[tuple[OrderData, str, bytes, int, str]]":
+        """Sign + validate a batch of resting orders OUTSIDE any transaction
+        (CPU only). Returns (order, order_id, signature, price_int, order_type)
+        for the orders that pass; unknown-token / underfunded payloads drop."""
         if not payloads:
             return []
         hints = (
             balance_hints if balance_hints is not None else [None] * len(payloads)
         )
-
         # Resolve each distinct token id once (one read), not per order.
         distinct = {p.token_id for p in payloads}
         with self._db.read() as conn:
             resolved = {t: resolve_by_token_id(conn, t) for t in distinct}
-
-        # Sign + validate everything OUTSIDE the write transaction (CPU only).
         prepared: "list[tuple[OrderData, str, bytes, int, str]]" = []
         for payload, hint in zip(payloads, hints):
             r = resolved.get(payload.token_id)
@@ -195,7 +182,7 @@ class OrderService:
                 continue  # unknown token
             token_id_int = int(r.token_id)
             size_micro = decimal_str_to_size_micro(str(payload.size))
-            maker_amount, _taker_amount = self._amounts_from_price_size(
+            maker_amount, taker_amount = self._amounts_from_price_size(
                 payload.side, payload.price, size_micro
             )
             try:
@@ -212,7 +199,7 @@ class OrderService:
                 taker=_ZERO_ADDR,
                 tokenId=token_id_int,
                 makerAmount=maker_amount,
-                takerAmount=_taker_amount,
+                takerAmount=taker_amount,
                 expiration=int(payload.expiration),
                 nonce=0,
                 feeRateBps=0,
@@ -226,11 +213,57 @@ class OrderService:
                 order, self._compute_order_id(order), signature,
                 self._price_int(order), payload.order_type,
             ))
+        return prepared
 
-        if not prepared:
+    def place_resting_orders(
+        self,
+        user: User,
+        payloads: "list[PlaceOrderRequest]",
+        *,
+        balance_hints: "list[int | None] | None" = None,
+    ) -> "list[str]":
+        """Insert many NON-CROSSING resting orders in a single transaction.
+
+        For a trusted batch caller (the liquidity mirror) whose orders are
+        already classified as non-crossing: a resting non-crossing order matches
+        nothing, so we skip the per-order match/settle — one signing pass + one
+        bulk INSERT instead of ~3 DB round-trips per order. Returns the inserted
+        order_ids; unknown-token / underfunded payloads are omitted.
+
+        NOT for crossing/taker orders — those must go through place_order so
+        they match and settle on-chain.
+        """
+        return self.replace_resting_orders(
+            user, [], payloads, balance_hints=balance_hints
+        )
+
+    def replace_resting_orders(
+        self,
+        user: User,
+        cancel_ids: "list[str]",
+        payloads: "list[PlaceOrderRequest]",
+        *,
+        balance_hints: "list[int | None] | None" = None,
+    ) -> "list[str]":
+        """Atomically cancel `cancel_ids` and insert non-crossing `payloads` in
+        ONE transaction, so a concurrent /book read never sees the intermediate
+        empty state — the cancel-then-replace gap that makes the book flicker
+        between full and empty during fast re-quoting.
+
+        Cancels apply before inserts within the transaction (spec §5); the
+        orders are non-crossing (caller-classified), so no matching/settlement
+        runs. Returns the inserted order_ids.
+        """
+        prepared = self._prepare_resting_orders(user, payloads, balance_hints)
+        if not cancel_ids and not prepared:
             return []
-        # One transaction, one commit, no matching (orders are non-crossing).
         with self._db.write() as conn:
+            for oid in dict.fromkeys(cancel_ids):
+                conn.execute(
+                    "UPDATE orders SET STATUS = 'cancelled' "
+                    "WHERE ORDER_ID = %s AND API_KEY = %s AND STATUS = 'live'",
+                    (oid, user.api_key),
+                )
             for order, order_id, signature, price_int, order_type in prepared:
                 self._insert_order(
                     conn, api_key=user.api_key, order=order, order_id=order_id,
