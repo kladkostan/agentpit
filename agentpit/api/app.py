@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -38,7 +39,11 @@ from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 from agentpit.liquidity.house_accounts import HouseAccountProvisioner, email_for
 from agentpit.liquidity.mirror import MirrorEngine
-from agentpit.polymarket.polymarket_sync import fetch_and_sync_polymarket_markets
+from agentpit.polymarket.polymarket_sync import (
+    auto_redeem_resolved_markets,
+    fetch_and_sync_polymarket_markets,
+    mirror_polymarket_resolutions,
+)
 from agentpit.services.event_service import EventService
 from agentpit.services.snapshot_service import SnapshotService
 
@@ -56,24 +61,59 @@ def _configure_root_logging() -> None:
     root.addHandler(handler)
 
 
-def _run_polymarket_sync(db: DbSession, admin: OnchainAdmin) -> int:
+def _run_polymarket_sync(db: DbSession, admin: OnchainAdmin, settings: Settings) -> int:
     with db.write() as conn:
-        created = fetch_and_sync_polymarket_markets(conn, admin)
+        created = fetch_and_sync_polymarket_markets(
+            conn,
+            admin,
+            max_markets=settings.sync_max_markets,
+            liquidity_min=settings.sync_liquidity_min,
+        )
     return len(created)
 
 
 async def _polymarket_sync_loop(
-    db: DbSession, admin: OnchainAdmin, interval_seconds: int
+    db: DbSession, admin: OnchainAdmin, settings: Settings
 ) -> None:
     while True:
         try:
-            count = await asyncio.to_thread(_run_polymarket_sync, db, admin)
+            count = await asyncio.to_thread(_run_polymarket_sync, db, admin, settings)
             log.info("Polymarket sync added %d new markets", count)
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("Polymarket sync failed")
-        await asyncio.sleep(interval_seconds)
+        await asyncio.sleep(settings.sync_interval_seconds)
+
+
+def _run_resolution_cycle(
+    db: DbSession, admin: OnchainAdmin, settings: Settings
+) -> tuple[int, int]:
+    now = int(time.time())
+    with db.write() as conn:
+        resolved = mirror_polymarket_resolutions(conn, admin, now=now)
+    redeemed = 0
+    if settings.auto_redeem_enabled:
+        redeemed = auto_redeem_resolved_markets(db, admin)
+    return resolved, redeemed
+
+
+async def _resolution_mirror_loop(
+    db: DbSession, admin: OnchainAdmin, settings: Settings
+) -> None:
+    while True:
+        try:
+            resolved, redeemed = await asyncio.to_thread(
+                _run_resolution_cycle, db, admin, settings
+            )
+            log.info(
+                "Resolution cycle: %d resolved, %d redeemed", resolved, redeemed
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Resolution cycle failed")
+        await asyncio.sleep(settings.resolution_mirror_interval_seconds)
 
 
 def _run_snapshot_tick(db: DbSession, retention_seconds: int) -> tuple[int, int]:
@@ -152,9 +192,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Polymarket sync enabled (interval=%ds)", settings.sync_interval_seconds
             )
             sync_task = asyncio.create_task(
-                _polymarket_sync_loop(
-                    db_session, onchain_admin, settings.sync_interval_seconds
-                )
+                _polymarket_sync_loop(db_session, onchain_admin, settings)
             )
         else:
             log.info("Polymarket sync disabled (set SYNC=true to enable)")
@@ -195,10 +233,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             log.info("Liquidity mirror disabled (set LIQUIDITY_ENGINE=true to enable)")
 
+        resolution_task: asyncio.Task | None = None
+        if settings.resolution_mirror_enabled:
+            log.info(
+                "Resolution/redeem loop enabled (interval=%ds, auto_redeem=%s)",
+                settings.resolution_mirror_interval_seconds,
+                settings.auto_redeem_enabled,
+            )
+            resolution_task = asyncio.create_task(
+                _resolution_mirror_loop(db_session, onchain_admin, settings)
+            )
+        else:
+            log.info(
+                "Resolution/redeem loop disabled "
+                "(set RESOLUTION_MIRROR_ENABLED=true to enable)"
+            )
+
         try:
             yield
         finally:
-            for task in (sync_task, snapshot_task, *mirror_tasks):
+            for task in (sync_task, snapshot_task, resolution_task, *mirror_tasks):
                 if task is None:
                     continue
                 task.cancel()
