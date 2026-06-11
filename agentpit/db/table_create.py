@@ -197,10 +197,19 @@ class TableCreate:
             )
             """
         )
+        # Migration: add upstream 24h volume to existing tables (idempotent, so
+        # the running DB upgrades on startup — no reset). Drives homepage order.
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS VOLUME_24HR DOUBLE PRECISION"
+        )
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_polymarket_event_id "
             "ON events(POLYMARKET_EVENT_ID)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_volume_24hr "
+            "ON events(VOLUME_24HR)"
         )
 
     @staticmethod

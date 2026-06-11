@@ -74,5 +74,6 @@ def to_gamma_event(event: Event, markets: list[Market]) -> GammaEvent:
         category=event.category,
         startDate=_iso(event.start_date),
         endDate=_iso(event.end_date),
+        volume24hr=str(event.volume_24hr if event.volume_24hr is not None else 0),
         markets=[to_gamma_market(m) for m in markets],
     )

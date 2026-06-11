@@ -45,4 +45,7 @@ class GammaEvent(BaseModel):
     category: str | None
     startDate: str | None
     endDate: str | None
+    # Upstream 24h volume (stringified, Gamma's wire convention). "0" when the
+    # event was never synced from upstream. Drives the homepage ordering.
+    volume24hr: str = "0"
     markets: list[GammaMarket]

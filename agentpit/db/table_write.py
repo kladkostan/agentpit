@@ -202,6 +202,24 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_event_volume(
+        db: psycopg.Connection, event_id: int, volume_24hr: float | None
+    ) -> None:
+        """Refresh an event's captured upstream 24h volume.
+
+        No-op when ``volume_24hr`` is None, so a degraded sync pass (e.g. a
+        recurring window with no series metadata, whose own 24h volume is null)
+        never clobbers a previously-captured good value. Called on every bind
+        pass so the figure tracks the latest sync.
+        """
+        if volume_24hr is None:
+            return
+        db.execute(
+            "UPDATE events SET VOLUME_24HR = %s WHERE EVENT_ID = %s",
+            (volume_24hr, event_id),
+        )
+
+    @staticmethod
     def attach_market_to_event(
         db: psycopg.Connection,
         *,

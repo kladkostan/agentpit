@@ -91,6 +91,9 @@ def _event_entry(src: dict) -> dict | None:
         "category": src.get("category"),
         "startDate": src.get("startDate") or src.get("startDateIso"),
         "endDate": src.get("endDate") or src.get("endDateIso"),
+        # For a recurring series the window event's own 24h volume is null; the
+        # series aggregate (large) is what should rank the homepage card.
+        "volume24hr": src.get("volume24hr"),
     }
 
 

@@ -277,7 +277,7 @@ class TableRead:
 
     _EVENT_COLS = (
         "EVENT_ID, SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY, "
-        "START_DATE, END_DATE, POLYMARKET_EVENT_ID"
+        "START_DATE, END_DATE, POLYMARKET_EVENT_ID, VOLUME_24HR"
     )
 
     @staticmethod
@@ -292,6 +292,7 @@ class TableRead:
             start_date=row["START_DATE"],
             end_date=row["END_DATE"],
             polymarket_event_id=row["POLYMARKET_EVENT_ID"],
+            volume_24hr=row["VOLUME_24HR"],
         )
 
     @staticmethod
@@ -334,16 +335,21 @@ class TableRead:
     def list_events_with_markets(
         db: psycopg.Connection, limit: int = 100, offset: int = 0
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
-        """Return events ordered by newest, each paired with its child markets.
+        """Return events ranked by upstream 24h volume, each paired with its
+        child markets.
 
         Used by the home page: every market belongs to an event, so this is
-        the primary listing query. One query for the event page + one for
-        all member markets (bucketed in Python) — no N+1.
+        the primary listing query. Events with a captured upstream
+        ``VOLUME_24HR`` rank first (descending); events never synced from
+        upstream (NULL volume — orphan singletons, not-yet-refreshed rows) fall
+        to the bottom, ordered newest-first as a stable tiebreak. One query for
+        the event page + one for all member markets (bucketed in Python) — no
+        N+1.
         """
         total = db.execute("SELECT COUNT(*) as CNT FROM events").fetchone()["CNT"]
         events_cur = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events "
-            "ORDER BY EVENT_ID DESC LIMIT %s OFFSET %s",
+            "ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC LIMIT %s OFFSET %s",
             (limit, offset),
         )
         events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]

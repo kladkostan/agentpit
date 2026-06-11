@@ -14,6 +14,9 @@ class Event(BaseModel):
     start_date: Optional[int] = None
     end_date: Optional[int] = None
     polymarket_event_id: Optional[str] = None
+    # Upstream Polymarket 24h volume (event- or series-level), captured at sync
+    # time. Drives the homepage ordering. None when never synced from upstream.
+    volume_24hr: Optional[float] = None
 
     def model_post_init(self, _context):
         check_state(len(self.title) > 0, "Event title must not be empty")

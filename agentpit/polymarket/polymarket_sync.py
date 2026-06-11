@@ -392,6 +392,7 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         return None
     start_iso = raw.get("startDate") or raw.get("startDateIso")
     end_iso = raw.get("endDate") or raw.get("endDateIso")
+    volume24hr = raw.get("volume24hr")
     return {
         "polymarket_event_id": str(pm_event_id) if pm_event_id is not None else None,
         "slug": str(slug),
@@ -401,6 +402,7 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         "category": raw.get("category"),
         "start_date": _iso_to_unix(start_iso) if start_iso else None,
         "end_date": _iso_to_unix(end_iso) if end_iso else None,
+        "volume_24hr": _as_float(volume24hr) if volume24hr is not None else None,
     }
 
 
@@ -461,6 +463,10 @@ def bind_market_to_upstream_event(
         end_date=meta["end_date"],
         polymarket_event_id=meta["polymarket_event_id"],
     )
+    # Refresh upstream 24h volume on every pass (drives homepage order). No-op
+    # when the upstream entry carried no volume, so a good value is never
+    # clobbered with null.
+    TableWrite.update_event_volume(db, event.event_id, meta["volume_24hr"])
     outcome_label, icon_url = _extract_outcome_metadata(pm_market)
     TableWrite.attach_market_to_event(
         db,
