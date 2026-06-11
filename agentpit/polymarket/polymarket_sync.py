@@ -531,9 +531,17 @@ def create_polygon_market_if_does_not_exist(
     request = build_create_market_request_from_json(pm_market)
     check_state(bool(request.polymarket_id))
 
-    # Mirror onto the local CTF + Exchange so the market is tradeable.
-    # This overrides the upstream conditionId/tokenIds with locally-derived
-    # ones; polymarket_id stays as the cross-reference.
+    # Cheap path first: a market already synced for this polymarket_id needs no
+    # on-chain prepare — just keep its event grouping current and return.
+    if TableRead.market_exists_by_polymarket_id(db, request.polymarket_id):
+        bind_existing_market_to_upstream_event(
+            db, polymarket_id=request.polymarket_id, pm_market=pm_market
+        )
+        return None
+
+    # New market: mirror onto the local CTF + Exchange so it's tradeable. This
+    # overrides the upstream conditionId/tokenIds with locally-derived ones;
+    # polymarket_id stays as the cross-reference.
     outcome_labels = [label for _, label in request.erc1155_tokens]
     local_condition_id, local_tokens = prepare_market_on_chain(
         admin, request.question, outcome_labels
@@ -541,23 +549,10 @@ def create_polygon_market_if_does_not_exist(
     request.condition_id = local_condition_id
     request.erc1155_tokens = local_tokens
 
-    existing_market_id = TableRead.read_condition_id_by_polymarket_id(
-        db, request.polymarket_id
-    )
-
-    if existing_market_id is None:
-        market = TableWrite.create_market(db, request, True)
-        bind_market_to_upstream_event(db, market, pm_market)
-        logger.info("Added market: %s", request.question)
-        return market
-
-    # Already synced. Keep the event grouping current — upstream may have
-    # added the market to a new event, renamed an existing one, or shipped
-    # this market before this feature landed and it's still in a singleton.
-    bind_existing_market_to_upstream_event(
-        db, polymarket_id=request.polymarket_id, pm_market=pm_market
-    )
-    return None
+    market = TableWrite.create_market(db, request, True)
+    bind_market_to_upstream_event(db, market, pm_market)
+    logger.info("Added market: %s", request.question)
+    return market
 
 
 def _default_resolution_fetcher(polymarket_condition_id: str) -> dict | None:
