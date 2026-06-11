@@ -52,11 +52,12 @@ def test_split_insufficient_usdc_is_400():
     client = fresh_client()
     user = register(client)
     market = create_market(client)
-    # Faucet grants 1M apUSD = 1_000_000 * 10**6 raw; ask for more than that.
+    # Faucet grants $1 quadrillion apUSD (SIGNUP_GRANT_RAW = 1e21 raw); ask for
+    # more than that so the split is rejected for insufficient collateral.
     resp = client.post(
         f"/markets/{market['market_id']}/split_position",
         headers=hdr(user["access_token"]),
-        json={"amount": 10**18},
+        json={"amount": 10**24},
     )
     assert resp.status_code == 400
     assert "need" in resp.json()["detail"]
