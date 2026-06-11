@@ -60,6 +60,10 @@ export function useEventsInfinite() {
       const loaded = allPages.reduce((sum, page) => sum + page.events.length, 0);
       return loaded < lastPage.total ? loaded : undefined;
     },
+    // Poll so newly-synced markets appear on the home page without a manual
+    // refresh (a sync streams markets in over a few seconds). Only refetches
+    // while the tab is visible (refetchIntervalInBackground defaults to false).
+    refetchInterval: 5000,
   });
 }
 

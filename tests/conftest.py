@@ -47,6 +47,11 @@ def _isolated_db_session():
     overridden onto the singleton app (the app's lifespan closes its own
     db_session on TestClient shutdown, so endpoints must use the override)."""
     _truncate_all()
+    # The /events listing has a per-process TTL cache; clear it so a previous
+    # test's cached page can't leak into one that hits the same (limit, offset).
+    from agentpit.api.routes import events as _events_route
+
+    _events_route._events_cache.clear()
     before = {id(s) for s in DbSession._open}
     fresh = fresh_test_db()
     previous = app.dependency_overrides.get(get_db_session)
