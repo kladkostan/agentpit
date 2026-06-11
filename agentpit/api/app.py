@@ -159,6 +159,42 @@ async def _pin_sync_loop(
         )
 
 
+def _current_window_ids(db: DbSession, settings: Settings) -> list[int]:
+    now = int(time.time())
+    with db.read() as conn:
+        return current_window_market_ids(conn, settings.pinned_series, now)
+
+
+async def _pin_requote_once(
+    db: DbSession, settings: Settings, mirror: "MirrorEngine"
+) -> int:
+    """Re-mirror the current live window(s) from the upstream book once.
+
+    Returns the number of orders (re)placed. Kept self-contained so the loop
+    body is unit-testable with a fake mirror.
+    """
+    ids = await asyncio.to_thread(_current_window_ids, db, settings)
+    if not ids:
+        return 0
+    return await mirror.fill_markets(ids)
+
+
+async def _pin_requote_loop(
+    db: DbSession, settings: Settings, mirror: "MirrorEngine"
+) -> None:
+    # A rotating window lives only ~5 min — too short for the shared reconciler
+    # to revisit. This fast loop re-pulls the upstream book for just the live
+    # window(s) every few seconds so their local book tracks Polymarket.
+    while True:
+        try:
+            await _pin_requote_once(db, settings, mirror)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Pin re-quote failed")
+        await asyncio.sleep(settings.pin_requote_seconds)
+
+
 def _run_snapshot_tick(db: DbSession, retention_seconds: int) -> tuple[int, int]:
     service = SnapshotService(db)
     inserted = service.take_snapshot()
@@ -311,6 +347,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Pin-sync disabled (set PIN_SYNC_ENABLED=true/SYNC and PINNED_SERIES)"
             )
 
+        requote_task: asyncio.Task | None = None
+        if (
+            mirror_engine is not None
+            and settings.pin_sync_enabled
+            and settings.pinned_series
+        ):
+            log.info(
+                "Pin re-quote enabled (every %.1fs) — live windows track upstream",
+                settings.pin_requote_seconds,
+            )
+            requote_task = asyncio.create_task(
+                _pin_requote_loop(db_session, settings, mirror_engine)
+            )
+
         try:
             yield
         finally:
@@ -319,6 +369,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 snapshot_task,
                 resolution_task,
                 pin_task,
+                requote_task,
                 *mirror_tasks,
             ):
                 if task is None:

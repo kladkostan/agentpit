@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     pin_sync_offset_seconds: int = Field(
         default=10, validation_alias="PIN_SYNC_OFFSET_SECONDS"
     )
+    # How often the live window of each pinned series is re-mirrored from the
+    # real Polymarket book. The shared reconciler can take 15+ min for a full
+    # pass over hundreds of markets — far longer than a window's ~5-min life —
+    # so the live windows get their own fast loop and track upstream in seconds.
+    pin_requote_seconds: float = Field(
+        default=4.0, validation_alias="AGENTPIT_PIN_REQUOTE_SECONDS"
+    )
 
     @model_validator(mode="after")
     def _default_resolution_mirror_enabled(self) -> "Settings":
