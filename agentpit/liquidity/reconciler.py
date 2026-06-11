@@ -251,9 +251,31 @@ def reconcile_market(
                             "(benign TOCTOU race; market=%s %s@%s)",
                             ref.market_id, p.side, p.price_micro)
 
-    # Phase 1: calm placements (DB-only; an unexpected fill is a benign race).
-    for p in calm:
-        _try_place(p, expect_fill=False)
+    # Phase 1: calm placements — one bulk insert in a single transaction.
+    # They are non-crossing by classification, so no matching/settlement is
+    # needed; this replaces ~3 DB round-trips per order with one for the batch.
+    if calm:
+        calm_reqs = [
+            PlaceOrderRequest(
+                token_id=p.token_id, side=p.side,
+                price=Decimal(p.price_micro) / MICRO,
+                size=Decimal(p.size_micro) / MICRO,
+                order_type="GTC",
+            )
+            for p in calm
+        ]
+        calm_hints = [
+            house_usd if p.side == "BUY" else raw_ctf.get(p.token_id)
+            for p in calm
+        ]
+        try:
+            ids = order.place_resting_orders(user, calm_reqs, balance_hints=calm_hints)
+            placed += len(ids)
+            failed += len(calm) - len(ids)  # skipped (unknown token / underfunded)
+        except Exception:
+            log.warning("mirror batch placement raised (market=%s)",
+                        ref.market_id, exc_info=True)
+            failed += len(calm)
 
     # Phase 2: hot placements (real settlements), budgeted by ATTEMPT — a
     # failed settlement still consumed chain time and must count.

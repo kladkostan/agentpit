@@ -157,6 +157,87 @@ class OrderService:
             tradeIDs=[m["trade_id"] for m in matches],
         )
 
+    def place_resting_orders(
+        self,
+        user: User,
+        payloads: "list[PlaceOrderRequest]",
+        *,
+        balance_hints: "list[int | None] | None" = None,
+    ) -> "list[str]":
+        """Insert many NON-CROSSING resting orders in a single transaction.
+
+        For a trusted batch caller (the liquidity mirror) whose orders are
+        already classified as non-crossing: a resting non-crossing order
+        matches nothing, so we skip the per-order match/settle and the
+        per-order transactions — one signing pass + one bulk INSERT instead of
+        ~3 DB round-trips per order. Returns the inserted order_ids; payloads
+        with an unknown token or a failed balance check are skipped (omitted).
+
+        NOT for crossing/taker orders — those must go through place_order so
+        they match and settle on-chain.
+        """
+        if not payloads:
+            return []
+        hints = (
+            balance_hints if balance_hints is not None else [None] * len(payloads)
+        )
+
+        # Resolve each distinct token id once (one read), not per order.
+        distinct = {p.token_id for p in payloads}
+        with self._db.read() as conn:
+            resolved = {t: resolve_by_token_id(conn, t) for t in distinct}
+
+        # Sign + validate everything OUTSIDE the write transaction (CPU only).
+        prepared: "list[tuple[OrderData, str, bytes, int, str]]" = []
+        for payload, hint in zip(payloads, hints):
+            r = resolved.get(payload.token_id)
+            if r is None:
+                continue  # unknown token
+            token_id_int = int(r.token_id)
+            size_micro = decimal_str_to_size_micro(str(payload.size))
+            maker_amount, _taker_amount = self._amounts_from_price_size(
+                payload.side, payload.price, size_micro
+            )
+            try:
+                self._check_balance(
+                    user.eth_address, payload.side, maker_amount, token_id_int,
+                    balance_hint=hint,
+                )
+            except InsufficientBalanceError:
+                continue  # skip underfunded; not fatal for a batch
+            order = OrderData(
+                salt=secrets.randbits(256),
+                maker=user.eth_address,
+                signer=user.eth_address,
+                taker=_ZERO_ADDR,
+                tokenId=token_id_int,
+                makerAmount=maker_amount,
+                takerAmount=_taker_amount,
+                expiration=int(payload.expiration),
+                nonce=0,
+                feeRateBps=0,
+                side=0 if payload.side == "BUY" else 1,
+                signatureType=0,
+            )
+            signature = sign_order(
+                user.eth_key, self._onchain._client.deployment, order
+            )
+            prepared.append((
+                order, self._compute_order_id(order), signature,
+                self._price_int(order), payload.order_type,
+            ))
+
+        if not prepared:
+            return []
+        # One transaction, one commit, no matching (orders are non-crossing).
+        with self._db.write() as conn:
+            for order, order_id, signature, price_int, order_type in prepared:
+                self._insert_order(
+                    conn, api_key=user.api_key, order=order, order_id=order_id,
+                    signature=signature, price_int=price_int, order_type=order_type,
+                )
+        return [order_id for _o, order_id, _s, _p, _t in prepared]
+
     def list_open_orders(
         self,
         user: User,

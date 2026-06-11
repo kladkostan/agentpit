@@ -123,3 +123,36 @@ def test_reconcile_fills_bot_order_when_price_passes_through(caplog):
                               _snap(bids=[(400_000, 10_000_000)],
                                     asks=[(500_000, 7_000_000)]), s)
     assert stats2["deferred"] == 0
+
+
+def test_place_resting_orders_batch_inserts_without_matching():
+    _s, db, admin, client, ref, user = _rig()
+    order = OrderService(db, admin)
+    # Non-crossing BUYs (apUSD-backed); a single transaction, no matching.
+    reqs = [
+        PlaceOrderRequest(token_id=ref.yes_token, side="BUY",
+                          price=Decimal("0.40"), size=Decimal("10"), order_type="GTC"),
+        PlaceOrderRequest(token_id=ref.yes_token, side="BUY",
+                          price=Decimal("0.30"), size=Decimal("5"), order_type="GTC"),
+    ]
+    ids = order.place_resting_orders(user, reqs)
+    assert len(ids) == 2
+    yes_bids, yes_asks = _levels(client, ref.yes_token)
+    assert yes_bids == {0.4: 10.0, 0.3: 5.0} and yes_asks == {}
+    with db.read() as conn:
+        n = conn.execute("SELECT COUNT(*) AS C FROM trades WHERE MARKET = %s",
+                         (ref.condition_id,)).fetchone()["C"]
+    assert n == 0          # pure resting insert — no matching/settlement
+
+
+def test_place_resting_orders_skips_underfunded():
+    _s, db, admin, client, ref, user = _rig()
+    order = OrderService(db, admin)
+    # A SELL needs CTF inventory the freshly-provisioned house doesn't hold yet,
+    # so its balance check fails and it's omitted — no exception, no partial book.
+    reqs = [PlaceOrderRequest(token_id=ref.yes_token, side="SELL",
+                              price=Decimal("0.60"), size=Decimal("7"), order_type="GTC")]
+    ids = order.place_resting_orders(user, reqs)
+    assert ids == []
+    _, yes_asks = _levels(client, ref.yes_token)
+    assert yes_asks == {}
