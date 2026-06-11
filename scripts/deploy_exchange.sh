@@ -139,7 +139,7 @@ echo "Exchange    deployed: $EXCHANGE"
 mkdir -p "$AGENTPIT_DIR/deployments"
 cat > "$AGENTPIT_DIR/deployments/local.json" <<EOF
 {
-  "chain_id": 137,
+  "chain_id": 31337,
   "rpc_url": "$RPC_URL",
   "admin": "$ADMIN",
   "usd": "$USD",
