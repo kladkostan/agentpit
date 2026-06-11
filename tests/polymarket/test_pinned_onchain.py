@@ -5,6 +5,8 @@ The Gamma fetch is faked so the test is deterministic (no live Polymarket).
 
 import secrets
 
+import pytest
+
 import agentpit.polymarket.pinned as pinned
 from agentpit.config import Settings
 from agentpit.datastructures.market_state import MarketState
@@ -14,6 +16,13 @@ from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 from tests.db_helpers import fresh_test_conn
+
+
+@pytest.fixture()
+def db():
+    conn = fresh_test_conn()
+    yield conn
+    conn.close()
 
 
 def _admin() -> OnchainAdmin:
@@ -50,8 +59,7 @@ def _fake_window_event() -> dict:
     }
 
 
-def test_pin_sync_prepares_window_and_groups_under_series(monkeypatch):
-    conn = fresh_test_conn()
+def test_pin_sync_prepares_window_and_groups_under_series(monkeypatch, db):
     admin = _admin()
 
     # Capture the upstream conditionId from the SAME event the sync consumes,
@@ -61,7 +69,7 @@ def test_pin_sync_prepares_window_and_groups_under_series(monkeypatch):
     monkeypatch.setattr(pinned, "fetch_event_by_slug", lambda slug: event)
 
     created = pinned.sync_pinned_series(
-        conn, admin, pinned=[("btc-updown-5m", 300)], now=1781193601
+        db, admin, pinned=[("btc-updown-5m", 300)], now=1781193601
     )
 
     assert len(created) == 1
@@ -72,12 +80,10 @@ def test_pin_sync_prepares_window_and_groups_under_series(monkeypatch):
     assert market.market_state == MarketState.ACTIVE
     assert len(market.erc1155_tokens) == 2
 
-    re = TableRead.read_market(conn, market.market_id)
-    assert re is not None and re.event_id is not None
+    market_row = TableRead.read_market(db, market.market_id)
+    assert market_row is not None and market_row.event_id is not None
 
-    event_row = TableRead.get_event_by_slug(conn, "btc-up-or-down-5m")
+    event_row = TableRead.get_event_by_slug(db, "btc-up-or-down-5m")
     assert event_row is not None
-    assert event_row.event_id == re.event_id
+    assert event_row.event_id == market_row.event_id
     assert event_row.polymarket_event_id == "10684"
-
-    conn.close()
