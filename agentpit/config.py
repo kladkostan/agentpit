@@ -130,9 +130,10 @@ class Settings(BaseSettings):
     liquidity_house_account_count: int = Field(
         default=1, validation_alias="AGENTPIT_LIQUIDITY_HOUSE_ACCOUNTS"
     )
-    # 1 faucet drip = $1B apUSD. 4 drips cover splits + bids across all markets.
+    # 1 faucet drip = $1B apUSD. Mirroring full upstream book depth across the
+    # whole synced market set (300+) drains $4B; 20 ($20B) gives real headroom.
     liquidity_funding_drips: int = Field(
-        default=4, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
+        default=20, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
     )
     mirror_assets_per_connection: int = Field(
         default=200, validation_alias="AGENTPIT_MIRROR_ASSETS_PER_CONNECTION"
