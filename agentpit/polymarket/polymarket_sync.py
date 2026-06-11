@@ -612,6 +612,7 @@ def mirror_polymarket_resolutions(
     admin: OnchainAdmin,
     *,
     fetcher=_default_resolution_fetcher,
+    now: int,
 ) -> int:
     """Walk synced markets and mirror upstream resolutions onto the local CTF.
 
@@ -625,7 +626,7 @@ def mirror_polymarket_resolutions(
     from eth_utils.crypto import keccak  # local import: avoid circulars at module load
 
     resolved_count = 0
-    for market in TableRead.list_all_markets(db):
+    for market in TableRead.list_unresolved_ended_markets(db, now):
         if market.polymarket_condition_id is None:
             # Synced before the upstream-conditionId column existed, or a
             # locally-authored market with no Polymarket linkage. Either way,

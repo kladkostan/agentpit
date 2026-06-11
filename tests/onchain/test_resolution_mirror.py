@@ -106,7 +106,7 @@ def test_mirror_resolves_local_market_when_upstream_settled():
         return fake_response
 
     with db.write() as conn:
-        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher)
+        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher, now=9_999_999_999)
         row = TableRead.read_market(conn, market.market_id)
     assert row is not None
     assert row.market_state == MarketState.RESOLVED
@@ -139,7 +139,7 @@ def test_mirror_skips_when_upstream_not_resolved():
         return dict(pm, closed=False)
 
     with db.write() as conn:
-        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher)
+        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher, now=9_999_999_999)
         row = TableRead.read_market(conn, market.market_id)
     assert row is not None
     assert row.market_state == MarketState.ACTIVE
@@ -166,10 +166,10 @@ def test_mirror_is_idempotent_on_already_resolved_market():
         return fake
 
     with db.write() as conn:
-        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher)
+        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher, now=9_999_999_999)
         # Second pass must not raise (e.g. ConditionAlreadyResolved on CTF)
         # and must leave state unchanged.
-        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher)
+        mirror_polymarket_resolutions(conn, admin, fetcher=fetcher, now=9_999_999_999)
         row = TableRead.read_market(conn, market.market_id)
     assert row is not None
     assert row.market_state == MarketState.RESOLVED
