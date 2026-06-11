@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     pin_requote_seconds: float = Field(
         default=1.0, validation_alias="AGENTPIT_PIN_REQUOTE_SECONDS"
     )
+    # How often just-ended pinned windows are checked for upstream resolution +
+    # auto-redeem. The full resolution loop runs every few minutes (fine for
+    # long-dated markets), but a 5-min window's winner should be paid within
+    # seconds of the upstream market closing, so its windows get their own fast
+    # poll. Cheap: scoped to the few most-recently-ended pinned windows.
+    pin_resolve_seconds: float = Field(
+        default=20.0, validation_alias="AGENTPIT_PIN_RESOLVE_SECONDS"
+    )
 
     @model_validator(mode="after")
     def _default_resolution_mirror_enabled(self) -> "Settings":

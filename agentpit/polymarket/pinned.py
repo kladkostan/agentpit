@@ -177,3 +177,27 @@ def current_window_market_ids(
         if markets:
             ids.append(markets[0].market_id)
     return ids
+
+
+def ended_unresolved_window_ids(
+    conn, pinned: list[tuple[str, int]], now: int, *, horizon_seconds: int = 900
+) -> list[int]:
+    """Market ids of each pinned series' windows that have ENDED but are not yet
+    RESOLVED/CANCELLED, within `horizon_seconds` of now.
+
+    Drives the fast resolve loop: pay winners within seconds of the upstream
+    market closing, instead of waiting for the slow full-scan resolution cycle.
+    The horizon bounds the set to the few most-recent windows, so an old window
+    that never resolved upstream is dropped rather than re-fetched forever.
+    """
+    ids: list[int] = []
+    for base, _ in pinned:
+        rows = conn.execute(
+            "SELECT MARKET_ID FROM markets "
+            "WHERE SLUG LIKE %s "
+            "AND COALESCE(MARKET_STATE, 'DRAFT') NOT IN ('RESOLVED', 'CANCELLED') "
+            "AND END_DATE IS NOT NULL AND END_DATE <= %s AND END_DATE > %s",
+            (f"{base}-%", now, now - horizon_seconds),
+        ).fetchall()
+        ids.extend(int(r["MARKET_ID"]) for r in rows)
+    return ids

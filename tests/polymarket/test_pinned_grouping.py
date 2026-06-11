@@ -43,6 +43,37 @@ def test_current_window_market_ids_finds_live_window():
     conn.close()
 
 
+def test_ended_unresolved_window_ids_filters_by_state_and_horizon():
+    """Only recently-ended, not-yet-resolved windows of the series are returned
+    — the set the fast resolve/redeem loop checks against upstream."""
+    conn = fresh_test_conn()
+    now = 1781193600
+
+    def _mk(slug: str, end_date: int, state: str) -> int:
+        req = CreateMarketRequest(
+            question="w", description="d",
+            erc1155_tokens=[("u", "Up"), ("d", "Down")], slug=slug,
+            condition_id=ConditionId("0x" + secrets.token_hex(32)),
+            state=MarketState.ACTIVE,
+        )
+        m = TableWrite.create_market(conn, req, is_polygon_market=False)
+        conn.execute(
+            "UPDATE markets SET END_DATE=%s, MARKET_STATE=%s WHERE MARKET_ID=%s",
+            (end_date, state, m.market_id),
+        )
+        return m.market_id
+
+    ended = _mk("btc-updown-5m-100", now - 60, "ACTIVE")       # recently ended -> in
+    _mk("btc-updown-5m-200", now - 60, "RESOLVED")             # resolved -> out
+    _mk("btc-updown-5m-300", now + 60, "ACTIVE")              # not ended yet -> out
+    _mk("btc-updown-5m-400", now - 100_000, "ACTIVE")         # beyond horizon -> out
+    _mk("eth-updown-5m-100", now - 60, "ACTIVE")              # other series -> out
+
+    ids = pinned.ended_unresolved_window_ids(conn, [("btc-updown-5m", 300)], now)
+    assert ids == [ended]
+    conn.close()
+
+
 def _window_event(window_ts: int) -> dict:
     """Two distinct windows of the SAME series (id 10684) — unique market
     id/conditionId/question per window so they don't collide on dedup."""

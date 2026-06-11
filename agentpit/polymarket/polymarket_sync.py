@@ -633,6 +633,7 @@ def mirror_polymarket_resolutions(
     *,
     fetcher=_default_resolution_fetcher,
     now: int,
+    market_ids: "set[int] | None" = None,
 ) -> int:
     """Walk synced markets and mirror upstream resolutions onto the local CTF.
 
@@ -641,12 +642,19 @@ def mirror_polymarket_resolutions(
     `admin.report_payouts` against the local CTF, then flips the local row
     to RESOLVED. Idempotent on subsequent runs.
 
+    `market_ids`, when given, restricts the pass to those market ids — used by
+    the fast per-window resolve loop to check only a couple of just-ended
+    pinned windows instead of scanning (and upstream-fetching) every market.
+
     Returns the count of markets newly resolved this pass.
     """
     from eth_utils.crypto import keccak  # local import: avoid circulars at module load
 
     resolved_count = 0
-    for market in TableRead.list_unresolved_ended_markets(db, now):
+    candidates = TableRead.list_unresolved_ended_markets(db, now)
+    if market_ids is not None:
+        candidates = [m for m in candidates if m.market_id in market_ids]
+    for market in candidates:
         if market.polymarket_condition_id is None:
             # Synced before the upstream-conditionId column existed, or a
             # locally-authored market with no Polymarket linkage. Either way,

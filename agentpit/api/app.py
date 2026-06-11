@@ -41,6 +41,7 @@ from agentpit.liquidity.house_accounts import HouseAccountProvisioner, email_for
 from agentpit.liquidity.mirror import MirrorEngine
 from agentpit.polymarket.pinned import (
     current_window_market_ids,
+    ended_unresolved_window_ids,
     next_wake_delay,
     sync_pinned_series,
 )
@@ -193,6 +194,47 @@ async def _pin_requote_loop(
         except Exception:
             log.exception("Pin re-quote failed")
         await asyncio.sleep(settings.pin_requote_seconds)
+
+
+def _run_pin_resolve(
+    db: DbSession, admin: OnchainAdmin, settings: Settings
+) -> tuple[int, int]:
+    """Resolve + redeem just-ended pinned windows. Resolution is scoped to the
+    few recently-ended windows (cheap — only those hit upstream); redeem runs
+    against all resolved-unredeemed markets (a no-op query when there's nothing,
+    so a redeem that failed last pass is retried promptly)."""
+    now = int(time.time())
+    with db.write() as conn:
+        ids = ended_unresolved_window_ids(conn, settings.pinned_series, now)
+        resolved = (
+            mirror_polymarket_resolutions(conn, admin, now=now, market_ids=set(ids))
+            if ids
+            else 0
+        )
+    redeemed = 0
+    if settings.auto_redeem_enabled:
+        redeemed = auto_redeem_resolved_markets(db, admin)
+    return resolved, redeemed
+
+
+async def _pin_resolve_loop(
+    db: DbSession, admin: OnchainAdmin, settings: Settings
+) -> None:
+    # A 5-min window's winner should be paid within seconds of the upstream
+    # market closing (which lags the local window end by a few minutes), not on
+    # the slow full-scan resolution cycle — so poll the recently-ended windows.
+    while True:
+        try:
+            resolved, redeemed = await asyncio.to_thread(
+                _run_pin_resolve, db, admin, settings
+            )
+            if resolved or redeemed:
+                log.info("Pin-resolve: %d resolved, %d redeemed", resolved, redeemed)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Pin-resolve failed")
+        await asyncio.sleep(settings.pin_resolve_seconds)
 
 
 def _run_snapshot_tick(db: DbSession, retention_seconds: int) -> tuple[int, int]:
@@ -361,6 +403,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _pin_requote_loop(db_session, settings, mirror_engine)
             )
 
+        pin_resolve_task: asyncio.Task | None = None
+        if settings.pin_sync_enabled and settings.pinned_series:
+            log.info(
+                "Pin-resolve enabled (every %.0fs) — fast payout for ended windows",
+                settings.pin_resolve_seconds,
+            )
+            pin_resolve_task = asyncio.create_task(
+                _pin_resolve_loop(db_session, onchain_admin, settings)
+            )
+
         try:
             yield
         finally:
@@ -370,6 +422,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 resolution_task,
                 pin_task,
                 requote_task,
+                pin_resolve_task,
                 *mirror_tasks,
             ):
                 if task is None:
