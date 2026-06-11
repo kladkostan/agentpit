@@ -4,7 +4,7 @@
 
 **Goal:** Make agentpit's local on-chain stack fully self-contained — a clean anvil chain (no Polygon fork) with every contract (including ConditionalTokens) deployed from scratch, sourced from a pinned `yavrsky/ctf-exchange` git submodule.
 
-**Architecture:** ConditionalTokens is deployed from its committed creation bytecode (`vendor/ctf-exchange/artifacts/ConditionalTokens.json`) via `cast send --create`; AgentpitUSD/Faucet/CTFExchange are deployed by the existing `deployAgentpitStack` forge script (unchanged Solidity) with `address(0)` proxy/safe factories (EOA-only signatures). The node runs `anvil --chain-id 137` with no fork. The contract repo is vendored as a submodule with only its 4 needed nested libs initialized.
+**Architecture:** ConditionalTokens is deployed from its committed creation bytecode (`vendor/ctf-exchange/artifacts/ConditionalTokens.json`) via `cast send --create`; AgentpitUSD/Faucet/CTFExchange are deployed by the existing `deployAgentpitStack` forge script (unchanged Solidity) with `address(0)` proxy/safe factories (EOA-only signatures). The node runs `anvil --chain-id 31337` with no fork. The contract repo is vendored as a submodule with only its 4 needed nested libs initialized.
 
 **Tech Stack:** bash, Foundry (`anvil`, `cast`, `forge`), git submodules, Python 3.13 + web3 7.16, pytest.
 
@@ -119,11 +119,14 @@ Full new contents:
 # Run a local anvil node — a clean chain with NO Polygon fork.
 # Usage: ./scripts/run_node.sh
 #
-# The node listens on 127.0.0.1:8545 with chain id 137. Chain id 137 is kept
-# (not inherited from any fork) so EIP-712 order signatures and
-# deployments/local.json stay byte-identical to before. Every contract is
-# deployed from scratch by scripts/deploy_exchange.sh — nothing is inherited
-# from Polygon mainnet.
+# The node listens on 127.0.0.1:8545 with chain id 31337 (anvil's default).
+# The chain id is not load-bearing: EIP-712 order signing reads it from
+# deployments/local.json (order_signer uses deployment.chain_id) and the web3
+# client verifies node == local.json, so any value works as long as the node,
+# local.json, and signing agree. 31337 is chosen because the vendored
+# ctf-exchange .gitignore already excludes broadcast/*/31337/, so forge's
+# per-deploy broadcast logs stay out of git. Every contract is deployed from
+# scratch by scripts/deploy_exchange.sh — nothing is inherited from Polygon.
 
 set -euo pipefail
 
@@ -132,12 +135,12 @@ if ! command -v anvil >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Starting clean local node on 127.0.0.1:8545 (chain id 137, no fork)"
+echo "Starting clean local node on 127.0.0.1:8545 (chain id 31337, no fork)"
 
 exec anvil \
   --host 127.0.0.1 \
   --port 8545 \
-  --chain-id 137
+  --chain-id 31337
 ```
 
 - [ ] **Step 2: Start the node in the background and verify it is a clean chain**
@@ -150,7 +153,7 @@ cast chain-id --rpc-url http://127.0.0.1:8545
 cast block-number --rpc-url http://127.0.0.1:8545
 cast code 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045 --rpc-url http://127.0.0.1:8545
 ```
-Expected: chain-id `137`; block-number is low (`0` or single digits); `cast code` for the old Polygon CTF prints `0x` (empty) — proving there is no fork. Leave the node running for the next tasks.
+Expected: chain-id `31337`; block-number is low (`0` or single digits); `cast code` for the old Polygon CTF prints `0x` (empty) — proving there is no fork. Leave the node running for the next tasks.
 
 - [ ] **Step 3: Commit**
 
@@ -311,7 +314,7 @@ echo "Exchange    deployed: $EXCHANGE"
 mkdir -p "$AGENTPIT_DIR/deployments"
 cat > "$AGENTPIT_DIR/deployments/local.json" <<EOF
 {
-  "chain_id": 137,
+  "chain_id": 31337,
   "rpc_url": "$RPC_URL",
   "admin": "$ADMIN",
   "usd": "$USD",

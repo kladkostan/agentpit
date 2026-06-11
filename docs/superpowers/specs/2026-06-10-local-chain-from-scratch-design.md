@@ -92,9 +92,13 @@ make it fragile and externally-coupled:
 
 3. `scripts/run_node.sh`: drop `--fork-url`, the `POLYGON_RPC` requirement, and
    the `FORK_BLOCK` logic. Body becomes:
-   `anvil --host 127.0.0.1 --port 8545 --chain-id 137`.
-   **Keep chain id 137** so the EIP-712 domain, `deployments/local.json`, and
-   `order_signer.py` are unchanged.
+   `anvil --host 127.0.0.1 --port 8545 --chain-id 31337`.
+   **Use chain id 31337** (anvil's default). The chain id is not load-bearing —
+   order signing reads it from `local.json` (`deployment.chain_id`) and the web3
+   client verifies node == local.json — and 31337 keeps forge's per-deploy
+   broadcast logs out of git, since the vendored ctf-exchange `.gitignore`
+   already excludes `broadcast/*/31337/` (but not `/137/`, which it treats as a
+   real-Polygon deployment record).
 
 ### Part C — deploy
 
@@ -143,7 +147,7 @@ make it fragile and externally-coupled:
 
 ## Data flow (unchanged for consumers)
 
-`run_node.sh` (clean anvil, chain 137) → `deploy_exchange.sh`
+`run_node.sh` (clean anvil, chain 31337) → `deploy_exchange.sh`
 (ConditionalTokens → AgentpitUSD → Faucet → CTFExchange) →
 `deployments/local.json` (same keys; `ctf` now local, factories `0x0`) → Python
 loads it exactly as before.
@@ -165,7 +169,9 @@ loads it exactly as before.
   `Faucet.sol`, modified `ExchangeDeployment.s.sol`) leave the loop — the deploy
   will use the fork's version. Before starting, diff the local working tree
   against `yavrsky/ctf-exchange@main` so nothing intended is lost.
-- **chain id 137 on a non-forked node** looks unusual but is harmless and keeps
-  signing/config byte-identical.
+- **chain id 31337** (anvil's default) is used rather than 137: the chain id is
+  not load-bearing (signing reads it from `local.json`), and 31337 keeps forge's
+  per-deploy broadcast logs gitignored in the vendored submodule (the fork's
+  `.gitignore` excludes `broadcast/*/31337/` but not `/137/`).
 - **`cast --create` with large bytecode** — ConditionalTokens deploys on mainnet,
   so the size limit is fine on anvil too.
