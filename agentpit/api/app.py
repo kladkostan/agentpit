@@ -39,6 +39,7 @@ from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 from agentpit.liquidity.house_accounts import HouseAccountProvisioner, email_for
 from agentpit.liquidity.mirror import MirrorEngine
+from agentpit.polymarket.pinned import next_wake_delay, sync_pinned_series
 from agentpit.polymarket.polymarket_sync import (
     auto_redeem_resolved_markets,
     fetch_and_sync_polymarket_markets,
@@ -114,6 +115,32 @@ async def _resolution_mirror_loop(
         except Exception:
             log.exception("Resolution cycle failed")
         await asyncio.sleep(settings.resolution_mirror_interval_seconds)
+
+
+def _run_pin_sync(db: DbSession, admin: OnchainAdmin, settings: Settings) -> int:
+    now = int(time.time())
+    with db.write() as conn:
+        created = sync_pinned_series(conn, admin, settings.pinned_series, now)
+    return len(created)
+
+
+async def _pin_sync_loop(
+    db: DbSession, admin: OnchainAdmin, settings: Settings
+) -> None:
+    # Align to the smallest configured interval; wake `offset` seconds after
+    # each boundary so the now-live window is synced promptly.
+    align = min(interval for _, interval in settings.pinned_series)
+    while True:
+        try:
+            count = await asyncio.to_thread(_run_pin_sync, db, admin, settings)
+            log.info("Pin-sync: synced %d current window(s)", count)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Pin-sync failed")
+        await asyncio.sleep(
+            next_wake_delay(int(time.time()), align, settings.pin_sync_offset_seconds)
+        )
 
 
 def _run_snapshot_tick(db: DbSession, retention_seconds: int) -> tuple[int, int]:
@@ -249,10 +276,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "(set RESOLUTION_MIRROR_ENABLED=true to enable)"
             )
 
+        pin_task: asyncio.Task | None = None
+        if settings.pin_sync_enabled and settings.pinned_series:
+            align = min(i for _, i in settings.pinned_series)
+            log.info(
+                "Pin-sync enabled (%d series, align=%ds, offset=%ds)",
+                len(settings.pinned_series),
+                align,
+                settings.pin_sync_offset_seconds,
+            )
+            pin_task = asyncio.create_task(
+                _pin_sync_loop(db_session, onchain_admin, settings)
+            )
+        else:
+            log.info(
+                "Pin-sync disabled (set PIN_SYNC_ENABLED=true/SYNC and PINNED_SERIES)"
+            )
+
         try:
             yield
         finally:
-            for task in (sync_task, snapshot_task, resolution_task, *mirror_tasks):
+            for task in (
+                sync_task,
+                snapshot_task,
+                resolution_task,
+                pin_task,
+                *mirror_tasks,
+            ):
                 if task is None:
                     continue
                 task.cancel()
