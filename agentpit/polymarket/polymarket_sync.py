@@ -687,6 +687,84 @@ def mirror_polymarket_resolutions(
     return resolved_count
 
 
+def auto_redeem_resolved_markets(
+    db, admin: OnchainAdmin, *, gas_topup_wei: int = 10**18
+) -> int:
+    """Redeem every holder of each RESOLVED, not-yet-fully-redeemed market.
+
+    `db` is a DbSession (not a raw connection) because PositionService manages
+    its own read/write connections. For each candidate market, scans the
+    participant accounts (trades + split/merge, including the house bot),
+    redeems any with a nonzero on-chain token balance using their custodial
+    key, and flags the market FULLY_REDEEMED once no holder remains.
+
+    Returns the number of holder redemptions performed.
+    """
+    from agentpit.services.position_service import PositionService
+
+    svc = PositionService(db, admin)
+    redeemed = 0
+    with db.read() as conn:
+        markets = TableRead.list_resolved_unredeemed_markets(conn)
+
+    for market in markets:
+        token_strs = [t for t, _ in market.erc1155_tokens]
+        token_ints = [int(t) for t in token_strs]
+        with db.read() as conn:
+            api_keys = TableRead.list_participant_api_keys_for_market(
+                conn, market.market_id, token_strs
+            )
+
+        any_error = False
+        for api_key in api_keys:
+            with db.read() as conn:
+                user = TableRead.get_user_by_api_key(conn, api_key)
+            if user is None:
+                continue
+            if not any(
+                admin.ctf_balance(user.eth_address, tid) > 0 for tid in token_ints
+            ):
+                continue
+            try:
+                try:
+                    admin.fund_gas(user.eth_address, gas_topup_wei)
+                except Exception:
+                    logger.warning(
+                        "gas top-up failed for %s on market %s (continuing)",
+                        user.eth_address,
+                        market.market_id,
+                    )
+                svc.redeem(user, market.market_id)
+                redeemed += 1
+            except Exception:
+                logger.exception(
+                    "auto-redeem failed for %s on market %s",
+                    user.eth_address,
+                    market.market_id,
+                )
+                any_error = True
+
+        if any_error:
+            continue  # leave FULLY_REDEEMED unset; retried next pass
+
+        still_held = False
+        for api_key in api_keys:
+            with db.read() as conn:
+                user = TableRead.get_user_by_api_key(conn, api_key)
+            if user is None:
+                continue
+            if any(
+                admin.ctf_balance(user.eth_address, tid) > 0 for tid in token_ints
+            ):
+                still_held = True
+                break
+        if not still_held:
+            with db.write() as conn:
+                TableWrite.mark_fully_redeemed(conn, market.market_id)
+
+    return redeemed
+
+
 def sync_market_state(db, condition_id: ConditionId) -> None:
     """Placeholder until upstream→local resolution mirroring is built.
 
