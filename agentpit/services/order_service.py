@@ -38,6 +38,38 @@ _USDC_SCALE = Decimal(10**_USDC_DECIMALS)
 _PRICE_ONE = 10**_USDC_DECIMALS  # stored PRICE units that equal $1.00
 _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 
+# The CTFExchange decides crossing on the EXACT order amounts, not our rounded
+# stored PRICE: price = makerAmount*1e18/takerAmount (BUY) or
+# takerAmount*1e18/makerAmount (SELL), floored, with ONE = 1e18. We replicate
+# it bit-for-bit so a DB match can never trip the on-chain NotCrossing revert
+# (which reverts the whole matchOrders batch). See vendor CalculatorHelper.sol.
+_EXCHANGE_ONE = 10**18
+
+
+def _exchange_price(maker_amount: int, taker_amount: int, side: str) -> int:
+    """CalculatorHelper._calculatePrice — floored, scaled by 1e18."""
+    if side == "BUY":
+        return (maker_amount * _EXCHANGE_ONE) // taker_amount if taker_amount else 0
+    return (taker_amount * _EXCHANGE_ONE) // maker_amount if maker_amount else 0
+
+
+def _orders_cross(
+    taker_maker: int, taker_taker: int, taker_side: str,
+    maker_maker: int, maker_taker: int, maker_side: str,
+) -> bool:
+    """CalculatorHelper.isCrossing — exact replica over both orders' amounts."""
+    if taker_taker == 0 or maker_taker == 0:
+        return True
+    pa = _exchange_price(taker_maker, taker_taker, taker_side)
+    pb = _exchange_price(maker_maker, maker_taker, maker_side)
+    if taker_side == "BUY":
+        if maker_side == "BUY":
+            return pa + pb >= _EXCHANGE_ONE   # both bids → MINT
+        return pa >= pb                       # taker bid vs maker ask
+    if maker_side == "BUY":
+        return pb >= pa                       # taker ask vs maker bid
+    return pa + pb <= _EXCHANGE_ONE           # both asks → MERGE
+
 
 class OrderService:
     """Place + match + settle the simple-trade flow.
@@ -800,6 +832,16 @@ class OrderService:
                 break
             maker_remaining = int(maker["REMAINING_AMOUNT"])
             if maker_remaining <= 0:
+                continue
+            # The SQL pre-filter used the rounded stored PRICE; confirm the pair
+            # crosses on the EXACT amounts (what the exchange checks), so a match
+            # at the rounding boundary can't revert the on-chain matchOrders.
+            if not _orders_cross(
+                int(taker_row["MAKER_AMOUNT"]), int(taker_row["TAKER_AMOUNT"]),
+                taker_side,
+                int(maker["MAKER_AMOUNT"]), int(maker["TAKER_AMOUNT"]),
+                maker["SIDE"],
+            ):
                 continue
             trade_size = min(maker_remaining, taker_remaining)
             taker_remaining -= trade_size
