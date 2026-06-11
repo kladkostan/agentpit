@@ -444,6 +444,69 @@ class TableRead:
         return [_row_to_market(row) for row in rows]
 
     @staticmethod
+    def list_unresolved_ended_markets(
+        db: psycopg.Connection, now: int
+    ) -> "list[Market]":
+        """Resolution candidates: not RESOLVED/CANCELLED and past END_DATE.
+
+        Bounds the resolution mirror to markets that could plausibly be settled
+        upstream, instead of every unresolved market.
+        """
+        rows = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "WHERE MARKET_STATE NOT IN ('RESOLVED', 'CANCELLED') "
+            "AND END_DATE IS NOT NULL AND END_DATE < %s "
+            "ORDER BY MARKET_ID",
+            (now,),
+        ).fetchall()
+        return [_row_to_market(row) for row in rows]
+
+    @staticmethod
+    def list_resolved_unredeemed_markets(
+        db: psycopg.Connection,
+    ) -> "list[Market]":
+        """Auto-redeem candidates: RESOLVED and not yet fully redeemed."""
+        rows = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "WHERE MARKET_STATE = 'RESOLVED' "
+            "AND COALESCE(FULLY_REDEEMED, FALSE) = FALSE "
+            "ORDER BY MARKET_ID"
+        ).fetchall()
+        return [_row_to_market(row) for row in rows]
+
+    @staticmethod
+    def list_participant_api_keys_for_market(
+        db: psycopg.Connection, market_id: int, token_ids: "list[str]"
+    ) -> "set[str]":
+        """Distinct api_keys that traded the market's tokens or split/merged it.
+
+        Scopes the auto-redeem holder scan to real participants (including the
+        house/mirror bot account, which appears as a trade maker).
+        """
+        keys: set[str] = set()
+        if token_ids:
+            placeholders = ",".join("%s" for _ in token_ids)
+            rows = db.execute(
+                f"SELECT TAKER_API_KEY, MAKER_API_KEY FROM trades "
+                f"WHERE ASSET_ID IN ({placeholders})",
+                token_ids,
+            ).fetchall()
+            for r in rows:
+                if r["TAKER_API_KEY"]:
+                    keys.add(r["TAKER_API_KEY"])
+                if r["MAKER_API_KEY"]:
+                    keys.add(r["MAKER_API_KEY"])
+        rows = db.execute(
+            "SELECT DISTINCT API_KEY FROM transactions "
+            "WHERE MARKET_ID = %s AND TRANSACTION_TYPE IN ('SPLIT', 'MERGE')",
+            (market_id,),
+        ).fetchall()
+        for r in rows:
+            if r["API_KEY"]:
+                keys.add(r["API_KEY"])
+        return keys
+
+    @staticmethod
     def list_live_order_levels(
         db: psycopg.Connection, api_key: str, token_ids: list[str]
     ) -> list[dict]:
