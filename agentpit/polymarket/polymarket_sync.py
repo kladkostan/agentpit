@@ -181,6 +181,8 @@ def fetch_all_polymarket_markets(
     active: bool = True,
     archived: bool = False,
     liquidity_threshold: float = 1000000,
+    order: str | None = None,
+    max_markets: int | None = None,
 ) -> list[dict]:
     """
     Fetch all markets from Polymarket's Gamma API, paginating through all pages.
@@ -214,6 +216,10 @@ def fetch_all_polymarket_markets(
         query_parts.append("closed=true")
     else:
         query_parts.append("closed=false")
+
+    if order:
+        query_parts.append(f"order={order}")
+        query_parts.append("ascending=false")
 
     base_query = "&".join(query_parts)
 
@@ -268,10 +274,16 @@ def fetch_all_polymarket_markets(
             "Fetched %d markets (total so far: %d)", len(data), len(all_markets)
         )
 
+        if max_markets is not None and len(all_markets) >= max_markets:
+            break
+
         if len(data) < limit:
             break
 
         offset += limit
+
+    if max_markets is not None:
+        all_markets = all_markets[:max_markets]
 
     logger.info("Finished fetching %d markets from Polymarket", len(all_markets))
     return all_markets
@@ -478,16 +490,27 @@ def fetch_and_sync_polymarket_markets(
     db,
     admin: OnchainAdmin,
     host: str = POLYMARKET_GAMMA_URL,
+    *,
+    max_markets: int = 300,
+    liquidity_min: float = 0.0,
 ) -> list[Market]:
-    pm_markets = fetch_all_polymarket_markets(host)
-    created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
+    """Discover + locally create the trending Polymarket markets.
 
-    try:
-        resolved = mirror_polymarket_resolutions(db, admin)
-        if resolved:
-            logger.info("Mirrored %d upstream resolutions to local CTF", resolved)
-    except Exception:
-        logger.exception("resolution mirror pass failed")
+    Fetches the top markets by 24h volume (descending) from Gamma and syncs any
+    not already present onto the local CTF. Discovery only — resolution
+    mirroring + auto-redeem run in their own loop.
+
+    Args:
+        max_markets: cap on how many top-by-volume markets to consider per pass.
+        liquidity_min: minimum max(liquidity, volume) floor; 0 = no floor.
+    """
+    pm_markets = fetch_all_polymarket_markets(
+        host,
+        liquidity_threshold=liquidity_min,
+        order="volume_24hr",
+        max_markets=max_markets,
+    )
+    created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
     return created_markets
 
 
