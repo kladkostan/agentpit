@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     pin_resolve_seconds: float = Field(
         default=20.0, validation_alias="AGENTPIT_PIN_RESOLVE_SECONDS"
     )
+    # Fast re-quoting cancels + re-places the whole book every second, so the
+    # orders table fills with dead 'cancelled' rows. They never slow the live
+    # queries (a partial index covers only live rows), but unbounded growth eats
+    # disk, so purge cancelled rows older than the retention on a slow loop.
+    order_cleanup_interval_seconds: float = Field(
+        default=60.0, validation_alias="AGENTPIT_ORDER_CLEANUP_INTERVAL_SECONDS"
+    )
+    order_cancelled_retention_seconds: int = Field(
+        default=600, validation_alias="AGENTPIT_ORDER_CANCELLED_RETENTION_SECONDS"
+    )
 
     @model_validator(mode="after")
     def _default_resolution_mirror_enabled(self) -> "Settings":

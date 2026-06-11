@@ -33,6 +33,7 @@ from agentpit.auth.dependencies import make_current_user_dep
 from agentpit.auth.jwt import JwtCoder
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
+from agentpit.db.table_write import TableWrite
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
@@ -237,6 +238,30 @@ async def _pin_resolve_loop(
         await asyncio.sleep(settings.pin_resolve_seconds)
 
 
+def _run_order_cleanup(db: DbSession, settings: Settings) -> int:
+    now = int(time.time())
+    with db.write() as conn:
+        return TableWrite.purge_cancelled_orders(
+            conn, now - settings.order_cancelled_retention_seconds
+        )
+
+
+async def _order_cleanup_loop(db: DbSession, settings: Settings) -> None:
+    # Fast re-quoting leaves dead 'cancelled' rows behind; purge old ones so the
+    # orders table doesn't grow without bound (the live queries stay fast either
+    # way via the partial index).
+    while True:
+        try:
+            purged = await asyncio.to_thread(_run_order_cleanup, db, settings)
+            if purged:
+                log.info("Order cleanup: purged %d old cancelled orders", purged)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Order cleanup failed")
+        await asyncio.sleep(settings.order_cleanup_interval_seconds)
+
+
 def _run_snapshot_tick(db: DbSession, retention_seconds: int) -> tuple[int, int]:
     service = SnapshotService(db)
     inserted = service.take_snapshot()
@@ -413,6 +438,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _pin_resolve_loop(db_session, onchain_admin, settings)
             )
 
+        order_cleanup_task: asyncio.Task | None = None
+        if settings.liquidity_engine_enabled:
+            log.info(
+                "Order cleanup enabled (every %.0fs, retention=%ds)",
+                settings.order_cleanup_interval_seconds,
+                settings.order_cancelled_retention_seconds,
+            )
+            order_cleanup_task = asyncio.create_task(
+                _order_cleanup_loop(db_session, settings)
+            )
+
         try:
             yield
         finally:
@@ -423,6 +459,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 pin_task,
                 requote_task,
                 pin_resolve_task,
+                order_cleanup_task,
                 *mirror_tasks,
             ):
                 if task is None:

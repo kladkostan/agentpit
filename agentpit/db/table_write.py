@@ -644,3 +644,14 @@ class TableWrite:
         market.market_state = MarketState.RESOLVED
         market.resolved_outcome = winning_outcome_index
         return market
+
+    @staticmethod
+    def purge_cancelled_orders(db: psycopg.Connection, before_ts: int) -> int:
+        """Delete cancelled orders created before `before_ts`. Cancelled orders
+        are resting quotes replaced before matching, so nothing references them;
+        this caps table growth from fast re-quoting. Returns rows removed."""
+        cur = db.execute(
+            "DELETE FROM orders WHERE STATUS = 'cancelled' AND CREATED_AT < %s",
+            (before_ts,),
+        )
+        return cur.rowcount

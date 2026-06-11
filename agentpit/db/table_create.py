@@ -76,6 +76,15 @@ class TableCreate:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_api_key ON orders(API_KEY)")
+        # The book / price / matcher queries all filter live orders by token; a
+        # partial index over just the live rows keeps them index-scans even as
+        # the table fills with cancelled rows from fast re-quoting.
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_orders_live_book
+                ON orders(TOKEN_ID, SIDE, PRICE) WHERE STATUS = 'live'
+            """
+        )
 
     @staticmethod
     def create_users_table(conn: psycopg.Connection) -> None:
