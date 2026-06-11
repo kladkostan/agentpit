@@ -23,6 +23,27 @@ def test_desired_levels_yes_verbatim_no_complement():
     }
 
 
+def test_desired_levels_caps_depth_to_top_of_book():
+    # 3 levels per side (best-first); depth=2 keeps only the 2 nearest the touch.
+    snap = _snap(
+        bids=[(400_000, 1), (390_000, 2), (380_000, 3)],
+        asks=[(410_000, 1), (420_000, 2), (430_000, 3)],
+    )
+    desired = desired_levels(snap, YES, NO, depth=2)
+    yes_buys = sorted(d.price_micro for d in desired if d.token_id == YES and d.side == "BUY")
+    yes_sells = sorted(d.price_micro for d in desired if d.token_id == YES and d.side == "SELL")
+    assert yes_buys == [390_000, 400_000]    # top 2 bids (380k dropped)
+    assert yes_sells == [410_000, 420_000]   # top 2 asks (430k dropped)
+    assert len(desired) == 8                 # (2 bids + 2 asks) x (YES + NO complement)
+
+
+def test_desired_levels_depth_zero_is_unbounded():
+    snap = _snap(bids=[(400_000, 1), (390_000, 2)], asks=[(410_000, 1)])
+    assert len(desired_levels(snap, YES, NO, depth=0)) == len(
+        desired_levels(snap, YES, NO)
+    )
+
+
 def test_desired_levels_never_cross_within_either_token():
     # Non-crossed YES snapshot must yield non-crossed YES and NO books (spec §5).
     snap = _snap(bids=[(400_000, 1), (300_000, 2)], asks=[(410_000, 1), (900_000, 3)])

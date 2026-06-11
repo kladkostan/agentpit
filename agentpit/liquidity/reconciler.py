@@ -38,13 +38,21 @@ class Placement:
     size_micro: int
 
 
-def desired_levels(snap: BookSnapshot, yes_token: str, no_token: str) -> list[Placement]:
-    """YES book verbatim + NO book as the exact 1-p complement (same sizes)."""
+def desired_levels(
+    snap: BookSnapshot, yes_token: str, no_token: str, depth: int = 0
+) -> list[Placement]:
+    """YES book verbatim + NO book as the exact 1-p complement (same sizes).
+
+    `depth` caps how many levels per side (nearest the touch) are mirrored;
+    snap.bids/asks are already best-first, so a slice takes the top of book.
+    `depth <= 0` mirrors the full book (1:1)."""
+    bids = snap.bids[:depth] if depth > 0 else snap.bids
+    asks = snap.asks[:depth] if depth > 0 else snap.asks
     out: list[Placement] = []
-    for p, s in snap.bids:
+    for p, s in bids:
         out.append(Placement(yes_token, "BUY", p, s))
         out.append(Placement(no_token, "SELL", MICRO - p, s))
-    for p, s in snap.asks:
+    for p, s in asks:
         out.append(Placement(yes_token, "SELL", p, s))
         out.append(Placement(no_token, "BUY", MICRO - p, s))
     return out
@@ -168,8 +176,9 @@ def reconcile_market(
                   int(r["PRICE"]), int(r["REMAINING_AMOUNT"]))
         for r in rows
     ]
-    cancels, places = diff_levels(desired_levels(snap, ref.yes_token, ref.no_token),
-                                  current)
+    cancels, places = diff_levels(
+        desired_levels(snap, ref.yes_token, ref.no_token, cfg.mirror_book_depth),
+        current)
 
     splits = 0
     try:

@@ -168,3 +168,10 @@ class Settings(BaseSettings):
     mirror_target_refresh_seconds: float = Field(
         default=15.0, validation_alias="AGENTPIT_MIRROR_TARGET_REFRESH_SECONDS"
     )
+    # Cap how many price levels per side the mirror replicates onto the local
+    # book. Each level is ~4 on-chain/DB order ops, so a deep book is the main
+    # cost when re-quoting a fast-moving window. The top levels carry the price
+    # the user sees; deeper levels rarely matter. 0 = unbounded (full 1:1).
+    mirror_book_depth: int = Field(
+        default=8, validation_alias="AGENTPIT_MIRROR_BOOK_DEPTH"
+    )
