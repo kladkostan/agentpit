@@ -137,6 +137,9 @@ def sync_pinned_series(
             # per-window event entry if the series is absent.
             group = series_event_metadata(event) or _event_entry(event)
             if group is None:
+                # Neither series nor window event carried slug/title (malformed
+                # upstream). Still create the market — tradeable beats grouped;
+                # the startup orphan-wrap will give it a singleton event.
                 logger.warning("pin-sync: event %s has no bindable metadata", slug)
             prepared: list[dict] = []
             for raw in raw_markets:

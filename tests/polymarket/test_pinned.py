@@ -202,3 +202,45 @@ def test_sync_pinned_series_isolates_failing_series(monkeypatch):
         "CONN", "ADMIN", [("bad-series", 300), ("btc-updown-5m", 300)], 1781193601
     )
     assert out == ["ok"]  # bad series swallowed, good one still synced
+
+
+def test_sync_pinned_series_skips_event_with_no_markets(monkeypatch):
+    monkeypatch.setattr(
+        pinned,
+        "fetch_event_by_slug",
+        lambda slug: {"slug": slug, "title": "T", "series": [], "markets": []},
+    )
+    spy = {"n": 0}
+    monkeypatch.setattr(
+        pinned,
+        "create_polymarket_markets_if_needed",
+        lambda *a, **k: spy.__setitem__("n", spy["n"] + 1) or [],
+    )
+    out = pinned.sync_pinned_series("CONN", "ADMIN", [("btc-updown-5m", 300)], 1)
+    assert out == []
+    assert spy["n"] == 0  # event present but markets empty -> never creates
+
+
+def test_sync_pinned_series_falls_back_to_window_event_when_no_series(monkeypatch):
+    """When the event has no `series`, the per-window event entry is injected
+    so the market is still synced (per-window card) instead of orphaned."""
+    captured = {}
+
+    def fake_fetch(slug):
+        ev = _fake_window_event(1781193600, pmid=99, cond="0x" + "ef" * 32)
+        ev["series"] = []  # no series -> fall back to the window event entry
+        return ev
+
+    def fake_create(conn, prepared, admin):
+        captured["prepared"] = prepared
+        return ["m"]
+
+    monkeypatch.setattr(pinned, "fetch_event_by_slug", fake_fetch)
+    monkeypatch.setattr(pinned, "create_polymarket_markets_if_needed", fake_create)
+
+    out = pinned.sync_pinned_series(
+        "CONN", "ADMIN", [("btc-updown-5m", 300)], 1781193601
+    )
+    assert out == ["m"]
+    # Fallback injects the per-window event id (win-...), not a series id.
+    assert captured["prepared"][0]["events"][0]["id"] == "win-1781193600"
