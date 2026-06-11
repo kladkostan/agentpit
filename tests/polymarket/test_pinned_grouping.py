@@ -77,3 +77,49 @@ def test_two_windows_of_one_series_share_event(monkeypatch):
     assert event.polymarket_event_id == "10684"
 
     conn.close()
+
+
+def test_resyncing_same_window_dedups_and_keeps_grouping(monkeypatch):
+    """The pin loop re-fetches the SAME live window every cycle until the
+    boundary rolls. The second sync must hit the cheap path: no new market
+    (deduped by polymarket_id), and the event grouping persists.
+    """
+    conn = fresh_test_conn()
+
+    prepare_calls = {"n": 0}
+
+    def fake_prepare(admin, question, labels):
+        prepare_calls["n"] += 1
+        cid = ConditionId("0x" + secrets.token_hex(32))
+        toks = [
+            (str(int(secrets.token_hex(8), 16)), labels[0]),
+            (str(int(secrets.token_hex(8), 16)), labels[1]),
+        ]
+        return cid, toks
+
+    monkeypatch.setattr(sync, "prepare_market_on_chain", fake_prepare)
+
+    # Same window event returned on every fetch (same polymarket_id).
+    event = _window_event(1781193600)
+    monkeypatch.setattr(pinned, "fetch_event_by_slug", lambda slug: event)
+
+    first = pinned.sync_pinned_series(
+        conn, admin=None, pinned=[("btc-updown-5m", 300)], now=1781193601
+    )
+    second = pinned.sync_pinned_series(
+        conn, admin=None, pinned=[("btc-updown-5m", 300)], now=1781193602
+    )
+
+    assert len(first) == 1  # created on the first cycle
+    assert second == []  # cheap path: deduped, nothing new created
+    assert prepare_calls["n"] == 1  # on-chain prepare ran only once
+
+    # Grouping still intact after the cheap-path re-bind.
+    m1 = TableRead.read_market(conn, first[0].market_id)
+    assert m1 is not None and m1.event_id is not None
+    event_row = TableRead.get_event_by_slug(conn, "btc-up-or-down-5m")
+    assert event_row is not None
+    assert event_row.event_id == m1.event_id
+    assert event_row.polymarket_event_id == "10684"
+
+    conn.close()
