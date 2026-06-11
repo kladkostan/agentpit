@@ -232,6 +232,13 @@ def fetch_all_polymarket_markets(
         else:
             data = []
 
+        # Gamma caps each response at ~100 rows regardless of the requested
+        # `limit`, so we paginate by the ACTUAL page size and stop on the first
+        # empty page. (The old `len(data) < limit` check broke after one page
+        # because 100 < 500 is always true.)
+        if not data:
+            break
+
         # Client-side filtering to match test expectations (tests/api/test_polymarket_sync.py)
         filtered_data = []
         for m in data:
@@ -277,10 +284,7 @@ def fetch_all_polymarket_markets(
         if max_markets is not None and len(all_markets) >= max_markets:
             break
 
-        if len(data) < limit:
-            break
-
-        offset += limit
+        offset += len(data)
 
     if max_markets is not None:
         all_markets = all_markets[:max_markets]

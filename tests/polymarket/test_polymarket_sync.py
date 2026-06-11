@@ -11,9 +11,9 @@ from agentpit.polymarket.polymarket_sync import (
     _is_market_expired,
     _polymarket_to_erc1155_tokens,
     build_create_market_request_from_json,
+    create_polymarket_markets_if_needed,
     fetch_all_polymarket_markets,
     fetch_polymarket_market,
-    fetch_and_sync_polymarket_markets,
 )
 from tests.db_helpers import fresh_test_conn
 
@@ -43,7 +43,15 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     client = Web3Client(settings, deployment)
     admin = OnchainAdmin(client, Contracts(client.web3, deployment))
 
-    created_markets = fetch_and_sync_polymarket_markets(db, admin)
+    # Capture a small, single-page trending set ONCE. `order=volume_24hr` is a
+    # live, churning feed, so re-fetching between syncs is non-deterministic
+    # (the top-N shifts) — capture the upstream set and reuse it so the
+    # idempotency check below is stable. A small cap also keeps the on-chain
+    # prepareCondition work fast.
+    pm_markets = fetch_all_polymarket_markets(
+        order="volume_24hr", max_markets=25, liquidity_threshold=0
+    )
+    created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
 
     # We expect many markets to be created, but the exact number varies.
     assert len(created_markets) > 5
@@ -61,10 +69,8 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     assert first_db.description == first_synced.description
     assert len(first_db.erc1155_tokens) > 0
 
-    # Idempotent: a second sync against the same upstream set adds nothing.
-    created_markets = fetch_and_sync_polymarket_markets(db, admin)
-
-    assert created_markets == []
+    # Idempotent: re-syncing the SAME captured upstream set adds nothing.
+    assert create_polymarket_markets_if_needed(db, pm_markets, admin) == []
 
 
 def test_build_request_extracts_upstream_token_ids():
