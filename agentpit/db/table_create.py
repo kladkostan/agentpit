@@ -142,7 +142,8 @@ class TableCreate:
                 END_DATE BIGINT,
                 RESOLVED_OUTCOME INTEGER,
                 MARKET_STATE TEXT NOT NULL DEFAULT '{MarketState.DRAFT.value}'
-                    CHECK (MARKET_STATE IN ({allowed_states}))
+                    CHECK (MARKET_STATE IN ({allowed_states})),
+                FULLY_REDEEMED BOOLEAN NOT NULL DEFAULT FALSE
             )
             """
         )
@@ -163,6 +164,10 @@ class TableCreate:
         )
         conn.execute(
             "ALTER TABLE markets ADD COLUMN IF NOT EXISTS POLYMARKET_NO_TOKEN_ID TEXT"
+        )
+        conn.execute(
+            "ALTER TABLE markets ADD COLUMN IF NOT EXISTS "
+            "FULLY_REDEEMED BOOLEAN NOT NULL DEFAULT FALSE"
         )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(CONDITION_ID)"

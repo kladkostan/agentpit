@@ -26,6 +26,7 @@ class Market(BaseModel):
     event_id: Optional[int] = None
     outcome_label: Optional[str] = None
     icon_url: Optional[str] = None
+    fully_redeemed: bool = False
 
     def model_post_init(self, __context):
         check_state(

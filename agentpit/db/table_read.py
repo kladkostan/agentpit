@@ -20,7 +20,8 @@ _MARKET_COLS = (
     "COALESCE(MARKET_STATE, 'DRAFT') as MARKET_STATE, "
     "RESOLVED_OUTCOME, "
     "EVENT_ID, OUTCOME_LABEL, ICON_URL, "
-    "POLYMARKET_YES_TOKEN_ID, POLYMARKET_NO_TOKEN_ID"
+    "POLYMARKET_YES_TOKEN_ID, POLYMARKET_NO_TOKEN_ID, "
+    "COALESCE(FULLY_REDEEMED, FALSE) as FULLY_REDEEMED"
 )
 
 
@@ -45,6 +46,7 @@ def _row_to_market(row) -> Market:
         event_id=row["EVENT_ID"],
         outcome_label=row["OUTCOME_LABEL"],
         icon_url=row["ICON_URL"],
+        fully_redeemed=row["FULLY_REDEEMED"],
     )
 
 

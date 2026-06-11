@@ -467,6 +467,14 @@ class TableWrite:
         return market
 
     @staticmethod
+    def mark_fully_redeemed(db: psycopg.Connection, market_id: int) -> None:
+        """Flag a resolved market as having no remaining redeemable holders."""
+        db.execute(
+            "UPDATE markets SET FULLY_REDEEMED = TRUE WHERE MARKET_ID = %s",
+            (market_id,),
+        )
+
+    @staticmethod
     def resolve_market(
         db: psycopg.Connection, market_id: int, winning_outcome_index: int
     ) -> Market:
