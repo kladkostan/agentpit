@@ -42,12 +42,40 @@ class Settings(BaseSettings):
         default=True, validation_alias="AUTO_REDEEM_ENABLED"
     )
 
+    # Pinned-series sync (force-sync the current window of recurring markets).
+    pinned_series_raw: str = Field(
+        default="btc-updown-5m:300", validation_alias="PINNED_SERIES"
+    )
+    pin_sync_enabled: bool | None = Field(
+        default=None, validation_alias="PIN_SYNC_ENABLED"
+    )
+    pin_sync_offset_seconds: int = Field(
+        default=10, validation_alias="PIN_SYNC_OFFSET_SECONDS"
+    )
+
     @model_validator(mode="after")
     def _default_resolution_mirror_enabled(self) -> "Settings":
         # When RESOLUTION_MIRROR_ENABLED is unset, follow SYNC.
         if self.resolution_mirror_enabled is None:
             self.resolution_mirror_enabled = self.sync_enabled
         return self
+
+    @model_validator(mode="after")
+    def _default_pin_sync_enabled(self) -> "Settings":
+        # When PIN_SYNC_ENABLED is unset, follow SYNC.
+        if self.pin_sync_enabled is None:
+            self.pin_sync_enabled = self.sync_enabled
+        return self
+
+    @property
+    def pinned_series(self) -> list[tuple[str, int]]:
+        """Parsed ``[(base, interval), ...]`` from ``PINNED_SERIES``.
+
+        Imported lazily to avoid a config<->polymarket import cycle.
+        """
+        from agentpit.polymarket.pinned import parse_pinned_series
+
+        return parse_pinned_series(self.pinned_series_raw)
 
     snapshot_enabled: bool = Field(default=False, validation_alias="SNAPSHOT_ENABLED")
     snapshot_interval_seconds: int = Field(
