@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     mirror_tape_enabled: bool = Field(
         default=True, validation_alias="AGENTPIT_MIRROR_TAPE_ENABLED"
     )
+    # How often the mirror re-scans the active-market set. Kept short so a new
+    # rotating-series window (live for only ~5 min) is picked up and quoted
+    # promptly; a no-change scan is a cheap DB read (resubscribe fires only when
+    # the set actually changes).
     mirror_target_refresh_seconds: float = Field(
-        default=60.0, validation_alias="AGENTPIT_MIRROR_TARGET_REFRESH_SECONDS"
+        default=15.0, validation_alias="AGENTPIT_MIRROR_TARGET_REFRESH_SECONDS"
     )
