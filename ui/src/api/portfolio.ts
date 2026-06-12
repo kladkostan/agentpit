@@ -9,6 +9,8 @@ export interface Position {
   avgPrice: number;
   curPrice: number;
   cashPnl: number;
+  percentPnl: number;
+  initialValue: number;   // cost basis (avg x size)
   currentValue: number;
   outcome: string;
   outcomeIndex: number;

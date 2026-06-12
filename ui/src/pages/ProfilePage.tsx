@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { AlertCircle, ArrowUpRight, Search } from "lucide-react";
-import { usePositions, useClosedPositions, useUsdcBalance } from "@/api/portfolio";
+import { AlertCircle, CheckCircle2, Search, XCircle } from "lucide-react";
+import type { Position } from "@/api/portfolio";
+import { usePositions, useClosedPositions } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
-import { Button } from "@/components/ui/button";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import {
   Card,
@@ -59,7 +59,6 @@ export function ProfilePage() {
     error: positionsError,
   } = usePositions(user?.eth_address);
   const { data: closedData } = useClosedPositions(user?.eth_address);
-  const { data: usdcBalance } = useUsdcBalance(Boolean(user));
   const avatarStyle = getAvatarStyle(user?.eth_address || user?.email);
 
   const isLoading = positionsLoading;
@@ -103,6 +102,12 @@ export function ProfilePage() {
     return ids.size;
   }, [positions, closedPositions]);
 
+  // Current value of open positions (not the apUSD wallet balance).
+  const positionsValue = useMemo(
+    () => positions.reduce((sum, p) => sum + p.currentValue, 0),
+    [positions],
+  );
+
   if (authLoading) {
     return (
       <section className="mx-auto max-w-5xl space-y-6">
@@ -141,8 +146,8 @@ export function ProfilePage() {
             <div className="mt-6 grid grid-cols-3 divide-x rounded-lg border bg-muted/20">
               <TopMetric
                 label="Positions Value"
-                value={USD.format(usdcBalance ?? 0)}
-                tooltip={USD.format(usdcBalance ?? 0)}
+                value={USD.format(positionsValue)}
+                tooltip={USD.format(positionsValue)}
               />
               <TopMetric
                 label="Biggest Win"
@@ -290,21 +295,13 @@ function PositionList({
   search,
   onSearchChange,
 }: {
-  positions: {
-    asset: string;
-    title: string;
-    outcome: string;
-    size: number;
-    avgPrice: number;
-    curPrice: number;
-    slug: string;
-  }[];
+  positions: Position[];
   positionFilter: PositionFilter;
   onPositionFilterChange: (next: PositionFilter) => void;
   search: string;
   onSearchChange: (next: string) => void;
 }) {
-  const rows = positions;
+  const isClosed = positionFilter === "closed";
 
   const filterBtn = (key: PositionFilter, label: string) => (
     <button
@@ -339,72 +336,83 @@ function PositionList({
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead className="border-b text-left text-xs uppercase tracking-[0.1em] text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3">Market</th>
-              <th className="px-4 py-3">Avg</th>
-              <th className="px-4 py-3">Current</th>
-              <th className="px-4 py-3 text-right">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={4}
-                  className="px-4 py-14 text-center text-muted-foreground"
-                >
-                  No positions found
-                </td>
-              </tr>
-            ) : (
-              rows.map((position) => (
-                <tr
-                  key={position.asset}
-                  className="border-b hover:bg-muted/20"
-                >
-                  <td className="px-4 py-4 align-top">
-                    <p className="line-clamp-2 font-medium">
-                      {position.title}
-                    </p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                      {position.outcome}
-                    </p>
-                  </td>
-                  <td className="px-4 py-4 text-muted-foreground">
-                    {position.avgPrice > 0
-                      ? `${Math.round(position.avgPrice * 100)}¢`
-                      : "-"}
-                  </td>
-                  <td className="px-4 py-4 text-muted-foreground">
-                    {position.curPrice > 0
-                      ? `${Math.round(position.curPrice * 100)}¢`
-                      : "-"}
-                  </td>
-                  <td className="px-4 py-4 text-right">
-                    <p className="font-medium">
-                      {SHARES.format(position.size)} shares
-                    </p>
-                    <Button
-                      asChild
-                      size="sm"
-                      variant="link"
-                      className="h-auto p-0 text-xs"
-                    >
-                      <Link to={`/markets/${position.slug}`}>
-                        View market
-                        <ArrowUpRight className="ml-1 size-3.5" />
-                      </Link>
-                    </Button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {positions.length === 0 ? (
+        <p className="px-4 py-16 text-center text-muted-foreground">
+          No positions found
+        </p>
+      ) : (
+        <div className="divide-y">
+          {positions.map((position) => {
+            const won = position.currentValue > 0;
+            const pnlUp = position.cashPnl >= 0;
+            const pnlColor = pnlUp
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-rose-600 dark:text-rose-400";
+            return (
+              <div
+                key={position.asset}
+                className="flex items-center gap-3 px-4 py-4 hover:bg-muted/20"
+              >
+                {isClosed ? (
+                  <span
+                    className={`flex w-16 shrink-0 items-center gap-1.5 text-sm font-medium ${
+                      won
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }`}
+                  >
+                    {won ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : (
+                      <XCircle className="size-4" />
+                    )}
+                    {won ? "Won" : "Lost"}
+                  </span>
+                ) : null}
+                {position.icon ? (
+                  <img
+                    src={position.icon}
+                    alt=""
+                    className="size-9 shrink-0 rounded-md object-cover"
+                  />
+                ) : (
+                  <div className="size-9 shrink-0 rounded-md bg-muted" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <Link
+                    to={`/markets/${position.slug}`}
+                    className="line-clamp-1 font-medium hover:underline"
+                  >
+                    {position.title}
+                  </Link>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {SHARES.format(position.size)} {position.outcome} at{" "}
+                    {Math.round(position.avgPrice * 100)}¢
+                  </p>
+                </div>
+                <div className="hidden w-28 shrink-0 text-right sm:block">
+                  <p className="font-medium tabular-nums">
+                    {USD.format(position.initialValue)}
+                  </p>
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    cost
+                  </p>
+                </div>
+                <div className="w-36 shrink-0 text-right">
+                  <p className="font-semibold tabular-nums">
+                    {USD.format(position.currentValue)}
+                  </p>
+                  <p className={`text-xs tabular-nums ${pnlColor}`}>
+                    {pnlUp ? "+" : "−"}
+                    {USD.format(Math.abs(position.cashPnl))} (
+                    {Math.round(position.percentPnl)}%)
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

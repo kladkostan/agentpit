@@ -108,51 +108,76 @@ class AccountService:
 
             out: list[PositionWire] = []
             for market_id, payout in payout_micro.items():
-                if payout <= 0:
-                    continue  # a losing redeem pays nothing; not shown yet
                 mkt = TableRead.read_market(conn, market_id)
                 if mkt is None or mkt.resolved_outcome is None:
                     continue
-                idx = mkt.resolved_outcome
                 tokens = mkt.erc1155_tokens
-                win_token = tokens[idx][0]
-                # Entry price from the user's fills on the winning token; size +
-                # payout come from the redeem (1 winning token == $1).
-                avg = self._avg_fill_price(conn, user.api_key, win_token)
-                size = size_to_float(payout)
-                payout_usd = payout / 1_000_000
+                if len(tokens) != 2:
+                    continue  # binary markets only for now
+                win_idx = mkt.resolved_outcome
+                if payout > 0:
+                    # Won: size + payout are the redeem (1 winning token == $1).
+                    pos_idx = win_idx
+                    size = size_to_float(payout)
+                    value = payout / 1_000_000
+                else:
+                    # Lost: held the losing outcome (redeemed for $0). Size comes
+                    # from the user's net buys of that token.
+                    pos_idx = 1 - win_idx
+                    net = self._net_bought(conn, user.api_key, tokens[pos_idx][0])
+                    if net <= 0:
+                        continue
+                    size = size_to_float(net)
+                    value = 0.0
+                token_id = tokens[pos_idx][0]
+                avg = self._avg_fill_price(conn, user.api_key, token_id)
                 cost = avg * size
-                pnl = payout_usd - cost
+                pnl = value - cost
                 pct = (pnl / cost * 100) if cost else 0.0
-                opp_idx = 1 - idx if len(tokens) == 2 else idx
-                opp_token, opp_label = (
-                    tokens[opp_idx] if len(tokens) == 2 else tokens[idx]
-                )
+                opp_idx = 1 - pos_idx
                 out.append(
                     PositionWire(
                         proxyWallet=eth_address,
-                        asset=win_token,
+                        asset=token_id,
                         conditionId=mkt.condition_id.value,
                         size=size,
                         avgPrice=avg,
                         initialValue=cost,
-                        currentValue=payout_usd,
+                        currentValue=value,
                         cashPnl=pnl,
                         percentPnl=pct,
                         totalBought=cost,
-                        curPrice=1.0,
+                        curPrice=1.0 if payout > 0 else 0.0,
                         redeemable=False,
                         title=mkt.question,
                         slug=mkt.slug or "",
                         icon=mkt.icon_url or "",
-                        outcome=tokens[idx][1],
-                        outcomeIndex=idx,
-                        oppositeOutcome=opp_label,
-                        oppositeAsset=opp_token,
+                        outcome=tokens[pos_idx][1],
+                        outcomeIndex=pos_idx,
+                        oppositeOutcome=tokens[opp_idx][1],
+                        oppositeAsset=tokens[opp_idx][0],
                         endDate=str(mkt.end_date) if mkt.end_date else "",
                     )
                 )
         return out
+
+    @staticmethod
+    def _net_bought(conn, api_key: str, token_id: str) -> int:
+        """Net outcome tokens the user bought of `token_id` (effective buys minus
+        sells; a maker fills the side opposite the stored taker SIDE)."""
+        rows = conn.execute(
+            "SELECT SIDE, TRADE_SIZE, TAKER_API_KEY, MAKER_API_KEY FROM trades "
+            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
+            "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
+            (token_id, api_key, api_key),
+        ).fetchall()
+        net = 0
+        for r in rows:
+            is_taker = r["TAKER_API_KEY"] == api_key
+            buying = (r["SIDE"] == "BUY") == is_taker
+            sz = int(r["TRADE_SIZE"])
+            net += sz if buying else -sz
+        return net
 
     def total_value(self, eth_address: str) -> list[dict]:
         positions = self.list_positions(eth_address)

@@ -65,3 +65,41 @@ def test_list_closed_positions_redeem_driven_dedup_and_pnl():
     assert abs(p.size - 100.0) < 1e-6
     assert abs(p.avgPrice - 0.40) < 1e-6
     assert abs(p.cashPnl - 60.0) < 1e-6  # 100 payout - 40 cost
+
+
+def test_list_closed_positions_includes_losses():
+    db = DbSession(Settings().database_url)
+    with db.write() as conn:
+        _uid, acct, api_key = TableWrite.create_user(
+            conn,
+            email="loss@x.com",
+            password_hash=hash_password("pw12pw12pw12"),
+            handle=None,
+        )
+        req = CreateMarketRequest(
+            question="Lose?",
+            description="d",
+            erc1155_tokens=[("yt2", "Yes"), ("nt2", "No")],
+            slug="lose-q",
+            condition_id=ConditionId(_hex32("c2")),
+            state=MarketState.ACTIVE,
+        )
+        m = TableWrite.create_market(conn, req, is_polygon_market=False)
+        # YES (idx 0) won; the user bought NO — the losing side.
+        TableWrite.resolve_market(conn, market_id=m.market_id, winning_outcome_index=0)
+        _insert_trade(conn, asset="nt2", price=500_000, size=50_000_000,
+                      taker_api_key=api_key)  # 50 NO @ 0.50
+        TableWrite.log_transaction(
+            conn, api_key, "REDEEM", m.market_id, {"collateral_amount": 0}
+        )
+
+    out = AccountService(db, onchain=None).list_closed_positions(  # type: ignore[arg-type]
+        acct.address
+    )
+    assert len(out) == 1
+    p = out[0]
+    assert p.outcome == "No"  # the losing outcome the user held
+    assert abs(p.currentValue - 0.0) < 1e-6  # lost -> $0
+    assert abs(p.size - 50.0) < 1e-6
+    assert abs(p.avgPrice - 0.50) < 1e-6
+    assert abs(p.cashPnl + 25.0) < 1e-6  # loss = -cost (0.50 * 50)
