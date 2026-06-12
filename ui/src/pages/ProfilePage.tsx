@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Search, XCircle } from "lucide-react";
 import type { Position } from "@/api/portfolio";
 import { usePositions, useClosedPositions } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
+import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import {
   Card,
@@ -36,6 +37,14 @@ const DATE = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
+const PNL_WINDOWS = {
+  "1D": { days: 1, label: "Past Day" },
+  "1W": { days: 7, label: "Past Week" },
+  "1M": { days: 30, label: "Past Month" },
+  "1Y": { days: 365, label: "Past Year" },
+} as const;
+type PnlWindow = keyof typeof PNL_WINDOWS;
+
 function shortAddress(address: string): string {
   if (address.length < 12) return address;
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -52,6 +61,7 @@ export function ProfilePage() {
   const [positionFilter, setPositionFilter] =
     useState<PositionFilter>("active");
   const [search, setSearch] = useState("");
+  const [pnlWindow, setPnlWindow] = useState<PnlWindow>("1D");
   const { user, isLoading: authLoading } = useAuth();
   const {
     data: positionsData,
@@ -107,6 +117,25 @@ export function ProfilePage() {
     () => positions.reduce((sum, p) => sum + p.currentValue, 0),
     [positions],
   );
+
+  // Cumulative realized P/L over the selected window, from closed positions by
+  // their resolution time. (Open-position unrealized P/L isn't a time series.)
+  const pnl = useMemo(() => {
+    const cutoff = Date.now() / 1000 - PNL_WINDOWS[pnlWindow].days * 86_400;
+    const events = closedPositions
+      .map((p) => ({ t: Number(p.endDate) || 0, pnl: p.cashPnl }))
+      .filter((e) => e.t >= cutoff)
+      .sort((a, b) => a.t - b.t);
+    const points: { t: number; p: number }[] = [];
+    if (events.length === 0) return { total: 0, points };
+    points.push({ t: cutoff, p: 0 });
+    let cum = 0;
+    for (const e of events) {
+      cum += e.pnl;
+      points.push({ t: e.t, p: cum });
+    }
+    return { total: cum, points };
+  }, [closedPositions, pnlWindow]);
 
   if (authLoading) {
     return (
@@ -167,32 +196,47 @@ export function ProfilePage() {
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">Profit/Loss</p>
                 <div className="flex items-center gap-1 text-xs">
-                  {[
-                    { key: "1D", active: true },
-                    { key: "1W", active: false },
-                    { key: "1M", active: false },
-                    { key: "1Y", active: false },
-                  ].map((item) => (
-                    <span
-                      key={item.key}
+                  {(Object.keys(PNL_WINDOWS) as PnlWindow[]).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setPnlWindow(key)}
                       className={[
-                        "rounded-md px-2 py-1 font-medium",
-                        item.active
+                        "rounded-md px-2 py-1 font-medium transition-colors",
+                        key === pnlWindow
                           ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground",
+                          : "text-muted-foreground hover:text-foreground",
                       ].join(" ")}
                     >
-                      {item.key}
-                    </span>
+                      {key}
+                    </button>
                   ))}
                 </div>
               </div>
-              <p className="mt-2 text-2xl font-semibold leading-none tracking-tight">
-                $0.00
+              <p
+                className={[
+                  "mt-2 text-2xl font-semibold leading-none tracking-tight tabular-nums",
+                  pnl.total > 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : pnl.total < 0
+                      ? "text-rose-600 dark:text-rose-400"
+                      : "",
+                ].join(" ")}
+              >
+                {pnl.total >= 0 ? "+" : "−"}
+                {USD.format(Math.abs(pnl.total))}
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">Past Day</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {PNL_WINDOWS[pnlWindow].label}
+              </p>
             </div>
-            <div className="mt-6 h-14 rounded-md bg-gradient-to-t from-blue-100 via-blue-50 to-transparent dark:from-blue-950 dark:via-slate-900 dark:to-transparent" />
+            <Sparkline
+              points={pnl.points}
+              width={460}
+              height={56}
+              tone={pnl.total >= 0 ? "up" : "down"}
+              className="mt-6 h-14 w-full"
+            />
           </CardContent>
         </Card>
       </div>

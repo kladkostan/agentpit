@@ -20,6 +20,7 @@ export interface Position {
   slug: string;
   icon: string;
   redeemable: boolean;
+  endDate: string;        // market end/resolution time, unix seconds (string)
 }
 
 export async function getPositions(userAddress: string): Promise<Position[]> {
