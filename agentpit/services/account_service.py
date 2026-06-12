@@ -76,6 +76,84 @@ class AccountService:
                 )
         return out
 
+    def list_closed_positions(self, eth_address: str) -> list[PositionWire]:
+        """Won positions on resolved markets, reconstructed from REDEEM payouts
+        (the Active /positions list drops them once redeemed — token balance 0).
+
+        Payout is the REDEEM collateral (ground truth, robust to MINT/MERGE,
+        unlike per-token trade nets); cost basis is the user's net USDC into the
+        market across both outcomes; realized PnL = payout - cost. (Losing
+        positions leave no redeem and aren't reconstructed here yet.)"""
+        with self._db.read() as conn:
+            user = TableRead.get_user_by_eth_address(conn, eth_address)
+            if user is None:
+                return []
+            redeem_rows = conn.execute(
+                "SELECT MARKET_ID, DETAILS FROM transactions "
+                "WHERE API_KEY = %s AND TRANSACTION_TYPE = 'REDEEM'",
+                (user.api_key,),
+            ).fetchall()
+            # MAX payout per market: a position redeems once, so duplicate redeem
+            # logs are deduped by max rather than summed.
+            payout_micro: dict[int, int] = {}
+            for r in redeem_rows:
+                if r["MARKET_ID"] is None:
+                    continue
+                details = json.loads(r["DETAILS"]) if r["DETAILS"] else {}
+                mid = int(r["MARKET_ID"])
+                payout_micro[mid] = max(
+                    payout_micro.get(mid, 0),
+                    int(details.get("collateral_amount", 0)),
+                )
+
+            out: list[PositionWire] = []
+            for market_id, payout in payout_micro.items():
+                if payout <= 0:
+                    continue  # a losing redeem pays nothing; not shown yet
+                mkt = TableRead.read_market(conn, market_id)
+                if mkt is None or mkt.resolved_outcome is None:
+                    continue
+                idx = mkt.resolved_outcome
+                tokens = mkt.erc1155_tokens
+                win_token = tokens[idx][0]
+                # Entry price from the user's fills on the winning token; size +
+                # payout come from the redeem (1 winning token == $1).
+                avg = self._avg_fill_price(conn, user.api_key, win_token)
+                size = size_to_float(payout)
+                payout_usd = payout / 1_000_000
+                cost = avg * size
+                pnl = payout_usd - cost
+                pct = (pnl / cost * 100) if cost else 0.0
+                opp_idx = 1 - idx if len(tokens) == 2 else idx
+                opp_token, opp_label = (
+                    tokens[opp_idx] if len(tokens) == 2 else tokens[idx]
+                )
+                out.append(
+                    PositionWire(
+                        proxyWallet=eth_address,
+                        asset=win_token,
+                        conditionId=mkt.condition_id.value,
+                        size=size,
+                        avgPrice=avg,
+                        initialValue=cost,
+                        currentValue=payout_usd,
+                        cashPnl=pnl,
+                        percentPnl=pct,
+                        totalBought=cost,
+                        curPrice=1.0,
+                        redeemable=False,
+                        title=mkt.question,
+                        slug=mkt.slug or "",
+                        icon=mkt.icon_url or "",
+                        outcome=tokens[idx][1],
+                        outcomeIndex=idx,
+                        oppositeOutcome=opp_label,
+                        oppositeAsset=opp_token,
+                        endDate=str(mkt.end_date) if mkt.end_date else "",
+                    )
+                )
+        return out
+
     def total_value(self, eth_address: str) -> list[dict]:
         positions = self.list_positions(eth_address)
         total = sum(p.currentValue for p in positions)

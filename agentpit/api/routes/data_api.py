@@ -18,6 +18,15 @@ def get_positions(
     return service.list_positions(user, _csv(market))
 
 
+@router.get("/closed-positions", response_model=list[PositionWire])
+def get_closed_positions(
+    user: str, service: AccountServiceDep
+) -> list[PositionWire]:
+    """Resolved/cancelled positions (reconstructed from trade history), with
+    realized payout + PnL — the Active /positions list drops them once redeemed."""
+    return service.list_closed_positions(user)
+
+
 @router.get("/value")
 def get_value(user: str, service: AccountServiceDep) -> list[dict]:
     return service.total_value(user)

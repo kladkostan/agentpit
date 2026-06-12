@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { AlertCircle, ArrowUpRight, Search } from "lucide-react";
-import { usePositions, useUsdcBalance } from "@/api/portfolio";
+import { usePositions, useClosedPositions, useUsdcBalance } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { Button } from "@/components/ui/button";
 import { getAvatarStyle } from "@/lib/avatarColor";
@@ -58,6 +58,7 @@ export function ProfilePage() {
     isLoading: positionsLoading,
     error: positionsError,
   } = usePositions(user?.eth_address);
+  const { data: closedData } = useClosedPositions(user?.eth_address);
   const { data: usdcBalance } = useUsdcBalance(Boolean(user));
   const avatarStyle = getAvatarStyle(user?.eth_address || user?.email);
 
@@ -71,15 +72,36 @@ export function ProfilePage() {
       .sort((a, b) => b.size - a.size);
   }, [positionsData]);
 
+  const closedPositions = useMemo(() => {
+    if (!closedData) return [];
+    return [...closedData].sort((a, b) => b.currentValue - a.currentValue);
+  }, [closedData]);
+
   const filteredPositions = useMemo(() => {
-    if (positionFilter === "closed") return [];
+    const base = positionFilter === "closed" ? closedPositions : positions;
     const q = search.trim().toLowerCase();
-    if (!q) return positions;
-    return positions.filter((p) => {
+    if (!q) return base;
+    return base.filter((p) => {
       const hay = `${p.title} ${p.outcome}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [positions, positionFilter, search]);
+  }, [positions, closedPositions, positionFilter, search]);
+
+  // Biggest realized profit across closed (resolved) positions.
+  const biggestWin = useMemo(() => {
+    const wins = closedPositions
+      .map((p) => p.cashPnl)
+      .filter((pnl) => pnl > 0);
+    return wins.length ? Math.max(...wins) : null;
+  }, [closedPositions]);
+
+  // Distinct markets the user has ever held a position in (active + closed).
+  const predictionCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of positions) ids.add(p.conditionId);
+    for (const p of closedPositions) ids.add(p.conditionId);
+    return ids.size;
+  }, [positions, closedPositions]);
 
   if (authLoading) {
     return (
@@ -122,10 +144,13 @@ export function ProfilePage() {
                 value={USD.format(usdcBalance ?? 0)}
                 tooltip={USD.format(usdcBalance ?? 0)}
               />
-              <TopMetric label="Biggest Win" value="-" />
+              <TopMetric
+                label="Biggest Win"
+                value={biggestWin !== null ? USD.format(biggestWin) : "-"}
+              />
               <TopMetric
                 label="Predictions"
-                value={positions.length.toString()}
+                value={predictionCount.toString()}
               />
             </div>
           </CardContent>

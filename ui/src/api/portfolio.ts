@@ -36,6 +36,26 @@ export function usePositions(userAddress: string | undefined) {
   });
 }
 
+export async function getClosedPositions(
+  userAddress: string,
+): Promise<Position[]> {
+  return apiFetch<Position[]>(
+    `/closed-positions?user=${encodeURIComponent(userAddress)}`,
+  );
+}
+
+export function useClosedPositions(userAddress: string | undefined) {
+  return useQuery({
+    queryKey: ["closed-positions", userAddress],
+    queryFn: () => {
+      if (!userAddress) throw new Error("userAddress is required");
+      return getClosedPositions(userAddress);
+    },
+    enabled: Boolean(userAddress),
+    staleTime: 10_000,
+  });
+}
+
 export async function getUsdcBalance(): Promise<number> {
   const r = await apiFetch<{ balance: string }>("/balance-allowance?asset_type=COLLATERAL");
   return Number(r.balance) / 1_000_000;
