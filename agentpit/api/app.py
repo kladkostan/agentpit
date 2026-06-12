@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -56,6 +57,12 @@ from agentpit.services.snapshot_service import SnapshotService
 
 log = logging.getLogger(__name__)
 
+# The full resolution loop and the fast pin-resolve loop both run auto-redeem
+# off-thread; serialize them so they can't redeem the same position concurrently
+# (a race that double-logged the payout — phantom collateral from the apUSD
+# delta — even though on-chain only one redeem actually transferred).
+_redeem_lock = threading.Lock()
+
 
 def _configure_root_logging() -> None:
     root = logging.getLogger()
@@ -101,7 +108,8 @@ def _run_resolution_cycle(
         resolved = mirror_polymarket_resolutions(conn, admin, now=now)
     redeemed = 0
     if settings.auto_redeem_enabled:
-        redeemed = auto_redeem_resolved_markets(db, admin)
+        with _redeem_lock:
+            redeemed = auto_redeem_resolved_markets(db, admin)
     return resolved, redeemed
 
 
@@ -214,7 +222,8 @@ def _run_pin_resolve(
         )
     redeemed = 0
     if settings.auto_redeem_enabled:
-        redeemed = auto_redeem_resolved_markets(db, admin)
+        with _redeem_lock:
+            redeemed = auto_redeem_resolved_markets(db, admin)
     return resolved, redeemed
 
 
