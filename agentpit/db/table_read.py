@@ -207,6 +207,17 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
+    def get_idempotency_order_id(
+        db: psycopg.Connection, api_key: str, client_order_id: str
+    ) -> "str | None":
+        row = db.execute(
+            "SELECT ORDER_ID FROM idempotency_keys "
+            "WHERE API_KEY = %s AND CLIENT_ORDER_ID = %s",
+            (api_key, client_order_id),
+        ).fetchone()
+        return row["ORDER_ID"] if row else None
+
+    @staticmethod
     def get_user_by_email(db: psycopg.Connection, email: str) -> "User | None":
         row = db.execute(
             f"SELECT {TableRead._USER_COLS} FROM users WHERE EMAIL = %s LIMIT 1",

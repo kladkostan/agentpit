@@ -281,6 +281,24 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_idempotency_keys_table(conn: psycopg.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS idempotency_keys (
+                API_KEY         TEXT   NOT NULL,
+                CLIENT_ORDER_ID TEXT   NOT NULL,
+                ORDER_ID        TEXT   NOT NULL,
+                CREATED_AT      BIGINT NOT NULL,
+                PRIMARY KEY (API_KEY, CLIENT_ORDER_ID)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_idempotency_created_at "
+            "ON idempotency_keys(CREATED_AT)"
+        )
+
+    @staticmethod
     def create_all_tables(conn: psycopg.Connection) -> None:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(conn)
@@ -292,3 +310,4 @@ class TableCreate:
         TableCreate.create_markets_table(conn)
         TableCreate.create_transactions_table(conn)
         TableCreate.create_price_snapshots_table(conn)
+        TableCreate.create_idempotency_keys_table(conn)

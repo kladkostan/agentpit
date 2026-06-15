@@ -655,3 +655,31 @@ class TableWrite:
             (before_ts,),
         )
         return cur.rowcount
+
+    @staticmethod
+    def claim_idempotency_key(
+        db: psycopg.Connection,
+        *,
+        api_key: str,
+        client_order_id: str,
+        order_id: str,
+        created_at: int,
+    ) -> None:
+        """Reserve (api_key, client_order_id) for this order. Raises
+        psycopg.errors.UniqueViolation if already claimed — the caller treats
+        that as a duplicate and replays the prior order."""
+        db.execute(
+            "INSERT INTO idempotency_keys "
+            "(API_KEY, CLIENT_ORDER_ID, ORDER_ID, CREATED_AT) "
+            "VALUES (%s, %s, %s, %s)",
+            (api_key, client_order_id, order_id, created_at),
+        )
+
+    @staticmethod
+    def purge_idempotency_keys(db: psycopg.Connection, before_ts: int) -> int:
+        """Delete idempotency keys created before `before_ts`. Returns rows removed."""
+        cur = db.execute(
+            "DELETE FROM idempotency_keys WHERE CREATED_AT < %s",
+            (before_ts,),
+        )
+        return cur.rowcount
