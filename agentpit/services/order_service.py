@@ -2,6 +2,9 @@ import hashlib
 import json
 import logging
 import secrets
+import time
+
+import psycopg
 from dataclasses import asdict
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -18,6 +21,7 @@ from agentpit.datastructures.place_order_request import PlaceOrderRequest
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
+from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
     InsufficientBalanceError,
     MarketNotFoundError,
@@ -92,6 +96,12 @@ class OrderService:
         *,
         balance_hint: int | None = None,
     ) -> OrderResponse:
+        coid = payload.client_order_id
+        if coid is not None:
+            with self._db.read() as conn:
+                existing = TableRead.get_idempotency_order_id(conn, user.api_key, coid)
+                if existing is not None:
+                    return self._build_replay_response(conn, existing)
         token_id_int, _token_id_str = self._resolve_token(payload)
         size_micro = decimal_str_to_size_micro(str(payload.size))
         maker_amount, taker_amount = self._amounts_from_price_size(
@@ -126,18 +136,33 @@ class OrderService:
         order_id = self._compute_order_id(order)
         price_int = self._price_int(order)
 
-        with self._db.write() as conn:
-            self._insert_order(
-                conn,
-                api_key=user.api_key,
-                order=order,
-                order_id=order_id,
-                signature=signature,
-                price_int=price_int,
-                order_type=payload.order_type,
-            )
-            taker_row = self._get_order_row(conn, order_id)
-            matches = self._match(conn, taker_row, dry_run=False)
+        try:
+            with self._db.write() as conn:
+                if coid is not None:
+                    TableWrite.claim_idempotency_key(
+                        conn,
+                        api_key=user.api_key,
+                        client_order_id=coid,
+                        order_id=order_id,
+                        created_at=int(time.time()),
+                    )
+                self._insert_order(
+                    conn,
+                    api_key=user.api_key,
+                    order=order,
+                    order_id=order_id,
+                    signature=signature,
+                    price_int=price_int,
+                    order_type=payload.order_type,
+                )
+                taker_row = self._get_order_row(conn, order_id)
+                matches = self._match(conn, taker_row, dry_run=False)
+        except psycopg.errors.UniqueViolation:
+            # A concurrent request claimed this client_order_id first; the row is
+            # committed by the time the violation fires, so replay its order.
+            with self._db.read() as conn:
+                existing = TableRead.get_idempotency_order_id(conn, user.api_key, coid)
+                return self._build_replay_response(conn, existing)
 
         tx_hashes: list[str] = []
         if matches:
@@ -169,15 +194,9 @@ class OrderService:
         # where taker and maker pay different prices summing to 1 — so the
         # taker's collateral is taker_price × filled, not the maker's price.
         filled_micro = sum(int(m["trade_size"]) for m in matches)
-        collateral_micro = (price_int * filled_micro) // _PRICE_ONE
-        if matches and payload.side == "BUY":
-            making_amount = size_to_decimal_str(collateral_micro)  # USDC given
-            taking_amount = size_to_decimal_str(filled_micro)      # shares received
-        elif matches:  # SELL taker
-            making_amount = size_to_decimal_str(filled_micro)      # shares given
-            taking_amount = size_to_decimal_str(collateral_micro)  # USDC received
-        else:
-            making_amount = taking_amount = ""
+        making_amount, taking_amount = self._fill_amounts(
+            payload.side, price_int, filled_micro
+        )
 
         return OrderResponse(
             success=True,
@@ -586,6 +605,55 @@ class OrderService:
                 return self._get_order_row(conn, order_id)
             except RuntimeError:
                 return None
+
+    @staticmethod
+    def _fill_amounts(side: str, price_int: int, filled_micro: int) -> tuple[str, str]:
+        """(makingAmount, takingAmount) decimal strings for a taker's fills, or
+        ("","") when nothing filled. The taker transacts at its OWN limit price
+        for every fill, so collateral is taker_price x filled."""
+        if filled_micro <= 0:
+            return "", ""
+        collateral_micro = (price_int * filled_micro) // _PRICE_ONE
+        if side == "BUY":
+            return (
+                size_to_decimal_str(collateral_micro),  # USDC given
+                size_to_decimal_str(filled_micro),       # shares received
+            )
+        return (
+            size_to_decimal_str(filled_micro),           # shares given
+            size_to_decimal_str(collateral_micro),       # USDC received
+        )
+
+    def _build_replay_response(self, conn, order_id: str) -> OrderResponse:
+        """Reconstruct an OrderResponse for an already-placed order (idempotent
+        replay). Fill amounts + trade ids come from the order's confirmed trades;
+        transaction hashes are best-effort (the normal path returns them from the
+        in-memory settlement, so DB rows may not carry them)."""
+        row = self._get_order_row(conn, order_id)
+        trades = conn.execute(
+            "SELECT TRADE_ID, TRADE_SIZE, TRANSACTION_HASH, STATUS FROM trades "
+            "WHERE TAKER_ORDER_ID = %s",
+            (order_id,),
+        ).fetchall()
+        # Settlement is all-or-nothing per taker, so any FAILED trade means the
+        # original attempt failed -> replay that failure (spec §5.5). errorMsg
+        # is not reconstructed (the exception text was never persisted).
+        has_failed = any(t["STATUS"] == "FAILED" for t in trades)
+        confirmed = [t for t in trades if t["STATUS"] != "FAILED"]
+        filled_micro = sum(int(t["TRADE_SIZE"]) for t in confirmed)
+        making_amount, taking_amount = self._fill_amounts(
+            row["SIDE"], int(row["PRICE"]), filled_micro
+        )
+        tx_hashes = [t["TRANSACTION_HASH"] for t in confirmed if t["TRANSACTION_HASH"]]
+        return OrderResponse(
+            success=not has_failed,
+            orderID=order_id,
+            status=row["STATUS"],
+            transactionsHashes=tx_hashes,
+            takingAmount=taking_amount,
+            makingAmount=making_amount,
+            tradeIDs=[t["TRADE_ID"] for t in confirmed],
+        )
 
     @staticmethod
     def _amounts_from_price_size(
