@@ -201,3 +201,21 @@ def test_register_exposes_api_key():
             json={"email": "apikey@example.com", "password": "hunter22hunter22"},
         ).json()
         assert body["user"]["api_key"]
+
+
+def test_me_accepts_api_key_header():
+    with TestClient(app) as client:
+        body = client.post(
+            "/register",
+            json={"email": "akauth@example.com", "password": "hunter22hunter22"},
+        ).json()
+        api_key = body["user"]["api_key"]
+        resp = client.get("/me", headers={"X-API-Key": api_key})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["email"] == "akauth@example.com"
+
+
+def test_me_rejects_invalid_api_key():
+    with TestClient(app) as client:
+        resp = client.get("/me", headers={"X-API-Key": "nope-not-a-key"})
+        assert resp.status_code == 401
