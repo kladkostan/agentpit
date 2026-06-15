@@ -6,6 +6,7 @@ class UserPublic(BaseModel):
     email: str
     handle: str | None
     eth_address: str
+    api_key: str
     onboarded_at: int | None
     created_at: int
 

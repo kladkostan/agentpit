@@ -153,6 +153,7 @@ class AuthService:
                 email=user.email,
                 handle=user.handle,
                 eth_address=user.eth_address,
+                api_key=user.api_key,
                 onboarded_at=user.onboarded_at,
                 created_at=user.created_at,
             ),

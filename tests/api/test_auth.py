@@ -192,3 +192,12 @@ def test_patch_me_password_rejects_invalid_current_password():
             },
         )
         assert resp.status_code == 401
+
+
+def test_register_exposes_api_key():
+    with TestClient(app) as client:
+        body = client.post(
+            "/register",
+            json={"email": "apikey@example.com", "password": "hunter22hunter22"},
+        ).json()
+        assert body["user"]["api_key"]
