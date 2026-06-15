@@ -159,9 +159,15 @@ class OrderService:
                 matches = self._match(conn, taker_row, dry_run=False)
         except psycopg.errors.UniqueViolation:
             # A concurrent request claimed this client_order_id first; the row is
-            # committed by the time the violation fires, so replay its order.
+            # committed by the time the violation fires, so replay its order. A
+            # violation without a client_order_id can't be from the claim, so
+            # re-raise rather than mis-replay against a NULL key.
+            if coid is None:
+                raise
             with self._db.read() as conn:
                 existing = TableRead.get_idempotency_order_id(conn, user.api_key, coid)
+                if existing is None:
+                    raise
                 return self._build_replay_response(conn, existing)
 
         tx_hashes: list[str] = []
@@ -632,7 +638,7 @@ class OrderService:
         row = self._get_order_row(conn, order_id)
         trades = conn.execute(
             "SELECT TRADE_ID, TRADE_SIZE, TRANSACTION_HASH, STATUS FROM trades "
-            "WHERE TAKER_ORDER_ID = %s",
+            "WHERE TAKER_ORDER_ID = %s ORDER BY MATCH_TIME",
             (order_id,),
         ).fetchall()
         # Settlement is all-or-nothing per taker, so any FAILED trade means the
