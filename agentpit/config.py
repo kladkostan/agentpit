@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     order_cancelled_retention_seconds: int = Field(
         default=600, validation_alias="AGENTPIT_ORDER_CANCELLED_RETENTION_SECONDS"
     )
+    idempotency_key_retention_seconds: int = Field(
+        default=86400, validation_alias="AGENTPIT_IDEMPOTENCY_KEY_RETENTION_SECONDS"
+    )
 
     @model_validator(mode="after")
     def _default_resolution_mirror_enabled(self) -> "Settings":

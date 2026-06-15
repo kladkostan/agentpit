@@ -55,3 +55,26 @@ def test_purge_idempotency_keys_removes_old():
     with db.read() as conn:
         assert TableRead.get_idempotency_order_id(conn, "k", "old") is None
         assert TableRead.get_idempotency_order_id(conn, "k", "new") == "0x2"
+
+
+def test_run_order_cleanup_purges_idempotency_keys():
+    import time as _time
+
+    from agentpit.api.app import _run_order_cleanup
+
+    db = DbSession(Settings().database_url)
+    settings = Settings()
+    now = int(_time.time())
+    with db.write() as conn:
+        TableWrite.claim_idempotency_key(
+            conn, api_key="k", client_order_id="stale", order_id="0x1",
+            created_at=now - settings.idempotency_key_retention_seconds - 10,
+        )
+        TableWrite.claim_idempotency_key(
+            conn, api_key="k", client_order_id="fresh", order_id="0x2",
+            created_at=now,
+        )
+    _run_order_cleanup(db, settings)
+    with db.read() as conn:
+        assert TableRead.get_idempotency_order_id(conn, "k", "stale") is None
+        assert TableRead.get_idempotency_order_id(conn, "k", "fresh") == "0x2"
