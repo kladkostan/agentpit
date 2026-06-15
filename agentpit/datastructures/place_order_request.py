@@ -21,6 +21,7 @@ class PlaceOrderRequest(BaseModel):
     size: Decimal = Field(gt=0)  # whole shares (× 10⁶ base units internally)
     order_type: Literal["GTC", "FOK", "FAK", "GTD"] = "GTC"
     expiration: int = 0  # unix seconds, required if GTD
+    client_order_id: str | None = None  # optional per-user idempotency key
 
     @field_validator("price")
     @classmethod

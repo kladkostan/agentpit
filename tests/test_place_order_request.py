@@ -53,3 +53,15 @@ def test_size_below_one_base_unit_rejected():
 def test_size_exactly_one_base_unit_ok():
     r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size="0.000001")
     assert r.size == Decimal("0.000001")
+
+
+def test_client_order_id_optional_defaults_none():
+    r = PlaceOrderRequest(token_id="123", side="BUY", price="0.5", size=1)
+    assert r.client_order_id is None
+
+
+def test_client_order_id_accepted():
+    r = PlaceOrderRequest(
+        token_id="123", side="BUY", price="0.5", size=1, client_order_id="abc"
+    )
+    assert r.client_order_id == "abc"
