@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatProbabilityPct, parseVolume } from "./format";
+import { formatProbabilityPct, formatSignedUsd, parseVolume } from "./format";
 
 describe("parseVolume", () => {
   it("returns null for absent, zero, or unparseable input", () => {
@@ -36,5 +36,19 @@ describe("formatProbabilityPct", () => {
     expect(formatProbabilityPct(0.01)).toBe("1");
     expect(formatProbabilityPct(0.184)).toBe("18");
     expect(formatProbabilityPct(0.995)).toBe("100");
+  });
+});
+
+describe("formatSignedUsd", () => {
+  it("prefixes a positive amount with +", () => {
+    expect(formatSignedUsd(84.2)).toBe("+$84.20");
+  });
+
+  it("prefixes a negative amount with -", () => {
+    expect(formatSignedUsd(-210.8)).toBe("-$210.80");
+  });
+
+  it("renders zero without a sign", () => {
+    expect(formatSignedUsd(0)).toBe("$0.00");
   });
 });

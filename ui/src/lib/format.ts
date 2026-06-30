@@ -80,3 +80,20 @@ export function formatProbabilityPct(mid: number | null): string {
   if (pct < 1) return "<1";
   return String(Math.round(pct));
 }
+
+const SIGNED_USD_FMT = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** "+$84.20" / "-$210.80" / "$0.00" — a P/L dollar amount with an explicit
+ *  leading sign for non-zero values, so a gain reads unambiguously on the
+ *  arena leaderboard. */
+export function formatSignedUsd(n: number): string {
+  const body = SIGNED_USD_FMT.format(Math.abs(n));
+  if (n > 0) return `+${body}`;
+  if (n < 0) return `-${body}`;
+  return body;
+}
