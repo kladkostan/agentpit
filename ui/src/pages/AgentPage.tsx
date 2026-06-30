@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { ArrowDownRight, ArrowUpRight, Minus, Play } from "lucide-react";
 import type { Position } from "@/api/portfolio";
 import { usePositions } from "@/api/portfolio";
+import { useBotStatus, type BotFeedItem, type BotStatus } from "@/api/botStatus";
 import {
-  BOT_ADDRESS,
-  useBotStatus,
-  type BotFeedItem,
-  type BotStatus,
-} from "@/api/botStatus";
+  resolveAgentIdentity,
+  useLeaderboard,
+  type AgentIdentity,
+} from "@/api/leaderboard";
+import { useNowSeconds } from "@/lib/useNowSeconds";
 import { Sparkline } from "@/components/Sparkline";
 import type { SparklineSample } from "@/lib/chartGeometry";
 import { formatClock, formatCountdown } from "@/lib/format";
@@ -23,19 +24,6 @@ const USD = new Intl.NumberFormat("en-US", {
 // Trade sizes range from fractional (0.02 sh) to triple-digit, so keep up to two
 // decimals — rounding to whole shares turned a real 0.02-share fill into "0".
 const SHARES = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-
-/** A 1Hz ticking clock so the countdown + "live" judgement re-render each second. */
-function useNowSeconds(): number {
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  useEffect(() => {
-    const id = window.setInterval(
-      () => setNow(Math.floor(Date.now() / 1000)),
-      1000,
-    );
-    return () => window.clearInterval(id);
-  }, []);
-  return now;
-}
 
 /** localhost sidecar that fires an immediate OpenClaw run. Override via VITE_BOT_TRIGGER_URL. */
 const TRIGGER_URL =
@@ -56,8 +44,14 @@ const pnlText = (n: number) =>
 
 export function AgentPage() {
   const now = useNowSeconds();
-  const { data: status, error: statusError } = useBotStatus();
-  const { data: openData } = usePositions(BOT_ADDRESS);
+  const { agentId } = useParams();
+  const { data: leaderboard } = useLeaderboard();
+  const { identity, status: idStatus } = resolveAgentIdentity(
+    leaderboard,
+    agentId,
+  );
+  const { data: status, error: statusError } = useBotStatus(agentId);
+  const { data: openData } = usePositions(identity?.address);
 
   const open = useMemo(
     () =>
@@ -100,11 +94,28 @@ export function AgentPage() {
   // paused/stalled and we show an honest idle state rather than a fake pulse.
   const isLive = sinceUpdate < interval * 2 + 60;
 
+  if (idStatus === "not-found") {
+    return (
+      <section className="mx-auto max-w-5xl py-16 text-center">
+        <p className="text-sm text-muted-foreground">
+          No agent "{agentId}" in the arena.
+        </p>
+        <Link
+          to="/agents"
+          className="mt-3 inline-block text-sm text-primary hover:underline"
+        >
+          ← Back to Agent Arena
+        </Link>
+      </section>
+    );
+  }
+
   return (
     <section className="mx-auto max-w-6xl space-y-6">
       <style>{KEYFRAMES}</style>
 
       <HeroBanner
+        identity={identity}
         status={status}
         isLive={isLive}
         secsToNext={secsToNext}
@@ -161,16 +172,25 @@ export function AgentPage() {
 /* ----------------------------------------------------------------- hero --- */
 
 function HeroBanner({
+  identity,
   status,
   isLive,
   secsToNext,
   hasError,
 }: {
+  identity: AgentIdentity | null;
   status: BotStatus | undefined;
   isLive: boolean;
   secsToNext: number | null;
   hasError: boolean;
 }) {
+  // identity is null only briefly while the leaderboard loads for an arena
+  // agent — fall back to neutral placeholders so the hero never flashes empty.
+  const emoji = identity?.emoji ?? "🤖";
+  const name = identity?.name ?? "…";
+  const style = identity?.style ?? "";
+  const addr = identity ? shortAddr(identity.address) : "";
+
   return (
     <div
       className="relative overflow-hidden rounded-2xl border bg-card px-6 py-6 sm:px-8"
@@ -184,19 +204,25 @@ function HeroBanner({
       <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <div className="grid size-12 shrink-0 place-items-center rounded-xl border bg-background/70 text-2xl shadow-sm">
-            🤖
+            {emoji}
           </div>
           <div>
+            {identity?.isArena ? (
+              <Link
+                to="/agents"
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                ← Agent Arena
+              </Link>
+            ) : null}
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold tracking-tight">
-                agentpit-trader
-              </h1>
+              <h1 className="text-xl font-semibold tracking-tight">{name}</h1>
               <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
                 paper · demo
               </span>
             </div>
             <p className="font-mono text-xs text-muted-foreground">
-              {shortAddr(BOT_ADDRESS)} · autonomous trading agent
+              {addr ? `${addr} · ${style}` : style}
             </p>
           </div>
         </div>

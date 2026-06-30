@@ -20,6 +20,7 @@ export default function App() {
             <Route path="/events/:slug" element={<EventDetailPage />} />
             <Route path="/markets/:id" element={<MarketDetailPage />} />
             <Route path="/agent" element={<AgentPage />} />
+            <Route path="/agents/:agentId" element={<AgentPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
