@@ -61,12 +61,18 @@ export const BOT_ADDRESS =
     ? import.meta.env.VITE_BOT_ADDRESS
     : "0x5b3DfFE03Dbf0CB0793C62fff3e4e42204F927AD");
 
-export function useBotStatus() {
+/** Static path for an agent's status file. The arena writes one per agent
+ *  (`bot-status-<id>.json`); the legacy single bot uses `bot-status.json`. */
+export function botStatusUrl(agentId?: string): string {
+  return agentId ? `/bot-status-${agentId}.json` : "/bot-status.json";
+}
+
+export function useBotStatus(agentId?: string) {
   return useQuery({
-    queryKey: ["bot-status"],
+    queryKey: ["bot-status", agentId ?? "default"],
     queryFn: async (): Promise<BotStatus> => {
       // Cache-bust so the static asset never serves a stale cycle.
-      const res = await fetch(`/bot-status.json?t=${Date.now()}`, {
+      const res = await fetch(`${botStatusUrl(agentId)}?t=${Date.now()}`, {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`bot-status ${res.status}`);
