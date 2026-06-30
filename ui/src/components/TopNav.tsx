@@ -97,6 +97,19 @@ export function TopNav() {
             AgentPit
           </span>
         </NavLink>
+        <NavLink
+          to="/agent"
+          className={({ isActive }) =>
+            `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${
+              isActive
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`
+          }
+        >
+          <span className="inline-flex size-1.5 animate-pulse rounded-full bg-emerald-500" />
+          Agent Live
+        </NavLink>
         {showSearch ? <SearchBar /> : null}
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {user ? (

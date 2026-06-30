@@ -58,8 +58,11 @@ export function parseVolume(raw: string | null | undefined): number | null {
   return n;
 }
 
-/** Compact dollar formatter — $850, $12.4K, $8.1M, $1.2B. */
+/** Compact dollar formatter — $850, $12.4K, $8.1M, $1.2B, $3.4T, $1.0Q.
+ *  Goes up to quadrillions so the demo faucet's huge apUSD grant stays legible. */
 export function formatVolume(usd: number): string {
+  if (usd >= 1e15) return `$${(usd / 1e15).toFixed(1)}Q`;
+  if (usd >= 1e12) return `$${(usd / 1e12).toFixed(1)}T`;
   if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`;
   if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`;
   if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
