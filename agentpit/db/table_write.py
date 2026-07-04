@@ -649,12 +649,34 @@ class TableWrite:
     def purge_cancelled_orders(db: psycopg.Connection, before_ts: int) -> int:
         """Delete cancelled orders created before `before_ts`. Cancelled orders
         are resting quotes replaced before matching, so nothing references them;
-        this caps table growth from fast re-quoting. Returns rows removed."""
+        this caps table growth from fast re-quoting. Returns rows removed.
+
+        Idempotency claims pointing at a purged order go with it — a claim
+        whose order row is gone would break every replay of that
+        client_order_id until the (much longer) key retention expires it."""
+        db.execute(
+            "DELETE FROM idempotency_keys WHERE ORDER_ID IN "
+            "(SELECT ORDER_ID FROM orders "
+            " WHERE STATUS = 'cancelled' AND CREATED_AT < %s)",
+            (before_ts,),
+        )
         cur = db.execute(
             "DELETE FROM orders WHERE STATUS = 'cancelled' AND CREATED_AT < %s",
             (before_ts,),
         )
         return cur.rowcount
+
+    @staticmethod
+    def delete_idempotency_key(
+        db: psycopg.Connection, *, api_key: str, client_order_id: str
+    ) -> None:
+        """Drop a single (api_key, client_order_id) claim — used to heal a
+        stale claim whose order row no longer exists."""
+        db.execute(
+            "DELETE FROM idempotency_keys "
+            "WHERE API_KEY = %s AND CLIENT_ORDER_ID = %s",
+            (api_key, client_order_id),
+        )
 
     @staticmethod
     def claim_idempotency_key(

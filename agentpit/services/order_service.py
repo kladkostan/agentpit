@@ -100,8 +100,16 @@ class OrderService:
         if coid is not None:
             with self._db.read() as conn:
                 existing = TableRead.get_idempotency_order_id(conn, user.api_key, coid)
-                if existing is not None:
+                if existing is not None and self._safe_row(existing) is not None:
                     return self._build_replay_response(conn, existing)
+            if existing is not None:
+                # Stale claim: its order row was purged (cancelled + cleaned up)
+                # before this retry arrived. Replaying a purged, never-filled
+                # order helps nobody — drop the claim, place fresh.
+                with self._db.write() as conn:
+                    TableWrite.delete_idempotency_key(
+                        conn, api_key=user.api_key, client_order_id=coid
+                    )
         token_id_int, _token_id_str = self._resolve_token(payload)
         size_micro = decimal_str_to_size_micro(str(payload.size))
         maker_amount, taker_amount = self._amounts_from_price_size(
