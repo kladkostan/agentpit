@@ -37,12 +37,20 @@ export async function listEvents(
     offset: String(params.offset),
   });
   const wire = await apiFetch<GammaEvent[]>(`/events?${search.toString()}`);
-  const events = wire.map(gammaToEventWithMarkets);
-  // Gamma returns a bare array with no total; derive a total that keeps the
-  // infinite query paging while pages come back full, stopping on a short page.
-  const total =
-    params.offset + events.length + (events.length === params.limit ? 1 : 0);
-  return { events, total, limit: params.limit, offset: params.offset };
+  // A fully-resolved event has nothing tradeable left — hide it from listings
+  // (its price is frozen at the pre-resolution level and only confuses).
+  // Direct links to the event page keep working; this filters the grid only.
+  const live = wire.filter((g) => g.markets.some((m) => !m.closed));
+  const events = live.map(gammaToEventWithMarkets);
+  // Paging advances in WIRE units: the filter must not shift the server
+  // offset, or the next page would re-fetch (and duplicate) skipped rows.
+  return {
+    events,
+    nextOffset: params.offset + wire.length,
+    hasMore: wire.length === params.limit,
+    limit: params.limit,
+    offset: params.offset,
+  };
 }
 
 export async function getEvent(slug: string): Promise<EventWithMarkets> {
@@ -56,10 +64,8 @@ export function useEventsInfinite() {
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       listEvents({ limit: EVENTS_PAGE_SIZE, offset: pageParam }),
-    getNextPageParam: (lastPage, allPages) => {
-      const loaded = allPages.reduce((sum, page) => sum + page.events.length, 0);
-      return loaded < lastPage.total ? loaded : undefined;
-    },
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? lastPage.nextOffset : undefined,
     // Poll so newly-synced markets appear on the home page without a manual
     // refresh (a sync streams markets in over a few seconds). Only refetches
     // while the tab is visible (refetchIntervalInBackground defaults to false).

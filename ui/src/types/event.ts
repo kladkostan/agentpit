@@ -21,7 +21,11 @@ export interface EventWithMarkets {
 
 export interface ListEventsResponse {
   events: EventWithMarkets[];
-  total: number;
+  /** Server-side offset of the NEXT page, in wire units — client-side
+   *  filtering (hidden resolved events) must not shift server paging. */
+  nextOffset: number;
+  /** True while the server keeps returning full pages. */
+  hasMore: boolean;
   limit: number;
   offset: number;
 }
