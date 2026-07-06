@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_IDENTITY,
   equityPoints,
+  lastTrade,
   rankAgents,
   resolveAgentIdentity,
   type LeaderboardAgent,
   type LeaderboardData,
 } from "./leaderboard";
+import type { BotFeedItem } from "./botStatus";
 
 function agent(over: Partial<LeaderboardAgent>): LeaderboardAgent {
   return {
@@ -24,6 +26,56 @@ function agent(over: Partial<LeaderboardAgent>): LeaderboardAgent {
     ...over,
   };
 }
+
+function feedItem(over: Partial<BotFeedItem>): BotFeedItem {
+  return {
+    ts: 0,
+    cycle_id: "c",
+    decision_id: "d-0",
+    title: "Q?",
+    direction: "UP",
+    recent_move: 0,
+    rationale: "",
+    edge_source: "model",
+    outcome: "traded",
+    traded: true,
+    demo: false,
+    side: "BUY",
+    price: 0.5,
+    size: 10,
+    ...over,
+  };
+}
+
+describe("lastTrade", () => {
+  it("returns null for an empty feed", () => {
+    expect(lastTrade([])).toBeNull();
+  });
+
+  it("returns null when no item actually traded", () => {
+    expect(
+      lastTrade([feedItem({ traded: false, outcome: "no_trade" })]),
+    ).toBeNull();
+  });
+
+  it("picks the newest traded item even from an unsorted feed, skipping non-trades", () => {
+    const older = feedItem({ ts: 100, decision_id: "d-1" });
+    const newest = feedItem({ ts: 300, decision_id: "d-2" });
+    const heldLater = feedItem({
+      ts: 400,
+      decision_id: "d-3",
+      traded: false,
+      outcome: "no_trade",
+    });
+    expect(lastTrade([older, heldLater, newest])).toEqual(newest);
+  });
+
+  it("breaks equal timestamps by decision_id", () => {
+    const a = feedItem({ ts: 100, decision_id: "d-1" });
+    const b = feedItem({ ts: 100, decision_id: "d-9" });
+    expect(lastTrade([a, b])).toEqual(b);
+  });
+});
 
 describe("rankAgents", () => {
   it("orders by total_pnl descending and medals the top three", () => {

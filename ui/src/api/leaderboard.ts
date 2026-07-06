@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BOT_ADDRESS, type PnlPoint } from "@/api/botStatus";
+import { BOT_ADDRESS, type BotFeedItem, type PnlPoint } from "@/api/botStatus";
 import type { SparklineSample } from "@/lib/chartGeometry";
 
 /**
@@ -105,6 +105,23 @@ export function equityPoints(equity: PnlPoint[]): SparklineSample[] {
     { t: 0, p },
     { t: 1, p },
   ];
+}
+
+/** Newest feed item that actually traded, or null. Does not trust feed order:
+ *  picks the max (ts, decision_id) among traded items. */
+export function lastTrade(feed: BotFeedItem[]): BotFeedItem | null {
+  let best: BotFeedItem | null = null;
+  for (const item of feed) {
+    if (!item.traded) continue;
+    if (
+      best === null ||
+      item.ts > best.ts ||
+      (item.ts === best.ts && item.decision_id > best.decision_id)
+    ) {
+      best = item;
+    }
+  }
+  return best;
 }
 
 /** Fetch the arena leaderboard off the UI origin's static `public/`. Cache-busted
