@@ -286,6 +286,24 @@ class TableRead:
         markets = [_row_to_market(row) for row in cur.fetchall()]
         return markets, total
 
+    @staticmethod
+    def list_markets_with_user_activity(
+        db: psycopg.Connection, api_key: str
+    ) -> "list[Market]":
+        """Markets where `api_key` has any trade or split/merge transaction —
+        the only markets where the user can hold a CTF balance (you only acquire
+        outcome tokens via a fill or a split). Lets list_positions scan just
+        these (usually a handful) on-chain instead of every market, which is
+        O(market count) sequential on-chain reads."""
+        cur = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets WHERE CONDITION_ID IN "
+            "(SELECT MARKET FROM trades "
+            " WHERE TAKER_API_KEY = %s OR MAKER_API_KEY = %s) "
+            "OR MARKET_ID IN (SELECT MARKET_ID FROM transactions WHERE API_KEY = %s)",
+            (api_key, api_key, api_key),
+        )
+        return [_row_to_market(row) for row in cur.fetchall()]
+
     _EVENT_COLS = (
         "EVENT_ID, SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY, "
         "START_DATE, END_DATE, POLYMARKET_EVENT_ID, VOLUME_24HR"

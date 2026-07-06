@@ -24,7 +24,10 @@ class AccountService:
             user = TableRead.get_user_by_eth_address(conn, eth_address)
             if user is None:
                 return []
-            markets, _ = TableRead.list_markets(conn, limit=10000)
+            # Only markets the user has traded or split can hold a CTF balance.
+            # Scanning every market on-chain is O(market count) reads (~24s at
+            # 1000 markets); scope to the handful the user actually touched.
+            markets = TableRead.list_markets_with_user_activity(conn, user.api_key)
         out: list[PositionWire] = []
         for mkt in markets:
             if market and mkt.condition_id.value not in market:
