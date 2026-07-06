@@ -268,16 +268,31 @@ class AccountService:
 
     @staticmethod
     def _avg_fill_price(conn, api_key: str, token_id: str) -> float:
-        """Size-weighted average price of the user's fills on this asset
-        (taker or maker), in dollars; 0.0 if none."""
+        """Size-weighted price the user PAID per share of this asset, in dollars;
+        0.0 if none. Cost basis counts only BUY fills — exit SELLs reduce the
+        quantity, not the per-share entry price, so including them corrupts it.
+        And a MINT match (taker BUY vs maker BUY) records the maker's complement
+        price (1-p) against the taker's asset_id, so the taker truly paid
+        ONE - price — flip those, else the basis drifts toward $0.50."""
         rows = conn.execute(
-            "SELECT PRICE, TRADE_SIZE FROM trades "
-            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
+            "SELECT PRICE, TRADE_SIZE, MAKER_ORDERS FROM trades "
+            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' AND SIDE = 'BUY' "
             "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
             (token_id, api_key, api_key),
         ).fetchall()
-        num = sum(int(r["PRICE"]) * int(r["TRADE_SIZE"]) for r in rows)
-        den = sum(int(r["TRADE_SIZE"]) for r in rows)
+        num = den = 0
+        for r in rows:
+            price = int(r["PRICE"])
+            mo = r["MAKER_ORDERS"]
+            try:
+                mo = json.loads(mo) if isinstance(mo, str) else mo
+                maker_side = mo[0].get("side", "SELL") if mo else "SELL"
+            except (TypeError, ValueError, IndexError, KeyError, AttributeError):
+                maker_side = "SELL"
+            if maker_side == "BUY":          # MINT: recorded price is the complement
+                price = 1_000_000 - price
+            num += price * int(r["TRADE_SIZE"])
+            den += int(r["TRADE_SIZE"])
         return price_to_float(num // den) if den else 0.0
 
     @staticmethod
