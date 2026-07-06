@@ -2,10 +2,15 @@ import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { AlertCircle, CheckCircle2, Search, XCircle } from "lucide-react";
 import type { Position } from "@/api/portfolio";
-import { usePositions, useClosedPositions } from "@/api/portfolio";
+import {
+  usePositions,
+  useClosedPositions,
+  useUsdcBalance,
+} from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
+import { formatVolume } from "@/lib/format";
 import {
   Card,
   CardContent,
@@ -45,11 +50,6 @@ const PNL_WINDOWS = {
 } as const;
 type PnlWindow = keyof typeof PNL_WINDOWS;
 
-function shortAddress(address: string): string {
-  if (address.length < 12) return address;
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 function displayName(email: string, handle: string | null): string {
   if (handle && handle.trim().length > 0) return handle;
   const [prefix] = email.split("@");
@@ -69,6 +69,7 @@ export function ProfilePage() {
     error: positionsError,
   } = usePositions(user?.eth_address);
   const { data: closedData } = useClosedPositions(user?.eth_address);
+  const { data: balance } = useUsdcBalance(Boolean(user));
   const avatarStyle = getAvatarStyle(user?.eth_address || user?.email);
 
   const isLoading = positionsLoading;
@@ -161,18 +162,21 @@ export function ProfilePage() {
                 {displayName(user.email, user.handle).slice(0, 1).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <Tooltip title={user.eth_address} arrow>
-                  <h2 className="cursor-help truncate text-2xl font-semibold leading-none tracking-tight">
-                    {shortAddress(user.eth_address)}
-                  </h2>
-                </Tooltip>
+                <h2 className="break-all font-mono text-sm font-semibold leading-tight tracking-tight">
+                  {user.eth_address}
+                </h2>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Joined {DATE.format(new Date(user.created_at * 1000))} • 0
                   views
                 </p>
               </div>
             </div>
-            <div className="mt-6 grid grid-cols-3 divide-x rounded-lg border bg-muted/20">
+            <div className="mt-6 grid grid-cols-2 divide-x rounded-lg border bg-muted/20 sm:grid-cols-4">
+              <TopMetric
+                label="Balance"
+                value={balance != null ? formatVolume(balance) : "—"}
+                tooltip={balance != null ? USD.format(balance) : undefined}
+              />
               <TopMetric
                 label="Positions Value"
                 value={USD.format(positionsValue)}
@@ -308,7 +312,7 @@ function TopMetric({
 }: {
   label: string;
   value: string;
-  tooltip?: string;
+  tooltip?: string | undefined;
 }) {
   const truncatedValue = value.length > 12 ? `${value.slice(0, 9)}...` : value;
   return (

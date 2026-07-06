@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, KeyRound, Lock, Mail, User, X } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Key, KeyRound, Lock, Mail, User, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   changePasswordRequest,
@@ -32,20 +32,18 @@ export function SettingsPage() {
               </div>
             </div>
             <div className="flex items-center gap-4 border-b p-4">
-              <Lock className="size-5 text-muted-foreground" />
-              <div className="flex-1">
+              <Lock className="size-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">Address</p>
-                <p
-                  className="truncate text-sm text-muted-foreground"
-                  title={user.eth_address}
-                >
-                  {shortAddress(user.eth_address)}
+                <p className="break-all font-mono text-sm text-muted-foreground">
+                  {user.eth_address}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Do not send funds to this address. For API use only.
                 </p>
               </div>
             </div>
+            <ApiKeyRow apiKey={user.api_key} />
             <ChangePasswordRow />
           </CardContent>
         </Card>
@@ -183,10 +181,61 @@ function UsernameRow({ user, onUpdated }: UsernameRowProps) {
   );
 }
 
-function shortAddress(address: string): string {
-  if (!address) return "";
-  if (address.length <= 22) return address;
-  return `${address.slice(0, 12)}...${address.slice(-8)}`;
+function ApiKeyRow({ apiKey }: { apiKey: string }) {
+  const [revealed, setRevealed] = useState(false);
+  const masked = apiKey
+    ? `${apiKey.slice(0, 6)}${"•".repeat(10)}${apiKey.slice(-4)}`
+    : "—";
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(apiKey);
+      toast.success("API key copied to clipboard.");
+    } catch {
+      toast.error("Could not copy API key.");
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4 border-b p-4">
+      <Key className="size-5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">Agentpit API Key</p>
+        <p
+          className="truncate font-mono text-sm text-muted-foreground"
+          title={revealed ? apiKey : undefined}
+        >
+          {revealed ? apiKey : masked}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Send as the <span className="font-mono">X-API-Key</span> header to
+          trade through the API. Keep it secret.
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-9 rounded-full"
+          onClick={() => setRevealed((r) => !r)}
+          aria-label={revealed ? "Hide API key" : "Reveal API key"}
+        >
+          {revealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-9 rounded-full"
+          onClick={() => void copy()}
+          aria-label="Copy API key"
+        >
+          <Copy className="size-4" />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function ChangePasswordRow() {

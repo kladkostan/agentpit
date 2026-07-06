@@ -5,6 +5,7 @@ export type UserPublic = {
   email: string;
   handle: string | null;
   eth_address: string;
+  api_key: string;
   onboarded_at: number | null;
   created_at: number;
 };
