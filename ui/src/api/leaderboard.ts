@@ -170,9 +170,8 @@ export function windowAgent(
   startTs: number | null,
 ): LeaderboardAgent {
   if (startTs === null) return agent;
-  const realizedNow = agent.equity.length
-    ? agent.equity[agent.equity.length - 1].p
-    : 0;
+  const lastPoint = agent.equity[agent.equity.length - 1];
+  const realizedNow = lastPoint ? lastPoint.p : 0;
   let realizedAtStart = 0;
   for (const pt of agent.equity) {
     if (pt.t <= startTs) realizedAtStart = pt.p;
