@@ -141,3 +141,52 @@ export function useLeaderboard() {
     retry: false,
   });
 }
+
+export type TimeWindowKey = "24h" | "7d" | "30d" | "all";
+
+export interface TimeWindow {
+  key: TimeWindowKey;
+  label: string;
+  /** Window length in seconds; null = all time. */
+  seconds: number | null;
+}
+
+/** Rolling leaderboard windows (not calendar days) — steadier for a demo. */
+export const TIME_WINDOWS: TimeWindow[] = [
+  { key: "24h", label: "24h", seconds: 86_400 },
+  { key: "7d", label: "7d", seconds: 604_800 },
+  { key: "30d", label: "30d", seconds: 2_592_000 },
+  { key: "all", label: "All time", seconds: null },
+];
+
+/** Derive an agent re-scoped to [startTs, now]. `equity` is a cumulative
+ *  realized-P&L step function (ascending t, `{t:0,p:0}` anchor), so the
+ *  window's realized P&L is the step delta across the boundary; unrealized is
+ *  "now"-only and counts toward every window. A close exactly at `startTs`
+ *  belongs to *before* the window. `startTs === null` (All time) returns the
+ *  agent unchanged so ranking stays byte-identical to today. */
+export function windowAgent(
+  agent: LeaderboardAgent,
+  startTs: number | null,
+): LeaderboardAgent {
+  if (startTs === null) return agent;
+  const realizedNow = agent.equity.length
+    ? agent.equity[agent.equity.length - 1].p
+    : 0;
+  let realizedAtStart = 0;
+  for (const pt of agent.equity) {
+    if (pt.t <= startTs) realizedAtStart = pt.p;
+  }
+  const inWindow = agent.equity.filter((pt) => pt.t > startTs);
+  const realized = realizedNow - realizedAtStart;
+  return {
+    ...agent,
+    realized_pnl: realized,
+    total_pnl: realized + agent.unrealized_pnl,
+    trades: inWindow.length,
+    equity: [
+      { t: startTs, p: 0 },
+      ...inWindow.map((pt) => ({ t: pt.t, p: pt.p - realizedAtStart })),
+    ],
+  };
+}

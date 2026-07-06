@@ -5,6 +5,8 @@ import {
   lastTrade,
   rankAgents,
   resolveAgentIdentity,
+  TIME_WINDOWS,
+  windowAgent,
   type LeaderboardAgent,
   type LeaderboardData,
 } from "./leaderboard";
@@ -181,5 +183,87 @@ describe("equityPoints", () => {
       { t: 0, p: 0 },
       { t: 1, p: 0 },
     ]);
+  });
+});
+
+describe("TIME_WINDOWS", () => {
+  it("offers 24h/7d/30d/all with correct lengths", () => {
+    expect(TIME_WINDOWS.map((w) => w.key)).toEqual(["24h", "7d", "30d", "all"]);
+    expect(TIME_WINDOWS.map((w) => w.seconds)).toEqual([
+      86_400, 604_800, 2_592_000, null,
+    ]);
+  });
+});
+
+describe("windowAgent", () => {
+  const base = agent({
+    realized_pnl: -20,
+    unrealized_pnl: -5,
+    trades: 3,
+    total_pnl: -25,
+    equity: [
+      { t: 0, p: 0 },
+      { t: 1000, p: -8 },
+      { t: 2000, p: -12 },
+      { t: 3000, p: -20 },
+    ],
+  });
+
+  it("returns the same agent object for All time (null start)", () => {
+    expect(windowAgent(base, null)).toBe(base);
+  });
+
+  it("re-scopes realized, total, trades, and equity to the window", () => {
+    const w = windowAgent(base, 1500);
+    expect(w.realized_pnl).toBe(-12); // -20 now minus -8 at window start
+    expect(w.total_pnl).toBe(-17); // window realized + unrealized -5
+    expect(w.trades).toBe(2); // closes at t=2000 and t=3000
+    expect(w.equity).toEqual([
+      { t: 1500, p: 0 },
+      { t: 2000, p: -4 },
+      { t: 3000, p: -12 },
+    ]);
+  });
+
+  it("treats a close exactly at the boundary as before the window", () => {
+    const w = windowAgent(base, 2000);
+    expect(w.trades).toBe(1); // only t=3000
+    expect(w.realized_pnl).toBe(-8); // -20 minus -12
+    expect(w.equity).toEqual([
+      { t: 2000, p: 0 },
+      { t: 3000, p: -8 },
+    ]);
+  });
+
+  it("keeps unrealized P&L in every window", () => {
+    const w = windowAgent(base, 999_999); // window starts after all closes
+    expect(w.realized_pnl).toBe(0);
+    expect(w.total_pnl).toBe(-5);
+    expect(w.trades).toBe(0);
+    expect(w.equity).toEqual([{ t: 999_999, p: 0 }]);
+  });
+
+  it("handles a fresh agent that only has the zero anchor", () => {
+    const fresh = agent({ equity: [{ t: 0, p: 0 }] });
+    const w = windowAgent(fresh, 500);
+    expect(w.realized_pnl).toBe(0);
+    expect(w.total_pnl).toBe(0);
+    expect(w.trades).toBe(0);
+    expect(w.equity).toEqual([{ t: 500, p: 0 }]);
+  });
+
+  it("handles an empty equity series", () => {
+    const empty = agent({ equity: [], unrealized_pnl: 2 });
+    const w = windowAgent(empty, 500);
+    expect(w.realized_pnl).toBe(0);
+    expect(w.total_pnl).toBe(2);
+    expect(w.trades).toBe(0);
+    expect(w.equity).toEqual([{ t: 500, p: 0 }]);
+  });
+
+  it("does not mutate the input agent", () => {
+    const snapshot = JSON.parse(JSON.stringify(base));
+    windowAgent(base, 1500);
+    expect(base).toEqual(snapshot);
   });
 });
