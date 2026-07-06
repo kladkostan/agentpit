@@ -1,13 +1,19 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import {
   equityPoints,
+  lastTrade,
   rankAgents,
+  TIME_WINDOWS,
   useLeaderboard,
+  windowAgent,
   type RankedAgent,
+  type TimeWindowKey,
 } from "@/api/leaderboard";
+import { useBotStatus } from "@/api/botStatus";
 import { useNowSeconds } from "@/lib/useNowSeconds";
-import { formatCountdown, formatSignedUsd } from "@/lib/format";
+import { formatCountdown, formatSignedUsd, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const pnlText = (n: number) =>
@@ -23,7 +29,14 @@ const pnlTone = (n: number): "up" | "down" | "neutral" =>
 export function AgentArenaPage() {
   const now = useNowSeconds();
   const { data, error } = useLeaderboard();
-  const agents = data ? rankAgents(data.agents) : [];
+  const [windowKey, setWindowKey] = useState<TimeWindowKey>("all");
+  const win =
+    TIME_WINDOWS.find((w) => w.key === windowKey) ??
+    TIME_WINDOWS[TIME_WINDOWS.length - 1]!;
+  const startTs = win.seconds === null ? null : now - win.seconds;
+  const agents = data
+    ? rankAgents(data.agents.map((a) => windowAgent(a, startTs)))
+    : [];
 
   const interval = (data?.cycle_interval_minutes ?? 15) * 60;
   const sinceUpdate = data ? now - data.updated_at : Infinity;
@@ -75,15 +88,38 @@ export function AgentArenaPage() {
         </div>
       </header>
 
+      <div
+        className="flex w-fit items-center gap-1 rounded-full bg-muted p-1"
+        aria-label="Leaderboard time window"
+      >
+        {TIME_WINDOWS.map((w) => (
+          <button
+            key={w.key}
+            type="button"
+            aria-pressed={w.key === windowKey}
+            onClick={() => setWindowKey(w.key)}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+              w.key === windowKey
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {w.label}
+          </button>
+        ))}
+      </div>
+
       {error && !data ? (
         <div className="rounded-2xl border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           The leaderboard isn't available yet — it appears after the first cycle.
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border bg-card">
-          <div className="hidden grid-cols-[3rem_minmax(0,1fr)_8rem_7rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
+          <div className="hidden grid-cols-[3rem_minmax(0,1fr)_8rem_7rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,16rem)_8rem_7rem_4rem]">
             <span>#</span>
             <span>Agent</span>
+            <span className="hidden lg:block">Last Action</span>
             <span className="text-right">Total P&amp;L</span>
             <span className="text-center">Equity</span>
             <span className="text-right">Trades</span>
@@ -94,7 +130,7 @@ export function AgentArenaPage() {
                 Loading agents…
               </li>
             ) : (
-              agents.map((a) => <AgentRow key={a.id} agent={a} />)
+              agents.map((a) => <AgentRow key={a.id} agent={a} now={now} />)
             )}
           </ul>
         </div>
@@ -103,12 +139,12 @@ export function AgentArenaPage() {
   );
 }
 
-function AgentRow({ agent }: { agent: RankedAgent }) {
+function AgentRow({ agent, now }: { agent: RankedAgent; now: number }) {
   return (
     <li>
       <Link
         to={`/agents/${agent.id}`}
-        className="grid grid-cols-[3rem_minmax(0,1fr)_8rem] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_7rem_4rem]"
+        className="grid grid-cols-[3rem_minmax(0,1fr)_8rem] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_7rem_4rem] lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,16rem)_8rem_7rem_4rem]"
       >
         <span className="text-lg tabular-nums">
           {agent.medal ?? (
@@ -126,6 +162,7 @@ function AgentRow({ agent }: { agent: RankedAgent }) {
             </span>
           </span>
         </span>
+        <LastActionCell agentId={agent.id} now={now} />
         <span
           className={cn(
             "text-right text-base font-semibold tabular-nums",
@@ -147,5 +184,33 @@ function AgentRow({ agent }: { agent: RankedAgent }) {
         </span>
       </Link>
     </li>
+  );
+}
+
+/** Latest trade for one agent, off its bot-status feed. Fail-soft by design:
+ *  a missing/stale status file or a trade-less feed renders a quiet dash —
+ *  one agent's file must never break the whole row. */
+function LastActionCell({ agentId, now }: { agentId: string; now: number }) {
+  const { data } = useBotStatus(agentId);
+  const trade = data ? lastTrade(data.feed) : null;
+  if (!trade) {
+    return (
+      <span className="hidden text-sm text-muted-foreground lg:block">—</span>
+    );
+  }
+  const side =
+    trade.direction === "UP" ? "YES" : trade.direction === "DOWN" ? "NO" : null;
+  return (
+    <span className="hidden min-w-0 lg:block">
+      <span className="block truncate text-sm">
+        <span className="font-medium">
+          Trade{side ? ` "${side}"` : ""}
+        </span>
+        <span className="text-muted-foreground"> · {trade.title}</span>
+      </span>
+      <span className="block text-xs tabular-nums text-muted-foreground">
+        {relativeTime(now - trade.ts)} ago
+      </span>
+    </span>
   );
 }
