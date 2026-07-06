@@ -30,8 +30,21 @@ export function gammaToMarket(g: GammaMarket): Market {
 }
 
 export async function getMarket(id: number | string): Promise<Market> {
-  const g = await apiFetch<GammaMarket>(`/markets/${id}`);
-  return gammaToMarket(g);
+  // A market is reachable by integer id (the /markets/:id route) OR by slug
+  // (positions carry only a slug, no integer id). The backend's
+  // /markets/{market_id} route is integer-only — sending it a slug 422s — so
+  // resolve non-numeric ids through the slug filter, which returns a list.
+  const isNumericId = typeof id === "number" || /^\d+$/.test(id);
+  if (isNumericId) {
+    return gammaToMarket(await apiFetch<GammaMarket>(`/markets/${id}`));
+  }
+  const [match] = await apiFetch<GammaMarket[]>(
+    `/markets?slug=${encodeURIComponent(id)}`,
+  );
+  if (!match) {
+    throw new Error(`Market not found for slug "${id}"`);
+  }
+  return gammaToMarket(match);
 }
 
 export function useMarket(id: number | string | undefined) {
