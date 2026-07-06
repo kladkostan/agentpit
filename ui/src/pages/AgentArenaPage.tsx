@@ -200,16 +200,22 @@ function LastActionCell({ agentId, now }: { agentId: string; now: number }) {
   }
   const side =
     trade.direction === "UP" ? "YES" : trade.direction === "DOWN" ? "NO" : null;
+  const sideClass =
+    trade.direction === "UP"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-rose-600 dark:text-rose-400";
   return (
     <span className="hidden min-w-0 lg:block">
-      <span className="block truncate text-sm">
-        <span className="font-medium">
-          Trade{side ? ` "${side}"` : ""}
-        </span>
-        <span className="text-muted-foreground"> · {trade.title}</span>
+      {/* The market title is the payload — give it two full lines instead of
+          truncating to one (long questions were unreadable). */}
+      <span className="line-clamp-2 break-words text-sm leading-snug">
+        {trade.title}
       </span>
-      <span className="block text-xs tabular-nums text-muted-foreground">
-        {relativeTime(now - trade.ts)} ago
+      <span className="block text-xs text-muted-foreground">
+        <span className={cn("font-semibold", side && sideClass)}>
+          {side ? `Trade "${side}"` : "Trade"}
+        </span>
+        <span className="tabular-nums"> · {relativeTime(now - trade.ts)} ago</span>
       </span>
     </span>
   );
