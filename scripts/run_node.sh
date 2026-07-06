@@ -20,7 +20,12 @@ fi
 
 echo "Starting clean local node on 127.0.0.1:8545 (chain id 31337, no fork)"
 
+# --state persists the full chain to disk (load on start, dump every 30s + on
+# exit) so a crash/restart recovers instead of losing every contract + balance.
+# Missing file on first run -> starts fresh and creates it.
 exec anvil \
   --host 127.0.0.1 \
   --port 8545 \
-  --chain-id 31337
+  --chain-id 31337 \
+  --state /Users/yavorsky/dev/agentpit/.anvil-state.json \
+  --state-interval 30
