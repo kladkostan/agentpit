@@ -97,3 +97,14 @@ export function formatSignedUsd(n: number): string {
   if (n < 0) return `-${body}`;
   return body;
 }
+
+/** "42s" / "5m" / "2h" / "3d" — coarse age of an event given its distance in
+ *  seconds. Negative distances (clock skew) clamp to "0s". Callers append
+ *  their own "ago". */
+export function relativeTime(secsAgo: number): string {
+  if (secsAgo < 0) secsAgo = 0;
+  if (secsAgo < 60) return `${secsAgo}s`;
+  if (secsAgo < 3600) return `${Math.floor(secsAgo / 60)}m`;
+  if (secsAgo < 86_400) return `${Math.floor(secsAgo / 3600)}h`;
+  return `${Math.floor(secsAgo / 86_400)}d`;
+}

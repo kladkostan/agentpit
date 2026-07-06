@@ -12,7 +12,7 @@ import {
 import { useNowSeconds } from "@/lib/useNowSeconds";
 import { Sparkline } from "@/components/Sparkline";
 import type { SparklineSample } from "@/lib/chartGeometry";
-import { formatClock, formatCountdown } from "@/lib/format";
+import { formatClock, formatCountdown, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const USD = new Intl.NumberFormat("en-US", {
@@ -610,14 +610,6 @@ function Avatar({ icon, title }: { icon: string; title: string }) {
 
 function shortAddr(a: string): string {
   return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
-}
-
-function relativeTime(secsAgo: number): string {
-  if (secsAgo < 0) secsAgo = 0;
-  if (secsAgo < 60) return `${secsAgo}s`;
-  if (secsAgo < 3600) return `${Math.floor(secsAgo / 60)}m`;
-  if (secsAgo < 86_400) return `${Math.floor(secsAgo / 3600)}h`;
-  return `${Math.floor(secsAgo / 86_400)}d`;
 }
 
 const KEYFRAMES = `

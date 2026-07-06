@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatProbabilityPct, formatSignedUsd, parseVolume } from "./format";
+import {
+  formatProbabilityPct,
+  formatSignedUsd,
+  parseVolume,
+  relativeTime,
+} from "./format";
 
 describe("parseVolume", () => {
   it("returns null for absent, zero, or unparseable input", () => {
@@ -50,5 +55,27 @@ describe("formatSignedUsd", () => {
 
   it("renders zero without a sign", () => {
     expect(formatSignedUsd(0)).toBe("$0.00");
+  });
+});
+
+describe("relativeTime", () => {
+  it("renders seconds under a minute", () => {
+    expect(relativeTime(42)).toBe("42s");
+  });
+
+  it("renders whole minutes under an hour", () => {
+    expect(relativeTime(5 * 60 + 30)).toBe("5m");
+  });
+
+  it("renders whole hours under a day", () => {
+    expect(relativeTime(2 * 3600 + 59 * 60)).toBe("2h");
+  });
+
+  it("renders whole days from 24h up", () => {
+    expect(relativeTime(3 * 86_400 + 5)).toBe("3d");
+  });
+
+  it("clamps negative input (clock skew) to 0s", () => {
+    expect(relativeTime(-7)).toBe("0s");
   });
 });
