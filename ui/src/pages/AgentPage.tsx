@@ -572,7 +572,9 @@ function FeedRow({
               {SHARES.format(item.size ?? 0)} shares @ ${item.price.toFixed(3)}
             </span>
           ) : (
-            <span className="text-muted-foreground">held off</span>
+            <span className="text-muted-foreground">
+              held off{item.hold_reason ? ` · ${item.hold_reason}` : ""}
+            </span>
           )}
           {Math.abs(cents) >= 0.05 ? (
             <span className={cn("tabular-nums", tone)}>· momentum {moveLabel}</span>

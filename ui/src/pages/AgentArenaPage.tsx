@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import {
   equityPoints,
+  lastHold,
   lastTrade,
   rankAgents,
   TIME_WINDOWS,
@@ -200,12 +201,30 @@ function LastActionCell({ agentId, now }: { agentId: string; now: number }) {
   }
   const trade = lastTrade(data.feed);
   // Status is live but nothing traded: deliberate restraint, not missing data.
+  // If the bot ledgered WHAT it passed on, show the market + its reason.
   if (!trade) {
+    const hold = lastHold(data.feed);
+    if (!hold) {
+      return (
+        <span className="hidden min-w-0 lg:block">
+          <span className="block text-sm text-muted-foreground">Held back</span>
+          <span className="block text-xs text-muted-foreground/70">
+            nothing met its bar yet
+          </span>
+        </span>
+      );
+    }
     return (
       <span className="hidden min-w-0 lg:block">
-        <span className="block text-sm text-muted-foreground">Held back</span>
-        <span className="block text-xs text-muted-foreground/70">
-          nothing met its bar yet
+        <span className="line-clamp-2 break-words text-sm leading-snug">
+          {hold.title}
+        </span>
+        <span className="block text-xs text-muted-foreground">
+          <span className="font-semibold text-amber-600 dark:text-amber-400">
+            Held
+          </span>
+          {hold.hold_reason ? ` · ${hold.hold_reason}` : ""}
+          <span className="tabular-nums"> · {relativeTime(now - hold.ts)} ago</span>
         </span>
       </span>
     );
