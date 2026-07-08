@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_IDENTITY,
   equityPoints,
+  lastHold,
   lastTrade,
   rankAgents,
   resolveAgentIdentity,
@@ -265,5 +266,40 @@ describe("windowAgent", () => {
     const snapshot = JSON.parse(JSON.stringify(base));
     windowAgent(base, 1500);
     expect(base).toEqual(snapshot);
+  });
+});
+
+describe("lastHold", () => {
+  it("returns null for an empty feed", () => {
+    expect(lastHold([])).toBeNull();
+  });
+
+  it("returns null when every item traded", () => {
+    expect(lastHold([feedItem({ traded: true })])).toBeNull();
+  });
+
+  it("picks the newest non-traded item, skipping trades", () => {
+    const oldHold = feedItem({
+      ts: 100,
+      decision_id: "d-1",
+      traded: false,
+      outcome: "no_trade",
+      hold_reason: "confidence 0.30 < 0.60",
+    });
+    const newHold = feedItem({
+      ts: 300,
+      decision_id: "d-2",
+      traded: false,
+      outcome: "no_trade",
+      hold_reason: "price 0.60 outside band 0.05-0.30",
+    });
+    const tradeLater = feedItem({ ts: 400, decision_id: "d-3", traded: true });
+    expect(lastHold([oldHold, tradeLater, newHold])).toEqual(newHold);
+  });
+
+  it("breaks equal timestamps by decision_id", () => {
+    const a = feedItem({ ts: 100, decision_id: "d-1", traded: false });
+    const b = feedItem({ ts: 100, decision_id: "d-9", traded: false });
+    expect(lastHold([a, b])).toEqual(b);
   });
 });

@@ -107,12 +107,15 @@ export function equityPoints(equity: PnlPoint[]): SparklineSample[] {
   ];
 }
 
-/** Newest feed item that actually traded, or null. Does not trust feed order:
- *  picks the max (ts, decision_id) among traded items. */
-export function lastTrade(feed: BotFeedItem[]): BotFeedItem | null {
+/** Newest feed item matching `matches`, or null. Does not trust feed order:
+ *  picks the max (ts, decision_id) among matching items. */
+function newestFeedItem(
+  feed: BotFeedItem[],
+  matches: (item: BotFeedItem) => boolean,
+): BotFeedItem | null {
   let best: BotFeedItem | null = null;
   for (const item of feed) {
-    if (!item.traded) continue;
+    if (!matches(item)) continue;
     if (
       best === null ||
       item.ts > best.ts ||
@@ -122,6 +125,16 @@ export function lastTrade(feed: BotFeedItem[]): BotFeedItem | null {
     }
   }
   return best;
+}
+
+/** Newest feed item that actually traded, or null. */
+export function lastTrade(feed: BotFeedItem[]): BotFeedItem | null {
+  return newestFeedItem(feed, (item) => item.traded);
+}
+
+/** Newest feed item the agent chose NOT to trade (held/gated), or null. */
+export function lastHold(feed: BotFeedItem[]): BotFeedItem | null {
+  return newestFeedItem(feed, (item) => !item.traded);
 }
 
 /** Fetch the arena leaderboard off the UI origin's static `public/`. Cache-busted

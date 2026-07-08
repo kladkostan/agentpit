@@ -24,6 +24,7 @@ export interface BotFeedItem {
   price: number | null;
   size: number | null;
   sources?: { title: string; url: string; source: string }[]; // news the model read
+  hold_reason?: string; // why the preset held (arena gated decision); "" / absent otherwise
 }
 
 export interface BotSummary {
