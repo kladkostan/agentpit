@@ -192,10 +192,22 @@ function AgentRow({ agent, now }: { agent: RankedAgent; now: number }) {
  *  one agent's file must never break the whole row. */
 function LastActionCell({ agentId, now }: { agentId: string; now: number }) {
   const { data } = useBotStatus(agentId);
-  const trade = data ? lastTrade(data.feed) : null;
-  if (!trade) {
+  // No status file (still loading, or the bot never wrote one) — we know nothing.
+  if (!data) {
     return (
       <span className="hidden text-sm text-muted-foreground lg:block">—</span>
+    );
+  }
+  const trade = lastTrade(data.feed);
+  // Status is live but nothing traded: deliberate restraint, not missing data.
+  if (!trade) {
+    return (
+      <span className="hidden min-w-0 lg:block">
+        <span className="block text-sm text-muted-foreground">Held back</span>
+        <span className="block text-xs text-muted-foreground/70">
+          nothing met its bar yet
+        </span>
+      </span>
     );
   }
   const side =
