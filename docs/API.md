@@ -37,7 +37,7 @@ If `X-API-Key` is present it is checked first and, if invalid, returns `401` imm
 
 Admin endpoints (`/admin/*`) use a **separate, unrelated** mechanism: an `X-Admin-Token` header compared against `Settings.admin_token` (env var `AGENTPIT_ADMIN_TOKEN`, default `dev-admin-token` for local dev). This has nothing to do with `CurrentUserDep` — admin routes do not accept an API key or JWT.
 
-> Note: Several endpoints that are operationally "admin/operator" actions — market lifecycle (`create`/`activate`/`close`/`cancel`/`resolve`), `create_agent`, and `create_personality` — carry **no auth dependency at all** in the route code (no `CurrentUserDep`, no admin-token check). They are open to anyone who can reach the API. Only `POST /admin/mark_bot` is actually gated (by `X-Admin-Token`). Treat this as an operational/deployment concern (e.g. don't expose these routes publicly) rather than an API-level guarantee.
+> Note: The operator endpoints — market lifecycle (`POST /markets`, `POST /markets/{market_id}/activate`, `POST /markets/{market_id}/close`, `POST /markets/{market_id}/cancel`, `POST /markets/{market_id}/resolve`), `POST /create_agent`, and `POST /create_personality` — now **require** the same `X-Admin-Token` mechanism as `/admin/*`: a missing or mismatched header returns `401` with `detail: "admin token missing or invalid"`. All `GET` routes remain public.
 
 ```bash
 # Register and capture the API key
@@ -59,7 +59,7 @@ curl -s http://localhost:8000/me -H 'X-API-Key: <api_key>'
 - **CSV-style filters**: query params documented as "comma-separated" (`condition_ids`, `clob_token_ids` on `GET /markets`; `market` on `GET /positions`; `type`/`market` on `GET /activity`) are plain strings split on `,` server-side — send `a,b,c`, not a JSON array or repeated query params.
 - **Errors**: FastAPI's standard `{"detail": ...}` shape is used everywhere.
   - `422 Unprocessable Entity` — Pydantic request validation failure. `detail` is the FastAPI validation-error array (`HTTPValidationError`/`ValidationError` schema: `loc`, `msg`, `type`).
-  - `401 Unauthorized` — missing/invalid `X-API-Key` or bearer token (`CurrentUserDep`); missing/invalid `X-Admin-Token` on admin routes; invalid login/current-password (`InvalidCredentialsError`). `detail` is a plain string.
+  - `401 Unauthorized` — missing/invalid `X-API-Key` or bearer token (`CurrentUserDep`); missing/invalid `X-Admin-Token` on admin/operator routes; invalid login/current-password (`InvalidCredentialsError`). `detail` is a plain string.
   - `404 Not Found` — domain "not found" errors (`MarketNotFoundError`, `EventNotFoundError`, `PersonalityNotFoundError`, `UserNotFoundError`, missing `X-Admin-Token` target user on `mark_bot`, etc.). `detail` is a plain string.
   - `409 Conflict` — domain "already exists" errors (`UserAlreadyExistsError` on `/register`, `HandleAlreadyExistsError` on `PATCH /me`, `AgentAlreadyExistsError` on `/create_agent`). `detail` is a plain string.
   - `400 Bad Request` — general domain/business-rule violations (`BusinessRuleError` and subclasses: `InsufficientBalanceError`, `InvalidPaginationError`, `MarketStateError`, `OnboardingError` — e.g. wrong market state for an action, insufficient apUSD balance, invalid limit/offset). `detail` is a plain string.
@@ -128,7 +128,7 @@ Response: `UserPublic` (unchanged profile). Errors: `401` (`InvalidCredentialsEr
 
 ## Markets
 
-> Note: `POST /markets` and the four lifecycle actions below have **no auth dependency in the route code** — see the Authentication section note. They are operator actions by intent, not by enforcement.
+> Note: `POST /markets` and the four lifecycle actions below (`activate`/`close`/`cancel`/`resolve`) require the `X-Admin-Token` header — see the Authentication section note.
 
 ### `GET /markets`
 List markets in Gamma shape, with optional filters. Public.
@@ -478,10 +478,12 @@ Response: array of `ActivityWire` — `proxyWallet`, `timestamp`, `conditionId`,
 
 ## Agents & Personalities
 
-> Note: neither endpoint below has an auth dependency in the route code — see the Authentication section note. They exist to seed bot configuration and are intended for operator/tooling use, not public trading.
+> Note: both endpoints below require the `X-Admin-Token` header — see the Authentication section note. They exist to seed bot configuration and are intended for operator/tooling use, not public trading.
 
 ### `POST /create_personality`
 Register a reusable agent "personality" (a belief/method/needs spec used to drive an agent's decisions).
+
+Auth: `X-Admin-Token` (required).
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -491,17 +493,19 @@ Register a reusable agent "personality" (a belief/method/needs spec used to driv
 | `methods` | string | yes | |
 | `needs` | string | yes | |
 
-Response (`CreatePersonalityResponse`): `personality_id`, `title`, `spec` (`{beliefs, methods, needs}`).
+Response (`CreatePersonalityResponse`): `personality_id`, `title`, `spec` (`{beliefs, methods, needs}`). Errors: `401` if the admin token is missing/wrong.
 
 ### `POST /create_agent`
 Instantiate an agent bound to an existing personality.
+
+Auth: `X-Admin-Token` (required).
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `agent_id` | string | yes | |
 | `personality_id` | string | yes | must reference an existing personality |
 
-Response (`CreateAgentResponse`): `agent_id`, `personality_id`, `state` (free-form object), `history` (array), `todo` (array). Errors: `409` (`AgentAlreadyExistsError`) if `agent_id` is taken; `404` (`PersonalityNotFoundError`) if `personality_id` is unknown.
+Response (`CreateAgentResponse`): `agent_id`, `personality_id`, `state` (free-form object), `history` (array), `todo` (array). Errors: `401` if the admin token is missing/wrong; `409` (`AgentAlreadyExistsError`) if `agent_id` is taken; `404` (`PersonalityNotFoundError`) if `personality_id` is unknown.
 
 ## Admin
 
