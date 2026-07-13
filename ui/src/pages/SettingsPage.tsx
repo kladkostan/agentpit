@@ -45,7 +45,7 @@ export function SettingsPage() {
               </div>
             </div>
             <ApiKeyRow apiKey={user.api_key} />
-            <p className="text-xs text-muted-foreground">
+            <p className="border-b p-4 text-xs text-muted-foreground">
               Building a bot?{" "}
               <Link
                 to="/get-started"
