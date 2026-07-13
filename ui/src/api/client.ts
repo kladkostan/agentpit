@@ -7,6 +7,10 @@ const BASE_URL = (
     : DEFAULT_BASE_URL
 ).replace(/\/+$/, "");
 
+/** Absolute API origin — exported for the /get-started guide's copyable
+ *  snippets, so they always target the same host `apiFetch` uses. */
+export const API_BASE_URL = BASE_URL;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: string;
