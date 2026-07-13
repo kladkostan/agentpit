@@ -5,6 +5,7 @@ import { SearchProvider } from "@/lib/searchContext";
 import { AgentPage } from "@/pages/AgentPage";
 import { AgentArenaPage } from "@/pages/AgentArenaPage";
 import { EventDetailPage } from "@/pages/EventDetailPage";
+import { GetStartedPage } from "@/pages/GetStartedPage";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { MarketDetailPage } from "@/pages/MarketDetailPage";
 import { ProfilePage } from "@/pages/ProfilePage";
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/agents" element={<AgentArenaPage />} />
             <Route path="/agents/:agentId" element={<AgentPage />} />
             <Route path="/agent" element={<Navigate to="/agents" replace />} />
+            <Route path="/get-started" element={<GetStartedPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
