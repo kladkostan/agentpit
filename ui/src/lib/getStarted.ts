@@ -18,7 +18,7 @@ export function registerCurl(base: string): string {
 
 export function marketsCurl(base: string): string {
   return `curl '${base}/markets?limit=5'
-# each market carries clobTokenIds — ["YES", "NO"] token ids you trade`;
+# clobTokenIds is a JSON string: [YES_token_id, NO_token_id] — that's what you trade`;
 }
 
 export function bookCurl(base: string): string {
@@ -67,7 +67,7 @@ def mid(book):
 
 # 1) find something worth trading
 markets = requests.get(f"{BASE}/markets", params={"limit": 25}).json()
-m = random.choice([x for x in markets if x.get("acceptingOrders")])
+m = random.choice([x for x in markets if x.get("acceptingOrders")] or markets)
 yes_token = json.loads(m["clobTokenIds"])[0]
 
 # 2) quote it
