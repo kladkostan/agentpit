@@ -5,13 +5,15 @@ These endpoints exist for operational bot management (flagging bot users
 out of public leaderboards). They are not user-facing.
 """
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from agentpit.api.deps import SessionDep, SettingsDep
+from agentpit.api.deps import SessionDep, require_admin_token
 from agentpit.db.table_write import TableWrite
 
-router = APIRouter(tags=["admin"], prefix="/admin")
+router = APIRouter(
+    tags=["admin"], prefix="/admin", dependencies=[Depends(require_admin_token)]
+)
 
 
 class MarkBotRequest(BaseModel):
@@ -23,22 +25,8 @@ class MarkBotResponse(BaseModel):
     is_bot: bool
 
 
-def _check_admin(provided: str | None, expected: str) -> None:
-    if provided is None or provided != expected:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="admin token missing or invalid",
-        )
-
-
 @router.post("/mark_bot", response_model=MarkBotResponse)
-def mark_bot(
-    payload: MarkBotRequest,
-    settings: SettingsDep,
-    db: SessionDep,
-    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
-) -> MarkBotResponse:
-    _check_admin(x_admin_token, settings.admin_token)
+def mark_bot(payload: MarkBotRequest, db: SessionDep) -> MarkBotResponse:
     with db.write() as conn:
         updated = TableWrite.mark_user_as_bot_by_eth_address(conn, payload.eth_address)
     if not updated:

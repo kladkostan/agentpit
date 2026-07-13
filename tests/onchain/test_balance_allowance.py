@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from agentpit.api.app import create_app
 
+from tests.onchain._helpers import ADMIN_HDR
+
 
 def _hdr(t):
     return {"Authorization": f"Bearer {t}"}
@@ -36,7 +38,7 @@ def test_conditional_balance_zero_and_requires_token_id():
     tok = reg["access_token"]
     market = client.post("/markets", json={
         "question": f"Bal {secrets.token_hex(4)}?", "description": "x",
-        "outcome_labels": ["YES", "NO"]}).json()
+        "outcome_labels": ["YES", "NO"]}, headers=ADMIN_HDR).json()
     yes = market["erc1155_tokens"][0][0]
 
     resp = client.get(

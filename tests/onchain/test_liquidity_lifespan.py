@@ -7,6 +7,8 @@ from agentpit.api.app import create_app
 from agentpit.config import Settings
 from agentpit.liquidity import feed
 
+from tests.onchain._helpers import ADMIN_HDR
+
 
 def test_mirror_disabled_by_default():
     app = create_app(Settings())
@@ -37,7 +39,7 @@ def test_mirror_enabled_spawns_and_cancels_cleanly(monkeypatch):
         # up and spawn a (stubbed) feed connection for its Polymarket asset.
         m = client.post("/markets", json={
             "question": f"LS {uuid.uuid4().hex[:6]}?", "description": "x",
-            "outcome_labels": ["YES", "NO"]}).json()
+            "outcome_labels": ["YES", "NO"]}, headers=ADMIN_HDR).json()
         from agentpit.db.session import DbSession
         db = DbSession(s.database_url)
         with db.write() as conn:

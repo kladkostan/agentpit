@@ -1,6 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from agentpit.api.deps import MarketServiceDep
+from agentpit.api.deps import MarketServiceDep, require_admin_token
 from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.gamma_market import GammaMarket
@@ -36,7 +36,7 @@ def list_markets(
     )
 
 
-@router.post("/markets", response_model=Market)
+@router.post("/markets", response_model=Market, dependencies=[Depends(require_admin_token)])
 def create_market(payload: CreateMarketRequest, service: MarketServiceDep) -> Market:
     return service.create_market(payload)
 
@@ -46,22 +46,38 @@ def get_market(market_id: int, service: MarketServiceDep) -> GammaMarket:
     return service.get_market_gamma(market_id)
 
 
-@router.post("/markets/{market_id}/activate", response_model=Market)
+@router.post(
+    "/markets/{market_id}/activate",
+    response_model=Market,
+    dependencies=[Depends(require_admin_token)],
+)
 def activate_market(market_id: int, service: MarketServiceDep) -> Market:
     return service.activate_market(market_id)
 
 
-@router.post("/markets/{market_id}/close", response_model=Market)
+@router.post(
+    "/markets/{market_id}/close",
+    response_model=Market,
+    dependencies=[Depends(require_admin_token)],
+)
 def close_market(market_id: int, service: MarketServiceDep) -> Market:
     return service.close_market(market_id)
 
 
-@router.post("/markets/{market_id}/cancel", response_model=CancelMarketResponse)
+@router.post(
+    "/markets/{market_id}/cancel",
+    response_model=CancelMarketResponse,
+    dependencies=[Depends(require_admin_token)],
+)
 def cancel_market(market_id: int, service: MarketServiceDep) -> CancelMarketResponse:
     return service.cancel_market(market_id)
 
 
-@router.post("/markets/{market_id}/resolve", response_model=Market)
+@router.post(
+    "/markets/{market_id}/resolve",
+    response_model=Market,
+    dependencies=[Depends(require_admin_token)],
+)
 def resolve_market(
     market_id: int,
     payload: ResolveMarketRequest,

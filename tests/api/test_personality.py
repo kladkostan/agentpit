@@ -2,6 +2,11 @@ from fastapi.testclient import TestClient
 
 from agentpit.api.main import app as _app
 
+# AGENTPIT_ADMIN_TOKEN is read at app startup by Settings; tests rely on
+# the default ("dev-admin-token") so we don't need to mutate env here.
+ADMIN_TOKEN = "dev-admin-token"
+ADMIN_HDR = {"X-Admin-Token": ADMIN_TOKEN}
+
 
 def test_create_personality():
     with TestClient(_app) as client:
@@ -12,7 +17,7 @@ def test_create_personality():
             "methods": "Fade large moves and revert to mean",
             "needs": "Real-time sentiment data",
         }
-        resp = client.post("/create_personality", json=payload)
+        resp = client.post("/create_personality", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 200
         body = resp.json()
         assert body["personality_id"] == "contrarian_1"
@@ -31,7 +36,7 @@ def test_create_personality_missing_field():
             "beliefs": "Something",
             "methods": "Something else",
         }
-        resp = client.post("/create_personality", json=payload)
+        resp = client.post("/create_personality", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 422
 
 
@@ -44,7 +49,7 @@ def test_create_personality_empty_title():
             "methods": "Arbitrage",
             "needs": "Low latency feeds",
         }
-        resp = client.post("/create_personality", json=payload)
+        resp = client.post("/create_personality", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 400  # check_state raises
 
 
@@ -59,7 +64,7 @@ def test_create_multiple_personalities():
                 "methods": f"Method {i}",
                 "needs": f"Need {i}",
             }
-            resp = client.post("/create_personality", json=payload)
+            resp = client.post("/create_personality", json=payload, headers=ADMIN_HDR)
             assert resp.status_code == 200
             body = resp.json()
             ids.append(body["personality_id"])

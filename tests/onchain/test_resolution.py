@@ -12,7 +12,7 @@ from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 
-from tests.onchain._helpers import create_market, fresh_client, hdr, register
+from tests.onchain._helpers import ADMIN_HDR, create_market, fresh_client, hdr, register
 
 
 def _admin() -> OnchainAdmin:
@@ -64,7 +64,9 @@ def test_resolve_then_winner_redeems():
 
     # Mark resolved in DB so position service allows redeem.
     resolve = client.post(
-        f"/markets/{mid}/resolve", json={"winning_outcome_index": 0}
+        f"/markets/{mid}/resolve",
+        json={"winning_outcome_index": 0},
+        headers=ADMIN_HDR,
     ).json()
     assert resolve["market_state"] == "RESOLVED"
 

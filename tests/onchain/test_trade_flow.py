@@ -8,6 +8,8 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from tests.onchain._helpers import ADMIN_HDR
+
 
 def _hdr(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
@@ -76,6 +78,7 @@ def test_match_settles_on_chain():
             "description": "YES if test passes",
             "outcome_labels": ["YES", "NO"],
         },
+        headers=ADMIN_HDR,
     ).json()
     yes_id = int(market["erc1155_tokens"][0][0])
 
@@ -169,6 +172,7 @@ def test_complementary_buys_mint_via_split():
             "description": "MINT match path",
             "outcome_labels": ["YES", "NO"],
         },
+        headers=ADMIN_HDR,
     ).json()
     yes_id = int(market["erc1155_tokens"][0][0])
     no_id = int(market["erc1155_tokens"][1][0])

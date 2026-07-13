@@ -1,6 +1,11 @@
 from fastapi.testclient import TestClient
 from agentpit.api.main import app as _app
 
+# AGENTPIT_ADMIN_TOKEN is read at app startup by Settings; tests rely on
+# the default ("dev-admin-token") so we don't need to mutate env here.
+ADMIN_TOKEN = "dev-admin-token"
+ADMIN_HDR = {"X-Admin-Token": ADMIN_TOKEN}
+
 
 def _create_personality(client, personality_id="default_personality"):
     """Helper to create a personality for agent tests."""
@@ -11,7 +16,7 @@ def _create_personality(client, personality_id="default_personality"):
         "methods": "Follow the trend",
         "needs": "Price feeds",
     }
-    resp = client.post("/create_personality", json=payload)
+    resp = client.post("/create_personality", json=payload, headers=ADMIN_HDR)
     assert resp.status_code == 200
     return resp.json()
 
@@ -23,7 +28,7 @@ def test_create_agent():
             "agent_id": "agent_1",
             "personality_id": "p1",
         }
-        resp = client.post("/create_agent", json=payload)
+        resp = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 200
         body = resp.json()
         assert body["agent_id"] == "agent_1"
@@ -40,11 +45,11 @@ def test_create_agent_duplicate():
             "agent_id": "agent_dup",
             "personality_id": "p2",
         }
-        resp = client.post("/create_agent", json=payload)
+        resp = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 200
 
         # Same agent_id again should 409
-        resp2 = client.post("/create_agent", json=payload)
+        resp2 = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
         assert resp2.status_code == 409
         assert "already exists" in resp2.json()["detail"]
 
@@ -55,7 +60,7 @@ def test_create_agent_missing_personality():
             "agent_id": "agent_orphan",
             "personality_id": "nonexistent_personality",
         }
-        resp = client.post("/create_agent", json=payload)
+        resp = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"]
 
@@ -67,7 +72,7 @@ def test_create_agent_empty_agent_id():
             "agent_id": "",
             "personality_id": "p3",
         }
-        resp = client.post("/create_agent", json=payload)
+        resp = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 400  # check_state raises
 
 
@@ -77,13 +82,15 @@ def test_create_agent_empty_personality_id():
             "agent_id": "agent_no_personality",
             "personality_id": "",
         }
-        resp = client.post("/create_agent", json=payload)
+        resp = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
         assert resp.status_code == 400  # check_state raises
 
 
 def test_create_agent_missing_field():
     with TestClient(_app) as client:
-        resp = client.post("/create_agent", json={"agent_id": "agent_x"})
+        resp = client.post(
+            "/create_agent", json={"agent_id": "agent_x"}, headers=ADMIN_HDR
+        )
         assert resp.status_code == 422
 
 
@@ -95,7 +102,7 @@ def test_create_multiple_agents():
                 "agent_id": f"multi_agent_{i}",
                 "personality_id": "shared_personality",
             }
-            resp = client.post("/create_agent", json=payload)
+            resp = client.post("/create_agent", json=payload, headers=ADMIN_HDR)
             assert resp.status_code == 200
             body = resp.json()
             assert body["agent_id"] == f"multi_agent_{i}"

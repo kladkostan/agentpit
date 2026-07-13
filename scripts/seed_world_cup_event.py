@@ -75,6 +75,7 @@ def _request(
     method: str = "GET",
     body: dict | None = None,
     token: str | None = None,
+    admin_token: str | None = None,
 ) -> dict[str, Any]:
     url = f"{base.rstrip('/')}{path}"
     data = json.dumps(body).encode() if body is not None else None
@@ -84,6 +85,8 @@ def _request(
         req.add_header("Content-Type", "application/json")
     if token is not None:
         req.add_header("Authorization", f"Bearer {token}")
+    if admin_token is not None:
+        req.add_header("X-Admin-Token", admin_token)
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode() or "{}")
@@ -110,6 +113,7 @@ def create_country_market(
     country: Country,
     *,
     end_date: int,
+    admin_token: str | None = None,
 ) -> dict[str, Any]:
     payload = {
         "question": f"Will {country.name} win the 2026 FIFA World Cup?",
@@ -124,7 +128,14 @@ def create_country_market(
         "outcome_label": country.name,
         "icon_url": country.flag,
     }
-    return _request(base, "/markets", method="POST", body=payload, token=token)
+    return _request(
+        base,
+        "/markets",
+        method="POST",
+        body=payload,
+        token=token,
+        admin_token=admin_token,
+    )
 
 
 def attach_markets_to_event(market_ids: list[int]) -> int:
@@ -189,6 +200,8 @@ def main() -> int:
         return 1
     print(f"   admin {address}")
 
+    admin_token = Settings().admin_token
+
     print(
         f"\n→ creating {len(COUNTRIES)} sub-markets (on-chain prepareCondition + registerToken)"
     )
@@ -200,6 +213,7 @@ def main() -> int:
                 token,
                 country,
                 end_date=EVENT_END_DATE,
+                admin_token=admin_token,
             )
         except RuntimeError as exc:
             print(f"   ✗ {country.name:<10} skipped — {exc}", file=sys.stderr)

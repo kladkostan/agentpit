@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Header, HTTPException, status
 
 from agentpit.auth.jwt import JwtCoder
 from agentpit.config import Settings
@@ -49,6 +49,21 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 JwtCoderDep = Annotated[JwtCoder, Depends(get_jwt_coder)]
 OnchainAdminDep = Annotated[OnchainAdmin, Depends(get_onchain_admin)]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+# --- auth guards -----------------------------------------------------------
+
+
+def require_admin_token(
+    settings: SettingsDep,
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+) -> None:
+    """Operator gate: X-Admin-Token header must match Settings.admin_token."""
+    if x_admin_token is None or x_admin_token != settings.admin_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="admin token missing or invalid",
+        )
 
 
 # --- service factories ---------------------------------------------------
