@@ -36,7 +36,11 @@ def list_markets(
     )
 
 
-@router.post("/markets", response_model=Market, dependencies=[Depends(require_admin_token)])
+@router.post(
+    "/markets",
+    response_model=Market,
+    dependencies=[Depends(require_admin_token)],
+)
 def create_market(payload: CreateMarketRequest, service: MarketServiceDep) -> Market:
     return service.create_market(payload)
 

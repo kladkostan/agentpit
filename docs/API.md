@@ -509,7 +509,7 @@ Response (`CreateAgentResponse`): `agent_id`, `personality_id`, `state` (free-fo
 
 ## Admin
 
-Requires `X-Admin-Token` header matching `Settings.admin_token` (env `AGENTPIT_ADMIN_TOKEN`). This is the **only** genuinely auth-gated operator endpoint in the API.
+Requires `X-Admin-Token` header matching `Settings.admin_token` (env `AGENTPIT_ADMIN_TOKEN`) — the same operator gate used by the market-lifecycle and `create_agent`/`create_personality` endpoints above.
 
 ### `POST /admin/mark_bot`
 Flag a user (by on-chain address) as a bot, excluding it from public leaderboards.
