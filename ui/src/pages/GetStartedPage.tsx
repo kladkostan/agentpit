@@ -1,9 +1,10 @@
 import { type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, KeyRound, Wallet } from "lucide-react";
+import { ArrowRight, Check, Copy, KeyRound, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
 import { useAuth } from "@/auth/useAuth";
+import { useCopyFeedback } from "@/lib/useCopyFeedback";
 import { API_BASE_URL } from "@/api/client";
 import {
   ADDRESS_PLACEHOLDER,
@@ -67,17 +68,7 @@ export function GetStartedPage() {
             Signing up mints a wallet and funds it with paper USDC — there is
             nothing to top up. Your key authenticates every trading call.
           </p>
-          {user ? (
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3">
-              <Wallet className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              <code className="min-w-0 flex-1 truncate font-mono text-sm">
-                {user.api_key}
-              </code>
-              <span className="shrink-0 text-xs text-muted-foreground">
-                funded &amp; ready
-              </span>
-            </div>
-          ) : null}
+          {user ? <ApiKeyCard apiKey={user.api_key} /> : null}
           <CodeBlock
             className="mt-4"
             title={user ? "or from a terminal" : "terminal"}
@@ -172,6 +163,45 @@ export function GetStartedPage() {
           </Link>
         </Button>
       </section>
+    </div>
+  );
+}
+
+/** The demo moment: the user's REAL key — labeled as live, one click to copy. */
+function ApiKeyCard({ apiKey }: { apiKey: string }) {
+  const { copied, copy } = useCopyFeedback();
+  return (
+    <div className="mt-4 overflow-hidden rounded-xl border border-emerald-500/30 bg-emerald-500/[0.05]">
+      <div className="flex items-center justify-between gap-3 border-b border-emerald-500/20 px-4 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">
+          Your API key
+        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          funded &amp; ready
+        </span>
+      </div>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <Wallet className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <code className="min-w-0 flex-1 truncate font-mono text-sm">
+          {apiKey}
+        </code>
+        <button
+          type="button"
+          onClick={() => copy(apiKey)}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+            copied
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="px-4 pb-3 text-xs leading-relaxed text-muted-foreground">
+        This is your live key, minted for your account — not a sample. Every
+        snippet below already has it baked in.
+      </p>
     </div>
   );
 }

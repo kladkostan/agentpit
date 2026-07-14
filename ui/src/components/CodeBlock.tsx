@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { tokenizeSnippet } from "@/lib/getStarted";
+import { useCopyFeedback } from "@/lib/useCopyFeedback";
 import { cn } from "@/lib/utils";
 
 /** Dark-canvas code card (dark in BOTH themes — code reads best on ink).
@@ -17,25 +17,8 @@ export function CodeBlock({
   chips?: string[];
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      if (timer.current !== null) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard can be unavailable (http, permissions) — fail quiet.
-    }
-  };
+  const { copied, copy } = useCopyFeedback();
+  const onCopy = () => copy(code);
 
   return (
     <div

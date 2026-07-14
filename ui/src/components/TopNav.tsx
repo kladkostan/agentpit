@@ -6,7 +6,7 @@ import { useSearch } from "@/lib/searchContext";
 import { useTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { LogOut, Moon, Settings, User } from "lucide-react";
+import { KeyRound, LogOut, Moon, Settings, User } from "lucide-react";
 
 const menuPaperSx = {
   width: 220,
@@ -112,6 +112,19 @@ export function TopNav() {
         </NavLink>
         {showSearch ? <SearchBar /> : null}
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          <NavLink
+            to="/get-started"
+            className={({ isActive }) =>
+              `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${
+                isActive
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`
+            }
+          >
+            <KeyRound className="size-3.5" />
+            Get started
+          </NavLink>
           {user ? (
             <>
               <IconButton
