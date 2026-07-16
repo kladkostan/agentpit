@@ -535,7 +535,16 @@ def create_polymarket_markets_if_needed(
     for pm_market in pm_markets:
         question = pm_market.get("question") or "<no question>"
         try:
-            market = create_polygon_market_if_does_not_exist(db, pm_market, admin)
+            # SAVEPOINT per market: the batch shares one transaction (the
+            # caller's db.write()), and without it a single failed INSERT
+            # (e.g. duplicate question -> same derived CONDITION_ID) aborts
+            # the transaction — every later market dies with
+            # InFailedSqlTransaction and the closing COMMIT silently becomes
+            # a ROLLBACK, losing the entire batch.
+            with db.transaction():
+                market = create_polygon_market_if_does_not_exist(
+                    db, pm_market, admin
+                )
         except Exception as exc:
             # One bad market (e.g. RPC blip on getOutcomeSlotCount) shouldn't
             # kill the whole sync batch. Keep the message single-line; the
