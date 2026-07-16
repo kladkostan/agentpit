@@ -1,0 +1,15 @@
+# UI image: vite build baked into a Caddy server.
+# Build context is the repo root. VITE_API_BASE_URL is REQUIRED — the snippets
+# on /get-started display it, so a wrong value shows localhost to real users.
+FROM node:22-alpine AS build
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ .
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN test -n "$VITE_API_BASE_URL" && npm run build
+
+FROM caddy:2
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /ui/dist /srv

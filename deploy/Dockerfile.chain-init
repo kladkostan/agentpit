@@ -1,0 +1,10 @@
+# One-shot contract deployer: foundry (forge/cast) + the tools
+# scripts/deploy_exchange.sh needs. The repo is bind-mounted at /repo.
+FROM ghcr.io/foundry-rs/foundry:latest
+USER root
+# Foundry images have shipped on both Debian and Alpine bases — install
+# whichever package manager answers.
+RUN (apt-get update && apt-get install -y --no-install-recommends jq git bash && rm -rf /var/lib/apt/lists/*) \
+ || apk add --no-cache jq git bash
+WORKDIR /repo
+ENTRYPOINT ["bash"]

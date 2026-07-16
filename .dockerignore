@@ -1,0 +1,14 @@
+# Keep image build contexts lean (context is the repo root).
+.git
+.venv
+.env
+.anvil-state.json
+.superpowers
+ui/node_modules
+ui/dist
+ui/public/leaderboard.json
+ui/public/bot-status*.json
+vendor
+deployments
+docs
+tests

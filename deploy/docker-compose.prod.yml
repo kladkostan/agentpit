@@ -1,0 +1,104 @@
+# Production stack — single instance, one shared server-side .env at the repo
+# root (compose --env-file AND deploy_exchange.sh read it).
+#
+#   cd /root/dev/agentpit
+#   docker compose -f deploy/docker-compose.prod.yml --env-file .env build
+#   docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d postgres anvil
+#   docker compose -f deploy/docker-compose.prod.yml --env-file .env run --rm chain-init
+#   docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d api caddy
+#
+# Only caddy publishes ports (80 UI, 8000 API). postgres and anvil stay on the
+# internal network — anvil especially must NEVER be published (unlocked
+# accounts + operator key).
+name: agentpit
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agentpit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: agentpit
+    volumes:
+      - agentpit_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentpit"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    restart: unless-stopped
+    entrypoint:
+      - anvil
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8545"
+      - --chain-id
+      - "31337"
+      - --state
+      - /state/anvil-state.json
+      - --state-interval
+      - "30"
+    volumes:
+      - agentpit_anvil:/state
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: deploys CTF + AgentpitUSD + Faucet + CTFExchange to anvil and
+  # writes deployments/local.json into the bind-mounted repo. Run once per
+  # fresh chain (profile keeps it out of plain `up`).
+  chain-init:
+    profiles: ["init"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.chain-init
+    command: ["scripts/deploy_exchange.sh"]
+    volumes:
+      - ..:/repo
+    depends_on:
+      anvil:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      AGENTPIT_DATABASE_URL: postgresql://agentpit:${POSTGRES_PASSWORD}@postgres:5432/agentpit
+      RPC_URL: http://anvil:8545
+    volumes:
+      - ../deployments:/app/deployments:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      anvil:
+        condition: service_healthy
+
+  caddy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.ui
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set in .env}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8000:8000"
+    volumes:
+      - ./arena-data:/arena:ro
+    depends_on:
+      - api
+
+volumes:
+  agentpit_pg:
+  agentpit_anvil:

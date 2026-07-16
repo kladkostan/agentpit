@@ -1,0 +1,28 @@
+# No domain yet — plain http on the instance IP. When a domain appears,
+# replace ":80"/":8000" with the hostnames and Caddy handles TLS itself.
+{
+	auto_https off
+}
+
+# UI — static SPA + arena JSONs (delivered out-of-band into /arena).
+:80 {
+	encode gzip
+
+	@arena path /leaderboard.json /bot-status*.json
+	handle @arena {
+		root * /arena
+		header Cache-Control "no-store"
+		file_server
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# API — same-machine reverse proxy; uvicorn itself is not published.
+:8000 {
+	reverse_proxy api:8000
+}

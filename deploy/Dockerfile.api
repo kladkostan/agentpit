@@ -1,0 +1,14 @@
+# API image: uvicorn serving agentpit.api.main:app.
+# Build context is the repo root (see docker-compose.prod.yml).
+FROM python:3.13-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agentpit/ agentpit/
+
+# deployments/local.json is bind-mounted at runtime (Settings default path is
+# deployments/local.json relative to the workdir) — see compose.
+CMD ["uvicorn", "agentpit.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
