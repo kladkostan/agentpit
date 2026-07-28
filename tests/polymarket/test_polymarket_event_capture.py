@@ -302,3 +302,116 @@ def test_bind_market_to_upstream_event_rebinds_from_singleton_to_real_event(db):
     assert re is not None and real_event is not None
     assert re.event_id == real_event.event_id  # rebound to the real event
     assert re.outcome_label == "France"
+
+
+def test_bind_market_sets_category_on_a_new_event(db):
+    market = _seed_market(db, question="will france win?", cond_id=_hex32("fr"))
+    pm = {
+        "tags": [{"slug": "sports"}],
+        "events": [{"id": "evt-1", "slug": "wc", "title": "WC"}],
+    }
+
+    bind_market_to_upstream_event(db, market, pm)
+
+    event = TableRead.get_event_by_slug(db, "wc")
+    assert event is not None and event.category == "Sports"
+
+
+def test_bind_market_upgrades_an_existing_event_to_a_stricter_category(db):
+    """Sibling markets resolve independently; the strictest one wins."""
+    m1 = _seed_market(db, question="france?", cond_id=_hex32("fr"))
+    m2 = _seed_market(db, question="spain?", cond_id=_hex32("es"))
+    pm_events = [{"id": "evt-1", "slug": "wc", "title": "WC"}]
+
+    bind_market_to_upstream_event(
+        db, m1, {"events": pm_events, "tags": [{"slug": "politics"}]}
+    )
+    bind_market_to_upstream_event(
+        db, m2, {"events": pm_events, "tags": [{"slug": "sports"}]}
+    )
+
+    event = TableRead.get_event_by_slug(db, "wc")
+    assert event is not None and event.category == "Sports"
+
+
+def test_bind_market_does_not_downgrade_an_existing_event_category(db):
+    """Same pair as above in the opposite order — the result must not change."""
+    m1 = _seed_market(db, question="france?", cond_id=_hex32("fr"))
+    m2 = _seed_market(db, question="spain?", cond_id=_hex32("es"))
+    pm_events = [{"id": "evt-1", "slug": "wc", "title": "WC"}]
+
+    bind_market_to_upstream_event(
+        db, m1, {"events": pm_events, "tags": [{"slug": "sports"}]}
+    )
+    bind_market_to_upstream_event(
+        db, m2, {"events": pm_events, "tags": [{"slug": "politics"}]}
+    )
+
+    event = TableRead.get_event_by_slug(db, "wc")
+    assert event is not None and event.category == "Sports"
+
+
+def test_bind_market_never_clears_a_stored_category(db):
+    """An unresolvable market must not undo a sibling's categorization."""
+    m1 = _seed_market(db, question="france?", cond_id=_hex32("fr"))
+    m2 = _seed_market(db, question="spain?", cond_id=_hex32("es"))
+    pm_events = [{"id": "evt-1", "slug": "wc", "title": "WC"}]
+
+    bind_market_to_upstream_event(
+        db, m1, {"events": pm_events, "tags": [{"slug": "sports"}]}
+    )
+    bind_market_to_upstream_event(
+        db, m2, {"events": pm_events, "tags": [{"slug": "gta-vi"}]}
+    )
+
+    event = TableRead.get_event_by_slug(db, "wc")
+    assert event is not None and event.category == "Sports"
+
+
+def test_bind_market_converges_on_the_strictest_category_regardless_of_order(db):
+    """Three markets, three categories, arriving loosest-first.
+
+    Pins that _sync_event_category compares ranks rather than writing
+    unconditionally: an unconditional write would leave the last arrival
+    ("World"), and the pre-fix code would leave the first ("Politics").
+    """
+    m1 = _seed_market(db, question="france?", cond_id=_hex32("fr"))
+    m2 = _seed_market(db, question="spain?", cond_id=_hex32("es"))
+    m3 = _seed_market(db, question="brazil?", cond_id=_hex32("br"))
+    pm_events = [{"id": "evt-1", "slug": "wc", "title": "WC"}]
+
+    bind_market_to_upstream_event(
+        db, m1, {"events": pm_events, "tags": [{"slug": "politics"}]}
+    )
+    bind_market_to_upstream_event(
+        db, m2, {"events": pm_events, "tags": [{"slug": "sports"}]}
+    )
+    bind_market_to_upstream_event(
+        db, m3, {"events": pm_events, "tags": [{"slug": "world"}]}
+    )
+
+    event = TableRead.get_event_by_slug(db, "wc")
+    assert event is not None and event.category == "Sports"
+
+
+def test_bind_existing_market_categorizes_a_previously_uncategorized_event(db):
+    """The backfill path: an event synced before this feature acquires its
+    category on the next sync pass, with no migration script."""
+    market = _seed_market_with_polymarket_id(
+        db, question="france?", cond_id=_hex32("fr"), polymarket_id=99
+    )
+    pm_events = [{"id": "evt-1", "slug": "wc", "title": "WC"}]
+    # First pass: no tags at all, as before this feature shipped.
+    bind_market_to_upstream_event(db, market, {"events": pm_events})
+    seeded = TableRead.get_event_by_slug(db, "wc")
+    assert seeded is not None and seeded.category is None
+
+    # Second pass: same event, now with tags.
+    bind_existing_market_to_upstream_event(
+        db,
+        polymarket_id=99,
+        pm_market={"events": pm_events, "tags": [{"slug": "sports"}]},
+    )
+
+    event = TableRead.get_event_by_slug(db, "wc")
+    assert event is not None and event.category == "Sports"
