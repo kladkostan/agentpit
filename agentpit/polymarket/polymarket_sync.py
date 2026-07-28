@@ -15,6 +15,7 @@ from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.onchain.admin import OnchainAdmin
+from agentpit.polymarket.category_resolver import resolve_category
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.services.market_service import prepare_market_on_chain
 from agentpit.utils.parse import _iso_to_unix
@@ -217,6 +218,11 @@ def fetch_all_polymarket_markets(
     else:
         query_parts.append("closed=false")
 
+    # Tags are the only live source of category on Gamma: the `category` field
+    # is null for every market, and the nested `events[]` objects carry no tags
+    # at all. Without this parameter each market comes back with `tags: null`.
+    query_parts.append("include_tag=true")
+
     base_query = "&".join(query_parts)
 
     while True:
@@ -364,6 +370,10 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
     Polymarket's Gamma response has ``events: [{id, slug, title, image, ...}]``.
     We take the first entry — markets that belong to more than one event are
     rare and we treat the first as canonical.
+
+    The category is derived from the *market's* ``tags`` rather than from the
+    nested event: Gamma's ``category`` field is null everywhere, and the nested
+    event objects carry no tags.
     """
     events = pm_market.get("events")
     if not isinstance(events, list) or len(events) == 0:
@@ -384,7 +394,13 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         "title": str(title),
         "description": str(raw.get("description") or ""),
         "icon_url": raw.get("image") or raw.get("icon"),
-        "category": raw.get("category"),
+        # NOT raw.get("category") — that field is null on every Gamma response.
+        # Tags live on the market, not on the nested event object.
+        "category": resolve_category(
+            t.get("slug")
+            for t in (pm_market.get("tags") or [])
+            if isinstance(t, dict)
+        ),
         "start_date": _iso_to_unix(start_iso) if start_iso else None,
         "end_date": _iso_to_unix(end_iso) if end_iso else None,
     }

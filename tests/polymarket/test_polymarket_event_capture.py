@@ -48,6 +48,9 @@ def test_extract_event_metadata_returns_none_when_events_missing():
 
 def test_extract_event_metadata_pulls_first_event():
     pm = {
+        # Category comes from the market's own tags — the nested event object
+        # carries no tags, and its `category` field is null upstream.
+        "tags": [{"id": "1", "label": "Sports", "slug": "sports"}],
         "events": [
             {
                 "id": "evt-1",
@@ -55,11 +58,10 @@ def test_extract_event_metadata_pulls_first_event():
                 "title": "2026 FIFA World Cup Winner",
                 "description": "Who lifts the cup?",
                 "image": "https://img/wc.png",
-                "category": "Sports",
                 "startDate": "2026-06-11T00:00:00Z",
                 "endDate": "2026-07-19T22:00:00Z",
             }
-        ]
+        ],
     }
     meta = _extract_event_metadata(pm)
     assert meta is not None
@@ -81,6 +83,41 @@ def test_extract_event_metadata_handles_missing_optional_fields():
     assert meta["category"] is None
     assert meta["start_date"] is None
     assert meta["end_date"] is None
+
+
+def test_extract_event_metadata_ignores_the_dead_nested_category_field():
+    """Gamma returns `category: null` on every nested event.
+
+    If it ever starts returning a value, the tag-derived category still wins —
+    tags are the taxonomy Polymarket actually maintains.
+    """
+    pm = {
+        "tags": [{"slug": "crypto"}],
+        "events": [{"id": "x", "slug": "x", "title": "X", "category": "Sports"}],
+    }
+    meta = _extract_event_metadata(pm)
+    assert meta is not None
+    assert meta["category"] == "Crypto"
+
+
+def test_extract_event_metadata_survives_malformed_tags():
+    pm = {
+        "tags": [None, "not-a-dict", {"slug": None}, {}, {"slug": "sports"}],
+        "events": [{"id": "x", "slug": "x", "title": "X"}],
+    }
+    meta = _extract_event_metadata(pm)
+    assert meta is not None
+    assert meta["category"] == "Sports"
+
+
+def test_extract_event_metadata_category_is_none_without_recognisable_tags():
+    pm = {
+        "tags": [{"slug": "gta-vi"}, {"slug": "all"}],
+        "events": [{"id": "x", "slug": "x", "title": "X"}],
+    }
+    meta = _extract_event_metadata(pm)
+    assert meta is not None
+    assert meta["category"] is None
 
 
 # ----- _extract_outcome_metadata ----------------------------------------------
