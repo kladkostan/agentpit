@@ -396,11 +396,15 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         "description": str(raw.get("description") or ""),
         "icon_url": raw.get("image") or raw.get("icon"),
         # NOT raw.get("category") — that field is null on every Gamma response.
-        # Tags live on the market, not on the nested event object.
+        # Tags live on the market, not on the nested event object. The slug
+        # type check matters: a truthy non-str slug would reach .strip() inside
+        # resolve_category and raise, permanently skipping this market on every
+        # future sync pass.
         "category": resolve_category(
             t.get("slug")
             for t in (pm_market.get("tags") or [])
             if isinstance(t, dict)
+            and isinstance(t.get("slug"), (str, type(None)))
         ),
         "start_date": _iso_to_unix(start_iso) if start_iso else None,
         "end_date": _iso_to_unix(end_iso) if end_iso else None,

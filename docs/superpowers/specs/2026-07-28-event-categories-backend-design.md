@@ -224,6 +224,15 @@ column the upsert touches, predates this work, and is reachable only for the 0.4
 of markets that resolve to nothing. Left as is rather than changing `upsert_event`'s
 semantics, which the seeder also depends on.
 
+The same limitation has a second instance in `EventService._bind_singleton`
+(`agentpit/services/event_service.py`), which calls `upsert_event` keyed on the
+market's own slug with `category=None`. On a slug collision its UPDATE clears
+both `CATEGORY` and `POLYMARKET_EVENT_ID` on a real, categorized event. This is
+byte-identical to the pre-change behaviour, so it is not a regression — but
+before this work `CATEGORY` was always `NULL`, so the wipe cost nothing. It now
+has a cost. Reaching it requires an orphan market whose slug collides with an
+existing event's slug. Accepted on the same grounds as above.
+
 ## Non-goals
 
 - **Subcategory chips.** `CATEGORY_SUBCATEGORIES` in `MarketsPage.tsx` stays

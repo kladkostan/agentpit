@@ -102,7 +102,15 @@ def test_extract_event_metadata_ignores_the_dead_nested_category_field():
 
 def test_extract_event_metadata_survives_malformed_tags():
     pm = {
-        "tags": [None, "not-a-dict", {"slug": None}, {}, {"slug": "sports"}],
+        "tags": [
+            None,
+            "not-a-dict",
+            {"slug": None},
+            {},
+            {"slug": 123},
+            {"slug": ["a"]},
+            {"slug": "sports"},
+        ],
         "events": [{"id": "x", "slug": "x", "title": "X"}],
     }
     meta = _extract_event_metadata(pm)
