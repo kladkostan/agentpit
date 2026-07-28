@@ -371,7 +371,9 @@ class TableRead:
         params: list[object] = []
         normalized_category = category.strip() if category else None
         if normalized_category:
-            where = " WHERE CATEGORY = ?"
+            # NOCASE so a case drift between the label the UI sends and the
+            # label stored can't silently return an empty page.
+            where = " WHERE CATEGORY = ? COLLATE NOCASE"
             params.append(normalized_category)
 
         total = db.execute(

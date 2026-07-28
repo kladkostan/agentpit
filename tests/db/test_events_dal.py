@@ -269,3 +269,48 @@ def test_list_orphan_markets_returns_only_unbound_markets(db):
     ids = {m.market_id for m in orphans}
     assert orphan.market_id in ids
     assert bound.market_id not in ids
+
+
+def test_update_event_category_sets_only_the_category(db):
+    event = TableWrite.upsert_event(
+        db,
+        slug="wc",
+        title="World Cup",
+        description="Who lifts the cup?",
+        icon_url="https://img/wc.png",
+        category="Politics",
+    )
+
+    TableWrite.update_event_category(db, event_id=event.event_id, category="Sports")
+
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None
+    assert stored.category == "Sports"
+    # Every other column survives untouched.
+    assert stored.title == "World Cup"
+    assert stored.description == "Who lifts the cup?"
+    assert stored.icon_url == "https://img/wc.png"
+    assert stored.slug == "wc"
+
+
+def test_update_event_category_is_idempotent(db):
+    event = TableWrite.upsert_event(db, slug="wc", title="WC", category="Sports")
+
+    TableWrite.update_event_category(db, event_id=event.event_id, category="Sports")
+    TableWrite.update_event_category(db, event_id=event.event_id, category="Sports")
+
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None and stored.category == "Sports"
+
+
+def test_list_events_with_markets_matches_category_case_insensitively(db):
+    """The UI sends its own canonical label; a case drift must not silently
+    return zero events."""
+    TableWrite.upsert_event(db, slug="t1", title="T1", category="Technology")
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, category="technology"
+    )
+
+    assert total == 1
+    assert [ev.slug for ev, _ in pairs] == ["t1"]

@@ -222,6 +222,22 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_event_category(
+        db: sqlite3.Connection, *, event_id: int, category: str
+    ) -> None:
+        """Set an event's category, leaving every other column alone.
+
+        Deliberately not routed through ``upsert_event``: that matches on SLUG,
+        but the sync finds already-known events by POLYMARKET_EVENT_ID. If
+        upstream renamed the slug, a full upsert would insert a duplicate row
+        instead of updating the existing one.
+        """
+        db.execute(
+            "UPDATE events SET CATEGORY = ? WHERE EVENT_ID = ?",
+            (category, event_id),
+        )
+
+    @staticmethod
     def create_market(
         db: sqlite3.Connection, request: CreateMarketRequest, is_polygon_market: bool
     ) -> Market:
