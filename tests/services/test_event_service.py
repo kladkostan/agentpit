@@ -136,6 +136,37 @@ def test_list_events_includes_member_markets_per_event(db_session):
     assert len(summary.markets) == 2
 
 
+def test_list_events_can_filter_by_category(db_session):
+    with db_session.write() as conn:
+        sports = TableWrite.upsert_event(
+            conn, slug="wc", title="World Cup", category="Sports"
+        )
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+    _seed_market(
+        db_session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=sports.event_id,
+        outcome_label="France",
+    )
+
+    service = EventService(db_session)
+    resp = service.list_events(limit=10, offset=0, category="Sports")
+    assert resp.total == 1
+    assert len(resp.events) == 1
+    assert resp.events[0].event.slug == "wc"
+
+
+def test_list_categories_returns_available_event_categories(db_session):
+    with db_session.write() as conn:
+        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+
+    service = EventService(db_session)
+    resp = service.list_categories()
+    assert resp.categories == ["Crypto", "Sports"]
+
+
 # ----- ensure_singleton_events_for_orphans ------------------------------------
 
 
@@ -237,6 +268,7 @@ def test_market_service_create_market_attaches_singleton_event(db_session):
         slug="will-solo-win",
         condition_id=ConditionId(_hex32("solo")),
         state=MarketState.ACTIVE,
+        category="Sports",
     )
     service = MarketService(db_session, onchain=None)  # type: ignore[arg-type]
     market = service.create_market(payload)
@@ -245,3 +277,4 @@ def test_market_service_create_market_attaches_singleton_event(db_session):
     with db_session.read() as conn:
         ev = TableRead.get_event_by_id(conn, market.event_id)
         assert ev is not None and ev.slug == "will-solo-win"
+        assert ev.category == "Sports"

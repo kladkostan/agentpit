@@ -228,6 +228,36 @@ def test_list_events_with_markets_paginates(db):
     assert len(pairs) == 2
 
 
+def test_list_events_with_markets_filters_by_category(db):
+    sports = TableWrite.upsert_event(db, slug="sports-e1", title="Sports 1", category="Sports")
+    TableWrite.upsert_event(db, slug="sports-e2", title="Sports 2", category="Sports")
+    TableWrite.upsert_event(db, slug="crypto-e1", title="Crypto 1", category="Crypto")
+
+    _make_market(
+        db,
+        question="sports market",
+        cond_id=_hex32("sports-market"),
+        event_id=sports.event_id,
+    )
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, category="Sports"
+    )
+    assert total == 2
+    assert {ev.slug for ev, _ in pairs} == {"sports-e1", "sports-e2"}
+
+
+def test_list_event_categories_returns_distinct_sorted_non_empty_values(db):
+    TableWrite.upsert_event(db, slug="a", title="A", category="Sports")
+    TableWrite.upsert_event(db, slug="b", title="B", category="sports")
+    TableWrite.upsert_event(db, slug="c", title="C", category="Crypto")
+    TableWrite.upsert_event(db, slug="d", title="D", category=None)
+    TableWrite.upsert_event(db, slug="e", title="E", category="")
+
+    categories = TableRead.list_event_categories(db)
+    assert categories == ["Crypto", "Sports", "sports"]
+
+
 def test_list_orphan_markets_returns_only_unbound_markets(db):
     event = TableWrite.upsert_event(db, slug="bound", title="Bound")
     bound = _make_market(

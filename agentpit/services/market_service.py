@@ -65,7 +65,8 @@ class MarketService:
         # startup auto-wrap).
         if market.event_id is None:
             EventService(self._db).wrap_market_in_singleton_event_if_needed(
-                market.market_id
+                market.market_id,
+                category=payload.category,
             )
             with self._db.read() as conn:
                 refreshed = TableRead.read_market(conn, market.market_id)

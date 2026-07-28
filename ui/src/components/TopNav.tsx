@@ -6,7 +6,7 @@ import { useSearch } from "@/lib/searchContext";
 import { getResolvedTheme, setTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { LogOut, Moon, Settings, User } from "lucide-react";
+import { LogOut, Moon, Settings, Sun, User } from "lucide-react";
 
 export function TopNav() {
   const navigate = useNavigate();
@@ -58,7 +58,7 @@ export function TopNav() {
     borderRadius: "1rem", // match menu item rounded-xl
     mt: 1,
     border: "1px solid hsl(var(--border) / 0.7)",
-    backgroundColor: "hsl(var(--popover)",
+    backgroundColor: "hsl(var(--popover))",
     color: "hsl(var(--popover-foreground))",
     boxShadow:
       "0 16px 40px -20px hsl(var(--foreground) / 0.45), 0 2px 12px -4px hsl(var(--foreground) / 0.25)",
@@ -70,7 +70,7 @@ export function TopNav() {
     px: 1.5,
     py: 0.75,
     fontSize: "0.875rem",
-    color: "hsl(var(--foreground))",
+    color: "hsl(var(--popover-foreground))",
     borderRadius: "0.5rem",
     transition: "background-color 0.15s, border-radius 0.15s",
     "&:hover": {
@@ -99,6 +99,23 @@ export function TopNav() {
         </NavLink>
         {showSearch ? <SearchBar /> : null}
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={handleToggleDarkMode}
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-border/70 bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            {isDarkMode ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+            <span>{isDarkMode ? "Dark" : "Light"}</span>
+            <span
+              className={`inline-flex h-4.5 w-8 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
+              aria-hidden
+            >
+              <span
+                className={`inline-block size-3.5 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-4" : "translate-x-0.5"}`}
+              />
+            </span>
+          </button>
           {user ? (
             <>
               <IconButton
@@ -132,25 +149,6 @@ export function TopNav() {
               >
                 <MenuItem onClick={handleProfile} sx={menuItemSx}>
                   <User className="mr-2 size-4" /> Profile
-                </MenuItem>
-                <MenuItem
-                  sx={menuItemSx}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    handleToggleDarkMode();
-                  }}
-                >
-                  <Moon className="mr-2 size-4" />
-                  <span className="mr-3">Dark mode</span>
-                  <span
-                    className={`ml-auto inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
-                    aria-hidden
-                  >
-                    <span
-                      className={`inline-block size-4 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-4" : "translate-x-0.5"}`}
-                    />
-                  </span>
                 </MenuItem>
                 <MenuItem onClick={handleSettings} sx={menuItemSx}>
                   <Settings className="mr-2 size-4" /> Settings

@@ -2,16 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useEventCategories, useEventsInfinite } from "@/api/events";
 import { Button } from "@/components/ui/button";
 import {
+  ArrowUpRight,
   Bitcoin,
   BriefcaseBusiness,
+  CircleDollarSign,
   Check,
   ChevronDown,
   Clapperboard,
+  Clock3,
   Cpu,
+  Droplets,
   FlaskConical,
   Globe2,
   Landmark,
   LayoutGrid,
+  Sparkles,
   Tag,
   Trophy,
   type LucideIcon,
@@ -83,6 +88,53 @@ interface SubcategoryOption {
   label: string;
   keywords: string[];
 }
+
+type QuickFilter = "all" | "live" | "endingSoon" | "new";
+type SortMode =
+  | "volume24h"
+  | "totalVolume"
+  | "liquidity"
+  | "newest"
+  | "endingSoon"
+  | "competitive"
+  | "earn";
+
+const SORT_OPTIONS: {
+  key: SortMode;
+  label: string;
+  icon: LucideIcon;
+}[] = [
+    { key: "volume24h", label: "24hr Volume", icon: ArrowUpRight },
+    { key: "totalVolume", label: "Total Volume", icon: CircleDollarSign },
+    { key: "liquidity", label: "Liquidity", icon: Droplets },
+    { key: "newest", label: "Newest", icon: Sparkles },
+    { key: "endingSoon", label: "Ending Soon", icon: Clock3 },
+    { key: "competitive", label: "Competitive", icon: Trophy },
+    { key: "earn", label: "Earn 3.25%", icon: CircleDollarSign },
+  ];
+
+const DEFAULT_SORT_OPTION = SORT_OPTIONS[0] ?? {
+  key: "volume24h" as SortMode,
+  label: "24hr Volume",
+  icon: ArrowUpRight,
+};
+
+const QUICK_FILTER_OPTIONS: {
+  key: QuickFilter;
+  label: string;
+  icon: LucideIcon;
+}[] = [
+    { key: "all", label: "All", icon: LayoutGrid },
+    { key: "live", label: "Active", icon: Check },
+    { key: "endingSoon", label: "Ending Soon", icon: Clock3 },
+    { key: "new", label: "Newest", icon: Sparkles },
+  ];
+
+const DEFAULT_QUICK_FILTER_OPTION = QUICK_FILTER_OPTIONS[0] ?? {
+  key: "all" as QuickFilter,
+  label: "All",
+  icon: LayoutGrid,
+};
 
 const CATEGORY_SUBCATEGORIES: Record<string, SubcategoryOption[]> = {
   politics: [
@@ -261,6 +313,11 @@ export function MarketsPage() {
     Record<string, boolean>
   >({});
   const [selectedSubcategories, setSelectedSubcategories] = useState<string[]>([]);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [showFilterTabs, setShowFilterTabs] = useState(false);
+  const [selectedQuickFilter, setSelectedQuickFilter] =
+    useState<QuickFilter>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("volume24h");
   const { data: categoriesData } = useEventCategories();
   const {
     data,
@@ -285,8 +342,15 @@ export function MarketsPage() {
     () => data?.pages.flatMap((page) => page.events) ?? [],
     [data],
   );
-  const { query, setQuery } = useSearch();
+  const { query } = useSearch();
   const trimmedQuery = query.trim().toLowerCase();
+  const tabTriggerClassName = "h-9 rounded-full px-3 text-sm";
+  const tabMenuSurfaceClassName =
+    "absolute left-0 z-20 mt-2 rounded-3xl border bg-background p-2 shadow-xl";
+  const tabMenuItemClassName =
+    "flex w-full items-center gap-2.5 rounded-2xl px-3 py-2 text-left text-sm hover:bg-muted/40";
+  const tabSelectedIndicatorClassName =
+    "size-2.5 rounded-full bg-muted-foreground/70";
 
   // When the user starts searching, eagerly pull remaining pages so the
   // client-side filter sees the whole dataset rather than only the loaded
@@ -308,6 +372,10 @@ export function MarketsPage() {
   }, [selectedCategory, selectedSubcategories]);
 
   const filtered = useMemo(() => {
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const sevenDaysFromNow = nowUnix + 7 * 24 * 60 * 60;
+    const sevenDaysAgo = nowUnix - 7 * 24 * 60 * 60;
+
     const queryFiltered =
       trimmedQuery.length === 0
         ? events
@@ -318,14 +386,86 @@ export function MarketsPage() {
           );
         });
 
-    if (selectedSubcategoryOptions.length === 0) return queryFiltered;
+    const withSubcategories =
+      selectedSubcategoryOptions.length === 0
+        ? queryFiltered
+        : queryFiltered.filter(({ event, markets }) =>
+          selectedSubcategoryOptions.some((subcategory) =>
+            eventMatchesKeywords(event, markets, subcategory.keywords),
+          ),
+        );
 
-    return queryFiltered.filter(({ event, markets }) =>
-      selectedSubcategoryOptions.some((subcategory) =>
-        eventMatchesKeywords(event, markets, subcategory.keywords),
-      ),
-    );
-  }, [events, selectedSubcategoryOptions, trimmedQuery]);
+    const withQuickFilter = withSubcategories.filter(({ event, markets }) => {
+      if (selectedQuickFilter === "all") return true;
+
+      if (selectedQuickFilter === "live") {
+        return markets.some((m) => m.market_state === "ACTIVE");
+      }
+
+      if (selectedQuickFilter === "endingSoon") {
+        if (!event.end_date) return false;
+        return event.end_date >= nowUnix && event.end_date <= sevenDaysFromNow;
+      }
+
+      if (selectedQuickFilter === "new") {
+        if (!event.start_date) return false;
+        return event.start_date >= sevenDaysAgo;
+      }
+
+      return true;
+    });
+
+    const sorted = [...withQuickFilter];
+    sorted.sort((a, b) => {
+      if (sortMode === "volume24h" || sortMode === "totalVolume") {
+        const aLiveCount = a.markets.filter((m) => m.market_state === "ACTIVE").length;
+        const bLiveCount = b.markets.filter((m) => m.market_state === "ACTIVE").length;
+        if (bLiveCount !== aLiveCount) return bLiveCount - aLiveCount;
+        return b.event.event_id - a.event.event_id;
+      }
+
+      if (sortMode === "liquidity") {
+        if (b.markets.length !== a.markets.length) {
+          return b.markets.length - a.markets.length;
+        }
+        return b.event.event_id - a.event.event_id;
+      }
+
+      if (sortMode === "endingSoon") {
+        const aEnd = a.event.end_date ?? Number.MAX_SAFE_INTEGER;
+        const bEnd = b.event.end_date ?? Number.MAX_SAFE_INTEGER;
+        if (aEnd !== bEnd) return aEnd - bEnd;
+        return b.event.event_id - a.event.event_id;
+      }
+
+      if (sortMode === "competitive") {
+        const aOutcomes = a.markets.length;
+        const bOutcomes = b.markets.length;
+        if (bOutcomes !== aOutcomes) return bOutcomes - aOutcomes;
+        return b.event.event_id - a.event.event_id;
+      }
+
+      if (sortMode === "earn") {
+        const aLiveCount = a.markets.filter((m) => m.market_state === "ACTIVE").length;
+        const bLiveCount = b.markets.filter((m) => m.market_state === "ACTIVE").length;
+        if (bLiveCount !== aLiveCount) return bLiveCount - aLiveCount;
+        return b.event.event_id - a.event.event_id;
+      }
+
+      const aStart = a.event.start_date ?? 0;
+      const bStart = b.event.start_date ?? 0;
+      if (bStart !== aStart) return bStart - aStart;
+      return b.event.event_id - a.event.event_id;
+    });
+
+    return sorted;
+  }, [
+    events,
+    selectedQuickFilter,
+    selectedSubcategoryOptions,
+    sortMode,
+    trimmedQuery,
+  ]);
 
   const activeCount = useMemo(
     () =>
@@ -339,8 +479,24 @@ export function MarketsPage() {
   );
 
   const isSearching = trimmedQuery.length > 0;
+  const selectedSortOption =
+    SORT_OPTIONS.find((option) => option.key === sortMode) ?? DEFAULT_SORT_OPTION;
+  const SelectedSortIcon = selectedSortOption.icon;
+  const selectedQuickFilterOption =
+    QUICK_FILTER_OPTIONS.find((option) => option.key === selectedQuickFilter) ??
+    DEFAULT_QUICK_FILTER_OPTION;
+  const SelectedQuickFilterIcon = selectedQuickFilterOption.icon;
 
   function handleCategorySelect(nextCategory: string | null) {
+    // Re-clicking the active category should clear category filters.
+    if (nextCategory !== null && selectedCategory === nextCategory) {
+      const categoryKey = normalizeCategoryKey(nextCategory);
+      setSelectedCategory(null);
+      setSelectedSubcategories([]);
+      setExpandedSubcategories((prev) => ({ ...prev, [categoryKey]: false }));
+      return;
+    }
+
     setSelectedCategory(nextCategory);
 
     if (nextCategory === null) {
@@ -484,11 +640,6 @@ export function MarketsPage() {
                 const arrowColorClass = isSelected
                   ? "text-primary-foreground"
                   : "text-foreground";
-                const selectedCount = subcategories.filter((subcategory) =>
-                  selectedSubcategories.includes(
-                    getSubcategorySelectionKey(category, subcategory.id),
-                  ),
-                ).length;
 
                 return (
                   <div key={category} className="space-y-1">
@@ -502,12 +653,6 @@ export function MarketsPage() {
                       >
                         <Icon className="size-4" aria-hidden />
                         <span className="truncate">{category}</span>
-
-                        {selectedCount > 0 ? (
-                          <span className="ml-auto rounded-full bg-background/70 px-1.5 py-0.5 text-[10px] leading-none">
-                            {selectedCount}
-                          </span>
-                        ) : null}
                       </Button>
 
                       {subcategories.length > 0 ? (
@@ -522,7 +667,6 @@ export function MarketsPage() {
                               [categoryKey]: !prev[categoryKey],
                             }));
                           }}
-                          aria-label={`Toggle ${category} subcategories`}
                         >
                           <ChevronDown
                             className={`size-4 transition-transform ${arrowColorClass} ${isExpanded ? "rotate-180" : ""
@@ -551,9 +695,6 @@ export function MarketsPage() {
                                 handleSubcategoryToggle(category, subcategory.id)
                               }
                             >
-                              {isSubSelected ? (
-                                <Check className="size-3" aria-hidden />
-                              ) : null}
                               {subcategory.label}
                             </Button>
                           );
@@ -568,15 +709,113 @@ export function MarketsPage() {
         </aside>
 
         <div className="space-y-8">
-          <header className="flex items-center justify-end gap-6 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="size-1.5 animate-pulse-dot rounded-full bg-emerald-500"
-              />
-              {activeCount} live
-            </span>
-          </header>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={tabTriggerClassName}
+                    onClick={() => {
+                      setShowSortMenu((prev) => !prev);
+                      setShowFilterTabs(false);
+                    }}
+                  >
+                    <SelectedSortIcon className="size-4" aria-hidden />
+                    {selectedSortOption.label}
+                    <ChevronDown
+                      className={`size-4 transition-transform ${showSortMenu ? "rotate-180" : ""
+                        }`}
+                      aria-hidden
+                    />
+                  </Button>
+
+                  {showSortMenu ? (
+                    <div className={`${tabMenuSurfaceClassName} w-64`}>
+                      {SORT_OPTIONS.map((option) => {
+                        const OptionIcon = option.icon;
+                        const isSelected = sortMode === option.key;
+
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            className={tabMenuItemClassName}
+                            onClick={() => {
+                              setSortMode(option.key);
+                              setShowSortMenu(false);
+                            }}
+                          >
+                            <OptionIcon className="size-4 text-current" aria-hidden />
+                            <span className="flex-1">{option.label}</span>
+                            {isSelected ? (
+                              <span className={tabSelectedIndicatorClassName} aria-hidden />
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="relative">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={tabTriggerClassName}
+                    onClick={() => {
+                      setShowFilterTabs((prev) => !prev);
+                      setShowSortMenu(false);
+                    }}
+                  >
+                    <SelectedQuickFilterIcon className="size-4" aria-hidden />
+                    {selectedQuickFilterOption.label}
+                    <ChevronDown
+                      className={`size-4 transition-transform ${showFilterTabs ? "rotate-180" : ""
+                        }`}
+                      aria-hidden
+                    />
+                  </Button>
+
+                  {showFilterTabs ? (
+                    <div className={`${tabMenuSurfaceClassName} w-56`}>
+                      {QUICK_FILTER_OPTIONS.map((option) => {
+                        const OptionIcon = option.icon;
+                        const isSelected = selectedQuickFilter === option.key;
+
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            className={tabMenuItemClassName}
+                            onClick={() => {
+                              setSelectedQuickFilter(option.key);
+                              setShowFilterTabs(false);
+                            }}
+                          >
+                            <OptionIcon className="size-4 text-current" aria-hidden />
+                            <span className="flex-1">{option.label}</span>
+                            {isSelected ? (
+                              <span className={tabSelectedIndicatorClassName} aria-hidden />
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                <span
+                  aria-hidden
+                  className="size-1.5 animate-pulse-dot rounded-full bg-emerald-500"
+                />
+                {activeCount} live
+              </span>
+            </div>
+          </div>
 
           {isLoading ? (
             <EventGridSkeleton />
@@ -600,7 +839,7 @@ export function MarketsPage() {
               </Button>
             </div>
           ) : filtered.length === 0 ? (
-            <EmptyState query={query} onClear={() => setQuery("")} />
+            <EmptyState />
           ) : (
             <EventGrid
               events={filtered}
@@ -617,27 +856,10 @@ export function MarketsPage() {
   );
 }
 
-function EmptyState({
-  query,
-  onClear,
-}: {
-  query: string;
-  onClear: () => void;
-}) {
+function EmptyState() {
   return (
     <div className="rounded-2xl border border-dashed bg-muted/20 px-8 py-16 text-center">
-      <p className="text-2xl font-semibold tracking-tight">No matches</p>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Nothing matches “{query}”. Try a different question.
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-6"
-        onClick={onClear}
-      >
-        Clear filter
-      </Button>
+      <p className="text-xl font-semibold tracking-tight"> 🚫 No events match your current filters</p>
     </div>
   );
 }
