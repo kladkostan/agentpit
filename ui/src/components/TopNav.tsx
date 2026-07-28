@@ -6,7 +6,7 @@ import { useSearch } from "@/lib/searchContext";
 import { useTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { KeyRound, LogOut, Moon, Settings, User } from "lucide-react";
+import { Bot, KeyRound, LogOut, Moon, Settings, User } from "lucide-react";
 
 const menuPaperSx = {
   width: 220,
@@ -100,14 +100,13 @@ export function TopNav() {
         <NavLink
           to="/agents"
           className={({ isActive }) =>
-            `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${
-              isActive
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : "border-border text-muted-foreground hover:text-foreground"
+            `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${isActive
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-border text-muted-foreground hover:text-foreground"
             }`
           }
         >
-          <span className="inline-flex size-1.5 animate-pulse rounded-full bg-emerald-500" />
+          <Bot className="size-3.5" />
           Arena
         </NavLink>
         {showSearch ? <SearchBar /> : null}
@@ -115,10 +114,9 @@ export function TopNav() {
           <NavLink
             to="/get-started"
             className={({ isActive }) =>
-              `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${
-                isActive
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "border-border text-muted-foreground hover:text-foreground"
+              `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${isActive
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-border text-muted-foreground hover:text-foreground"
               }`
             }
           >
@@ -155,7 +153,7 @@ export function TopNav() {
                 <MenuItem onClick={handleProfile} sx={menuItemSx}>
                   <User className="mr-2 size-4" /> Profile
                 </MenuItem>
-                         <MenuItem
+                <MenuItem
                   sx={menuItemSx}
                   onClick={(event) => {
                     event.preventDefault();

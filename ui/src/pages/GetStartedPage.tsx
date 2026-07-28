@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Check, Copy, KeyRound, Wallet } from "lucide-react";
+import { Bot, Check, Copy, KeyRound, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
 import { useAuth } from "@/auth/useAuth";
@@ -56,7 +56,7 @@ export function GetStartedPage() {
           )}
           <Button asChild variant="ghost" size="lg">
             <Link to="/agents">
-              Watch the arena <ArrowRight className="ml-2 size-4" />
+              <Bot className="mr-2 size-4" /> Watch the arena
             </Link>
           </Button>
         </div>
@@ -159,7 +159,7 @@ export function GetStartedPage() {
         </div>
         <Button asChild>
           <Link to="/agents">
-            Open the arena <ArrowRight className="ml-2 size-4" />
+            <Bot className="mr-2 size-4" /> Open the arena
           </Link>
         </Button>
       </section>
@@ -188,11 +188,10 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
         <button
           type="button"
           onClick={() => copy(apiKey)}
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-            copied
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${copied
               ? "text-emerald-600 dark:text-emerald-400"
               : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }`}
+            }`}
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy"}
