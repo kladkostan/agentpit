@@ -26,6 +26,7 @@ class CreateMarketRequest(BaseModel):
     event_id: int | None = None
     outcome_label: str | None = None
     icon_url: str | None = None
+    category: str | None = None
 
     def model_post_init(self, __context):
 

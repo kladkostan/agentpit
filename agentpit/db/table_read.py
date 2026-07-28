@@ -356,7 +356,10 @@ class TableRead:
 
     @staticmethod
     def list_events_with_markets(
-        db: sqlite3.Connection, limit: int = 100, offset: int = 0
+        db: sqlite3.Connection,
+        limit: int = 100,
+        offset: int = 0,
+        category: str | None = None,
     ) -> tuple[list[tuple[Event, list[Market]]], int]:
         """Return events ordered by newest, each paired with its child markets.
 
@@ -364,11 +367,23 @@ class TableRead:
         the primary listing query. One query for the event page + one for
         all member markets (bucketed in Python) — no N+1.
         """
-        total = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        where = ""
+        params: list[object] = []
+        normalized_category = category.strip() if category else None
+        if normalized_category:
+            # NOCASE so a case drift between the label the UI sends and the
+            # label stored can't silently return an empty page.
+            where = " WHERE CATEGORY = ? COLLATE NOCASE"
+            params.append(normalized_category)
+
+        total = db.execute(
+            f"SELECT COUNT(*) FROM events{where}",
+            tuple(params),
+        ).fetchone()[0]
         events_cur = db.execute(
-            f"SELECT {TableRead._EVENT_COLS} FROM events "
+            f"SELECT {TableRead._EVENT_COLS} FROM events{where} "
             "ORDER BY EVENT_ID DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            tuple(params + [limit, offset]),
         )
         events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]
         if not events:
@@ -387,6 +402,18 @@ class TableRead:
             assert market.event_id is not None  # guaranteed by WHERE clause
             by_event[market.event_id].append(market)
         return [(ev, by_event[ev.event_id]) for ev in events], total
+
+    @staticmethod
+    def list_event_categories(db: sqlite3.Connection) -> list[str]:
+        cur = db.execute(
+            """
+            SELECT DISTINCT CATEGORY
+            FROM events
+            WHERE CATEGORY IS NOT NULL AND TRIM(CATEGORY) != ''
+            ORDER BY CATEGORY COLLATE NOCASE ASC
+            """
+        )
+        return [str(row[0]) for row in cur.fetchall()]
 
     @staticmethod
     def list_orphan_markets(db: sqlite3.Connection) -> list[Market]:

@@ -87,3 +87,20 @@ def test_build_request_extracts_upstream_token_ids():
     req = build_create_market_request_from_json(pm_market)
     assert req.polymarket_yes_token_id == "777"
     assert req.polymarket_no_token_id == "888"
+
+
+def test_fetch_all_polymarket_markets_requests_tags(monkeypatch):
+    """Without include_tag=true every market comes back with `tags: null`."""
+    from agentpit.polymarket import polymarket_sync
+
+    seen: list[str] = []
+
+    def fake_get(url: str):
+        seen.append(url)
+        return []
+
+    monkeypatch.setattr(polymarket_sync, "get", fake_get)
+    polymarket_sync.fetch_all_polymarket_markets(host="https://gamma.test")
+
+    assert seen
+    assert "include_tag=true" in seen[0]

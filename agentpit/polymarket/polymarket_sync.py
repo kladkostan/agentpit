@@ -15,6 +15,8 @@ from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.onchain.admin import OnchainAdmin
+from agentpit.polymarket.category_resolver import category_rank, resolve_category
+from agentpit.datastructures.event import Event
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.services.market_service import prepare_market_on_chain
 from agentpit.utils.parse import _iso_to_unix
@@ -217,6 +219,11 @@ def fetch_all_polymarket_markets(
     else:
         query_parts.append("closed=false")
 
+    # Tags are the only live source of category on Gamma: the `category` field
+    # is null for every market, and the nested `events[]` objects carry no tags
+    # at all. Without this parameter each market comes back with `tags: null`.
+    query_parts.append("include_tag=true")
+
     base_query = "&".join(query_parts)
 
     while True:
@@ -364,6 +371,10 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
     Polymarket's Gamma response has ``events: [{id, slug, title, image, ...}]``.
     We take the first entry — markets that belong to more than one event are
     rare and we treat the first as canonical.
+
+    The category is derived from the *market's* ``tags`` rather than from the
+    nested event: Gamma's ``category`` field is null everywhere, and the nested
+    event objects carry no tags.
     """
     events = pm_market.get("events")
     if not isinstance(events, list) or len(events) == 0:
@@ -384,7 +395,17 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         "title": str(title),
         "description": str(raw.get("description") or ""),
         "icon_url": raw.get("image") or raw.get("icon"),
-        "category": raw.get("category"),
+        # NOT raw.get("category") — that field is null on every Gamma response.
+        # Tags live on the market, not on the nested event object. The slug
+        # type check matters: a truthy non-str slug would reach .strip() inside
+        # resolve_category and raise, permanently skipping this market on every
+        # future sync pass.
+        "category": resolve_category(
+            t.get("slug")
+            for t in (pm_market.get("tags") or [])
+            if isinstance(t, dict)
+            and isinstance(t.get("slug"), (str, type(None)))
+        ),
         "start_date": _iso_to_unix(start_iso) if start_iso else None,
         "end_date": _iso_to_unix(end_iso) if end_iso else None,
     }
@@ -399,6 +420,24 @@ def _extract_outcome_metadata(pm_market: dict) -> tuple[str | None, str | None]:
     label = pm_market.get("groupItemTitle")
     icon = pm_market.get("image")
     return (str(label) if label else None, str(icon) if icon else None)
+
+
+def _sync_event_category(db: Connection, event: Event, category: str | None) -> None:
+    """Raise an event's category when ``category`` is stricter than what's stored.
+
+    An event owns many markets and the sync's order across them isn't
+    guaranteed, so last-writer-wins would let the category oscillate between
+    passes. Comparing ranks makes the result order-independent: the event
+    converges on the strictest category any member market resolves to.
+
+    Never clears — a market whose tags resolve to nothing (~0.4% of the feed)
+    must not undo a good categorization contributed by a sibling market.
+    """
+    if category is None:
+        return
+    if category_rank(category) >= category_rank(event.category):
+        return
+    TableWrite.update_event_category(db, event_id=event.event_id, category=category)
 
 
 def bind_existing_market_to_upstream_event(
@@ -436,17 +475,23 @@ def bind_market_to_upstream_event(
         existing = TableRead.get_event_by_polymarket_event_id(
             db, meta["polymarket_event_id"]
         )
-    event = existing or TableWrite.upsert_event(
-        db,
-        slug=meta["slug"],
-        title=meta["title"],
-        description=meta["description"],
-        icon_url=meta["icon_url"],
-        category=meta["category"],
-        start_date=meta["start_date"],
-        end_date=meta["end_date"],
-        polymarket_event_id=meta["polymarket_event_id"],
-    )
+    if existing is not None:
+        # The upsert is skipped for known events (it matches on SLUG, which
+        # upstream can rename), so the category is refreshed on its own.
+        event = existing
+        _sync_event_category(db, event, meta["category"])
+    else:
+        event = TableWrite.upsert_event(
+            db,
+            slug=meta["slug"],
+            title=meta["title"],
+            description=meta["description"],
+            icon_url=meta["icon_url"],
+            category=meta["category"],
+            start_date=meta["start_date"],
+            end_date=meta["end_date"],
+            polymarket_event_id=meta["polymarket_event_id"],
+        )
     outcome_label, icon_url = _extract_outcome_metadata(pm_market)
     TableWrite.attach_market_to_event(
         db,
