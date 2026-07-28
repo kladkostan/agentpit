@@ -226,6 +226,73 @@ def test_list_events_with_markets_paginates(db):
     assert len(pairs) == 2
 
 
+def test_list_events_with_markets_filters_by_category(db):
+    sports = TableWrite.upsert_event(db, slug="sports-e1", title="Sports 1", category="Sports")
+    TableWrite.upsert_event(db, slug="sports-e2", title="Sports 2", category="Sports")
+    TableWrite.upsert_event(db, slug="crypto-e1", title="Crypto 1", category="Crypto")
+
+    _make_market(
+        db,
+        question="sports market",
+        cond_id=_hex32("sports-market"),
+        event_id=sports.event_id,
+    )
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, category="Sports"
+    )
+    assert total == 2
+    assert {ev.slug for ev, _ in pairs} == {"sports-e1", "sports-e2"}
+
+
+def test_list_events_with_markets_treats_a_blank_category_as_no_filter(db):
+    """`?category=` / `?category=%20` must not collapse the home page to zero
+    events — an empty filter means "everything"."""
+    TableWrite.upsert_event(db, slug="sports-e1", title="Sports 1", category="Sports")
+    TableWrite.upsert_event(db, slug="crypto-e1", title="Crypto 1", category="Crypto")
+
+    for blank in ("", "   ", "\t"):
+        pairs, total = TableRead.list_events_with_markets(
+            db, limit=10, offset=0, category=blank
+        )
+        assert total == 2, f"blank category {blank!r} must not filter"
+        assert {ev.slug for ev, _ in pairs} == {"sports-e1", "crypto-e1"}
+
+
+def test_list_events_with_markets_strips_the_category_before_matching(db):
+    TableWrite.upsert_event(db, slug="sports-e1", title="Sports 1", category="Sports")
+    TableWrite.upsert_event(db, slug="crypto-e1", title="Crypto 1", category="Crypto")
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, category="  Sports  "
+    )
+    assert total == 1
+    assert [ev.slug for ev, _ in pairs] == ["sports-e1"]
+
+
+def test_list_event_categories_is_empty_when_nothing_is_categorized(db):
+    TableWrite.upsert_event(db, slug="a", title="A")
+    TableWrite.upsert_event(db, slug="b", title="B", category="")
+    assert TableRead.list_event_categories(db) == []
+
+
+def test_list_event_categories_returns_distinct_sorted_non_empty_values(db):
+    TableWrite.upsert_event(db, slug="a", title="A", category="Sports")
+    TableWrite.upsert_event(db, slug="b", title="B", category="sports")
+    TableWrite.upsert_event(db, slug="c", title="C", category="Crypto")
+    TableWrite.upsert_event(db, slug="d", title="D", category=None)
+    TableWrite.upsert_event(db, slug="e", title="E", category="")
+
+    categories = TableRead.list_event_categories(db)
+
+    # NULL and "" are excluded, values are distinct, and the primary sort is
+    # case-insensitive. The Sports/sports tiebreak is decided by the server's
+    # collation (C vs en_US.UTF-8 disagree), so pin the case-folded order —
+    # deterministic on any deployment — plus exact membership.
+    assert [c.lower() for c in categories] == ["crypto", "sports", "sports"]
+    assert sorted(categories) == ["Crypto", "Sports", "sports"]
+
+
 def test_list_orphan_markets_returns_only_unbound_markets(db):
     event = TableWrite.upsert_event(db, slug="bound", title="Bound")
     bound = _make_market(
@@ -237,3 +304,48 @@ def test_list_orphan_markets_returns_only_unbound_markets(db):
     ids = {m.market_id for m in orphans}
     assert orphan.market_id in ids
     assert bound.market_id not in ids
+
+
+def test_update_event_category_sets_only_the_category(db):
+    event = TableWrite.upsert_event(
+        db,
+        slug="wc",
+        title="World Cup",
+        description="Who lifts the cup?",
+        icon_url="https://img/wc.png",
+        category="Politics",
+    )
+
+    TableWrite.update_event_category(db, event_id=event.event_id, category="Sports")
+
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None
+    assert stored.category == "Sports"
+    # Every other column survives untouched.
+    assert stored.title == "World Cup"
+    assert stored.description == "Who lifts the cup?"
+    assert stored.icon_url == "https://img/wc.png"
+    assert stored.slug == "wc"
+
+
+def test_update_event_category_is_idempotent(db):
+    event = TableWrite.upsert_event(db, slug="wc", title="WC", category="Sports")
+
+    TableWrite.update_event_category(db, event_id=event.event_id, category="Sports")
+    TableWrite.update_event_category(db, event_id=event.event_id, category="Sports")
+
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None and stored.category == "Sports"
+
+
+def test_list_events_with_markets_matches_category_case_insensitively(db):
+    """The UI sends its own canonical label; a case drift must not silently
+    return zero events."""
+    TableWrite.upsert_event(db, slug="t1", title="T1", category="Technology")
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, category="technology"
+    )
+
+    assert total == 1
+    assert [ev.slug for ev, _ in pairs] == ["t1"]

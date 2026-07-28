@@ -145,18 +145,30 @@ class TableWrite:
         """Insert an event or update it if SLUG already exists.
 
         Used by both the seeder and the Polymarket sync to be idempotent.
+
+        ICON_URL, CATEGORY and POLYMARKET_EVENT_ID are COALESCE-updated: a
+        caller that does not know the value (the singleton auto-wrap, which
+        runs on every startup, and the sync's no-metadata branch) passes None
+        and must not erase what an earlier, better-informed write stored. The
+        returned Event reflects what is actually in the row afterwards.
         """
         existing = db.execute(
             "SELECT EVENT_ID FROM events WHERE SLUG = %s LIMIT 1", (slug,)
         ).fetchone()
         if existing is not None:
             event_id = int(existing["EVENT_ID"])
-            db.execute(
+            updated = db.execute(
                 """
                 UPDATE events
-                SET TITLE = %s, DESCRIPTION = %s, ICON_URL = %s, CATEGORY = %s,
-                    START_DATE = %s, END_DATE = %s, POLYMARKET_EVENT_ID = %s
+                SET TITLE = %s,
+                    DESCRIPTION = %s,
+                    ICON_URL = COALESCE(%s, ICON_URL),
+                    CATEGORY = COALESCE(%s, CATEGORY),
+                    START_DATE = %s,
+                    END_DATE = %s,
+                    POLYMARKET_EVENT_ID = COALESCE(%s, POLYMARKET_EVENT_ID)
                 WHERE EVENT_ID = %s
+                RETURNING ICON_URL, CATEGORY, POLYMARKET_EVENT_ID
                 """,
                 (
                     title,
@@ -168,7 +180,11 @@ class TableWrite:
                     polymarket_event_id,
                     event_id,
                 ),
-            )
+            ).fetchone()
+            if updated is not None:
+                icon_url = updated["ICON_URL"]
+                category = updated["CATEGORY"]
+                polymarket_event_id = updated["POLYMARKET_EVENT_ID"]
         else:
             row = db.execute(
                 """
@@ -265,6 +281,22 @@ class TableWrite:
             WHERE MARKET_ID = %s
             """,
             (event_id, outcome_label, icon_url, market_id),
+        )
+
+    @staticmethod
+    def update_event_category(
+        db: psycopg.Connection, *, event_id: int, category: str
+    ) -> None:
+        """Set an event's category, leaving every other column alone.
+
+        Deliberately not routed through ``upsert_event``: that matches on SLUG,
+        but the sync finds already-known events by POLYMARKET_EVENT_ID. If
+        upstream renamed the slug, a full upsert would insert a duplicate row
+        instead of updating the existing one.
+        """
+        db.execute(
+            "UPDATE events SET CATEGORY = %s WHERE EVENT_ID = %s",
+            (category, event_id),
         )
 
     @staticmethod

@@ -25,12 +25,12 @@ def test_fetch_uses_volume_order_and_caps(monkeypatch):
     monkeypatch.setattr(sync, "get", fake_get)
 
     out = sync.fetch_all_polymarket_markets(
-        order="volume_24hr", max_markets=3, liquidity_threshold=0
+        order="volume24hr", max_markets=3, liquidity_threshold=0
     )
 
     assert len(out) == 3  # capped to max_markets
     url = seen["urls"][0]
-    assert "order=volume_24hr" in url
+    assert "order=volume24hr" in url
     assert "ascending=false" in url
     assert "active=true" in url
     assert "closed=false" in url
@@ -67,7 +67,7 @@ def test_pagination_collects_across_capped_pages(monkeypatch):
     monkeypatch.setattr(sync, "get", fake_get)
 
     out = sync.fetch_all_polymarket_markets(
-        order="volume_24hr", max_markets=250, liquidity_threshold=0
+        order="volume24hr", max_markets=250, liquidity_threshold=0
     )
 
     assert len(out) == 250  # paginated across 100-row pages, not stuck at ~100
