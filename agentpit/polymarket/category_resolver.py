@@ -8,7 +8,7 @@ mixing top-level categories ("Politics", "Crypto") with fine-grained topics
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 # Ordered strictest-first: a narrower category wins when a market carries
 # several. "Politics" is last because Polymarket tags most geopolitics with it

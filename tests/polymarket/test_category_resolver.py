@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from agentpit.polymarket.category_resolver import (
+    _ALIAS_SLUGS,
+    _CANONICAL_SLUGS,
     CATEGORY_PRIORITY,
     category_rank,
     resolve_category,
@@ -68,8 +70,16 @@ def test_slugs_are_case_and_whitespace_insensitive():
 
 
 def test_category_rank_orders_priority_strictest_first():
-    ranks = [category_rank(c) for c in CATEGORY_PRIORITY]
-    assert ranks == sorted(ranks)
+    assert CATEGORY_PRIORITY == (
+        "Sports",
+        "Crypto",
+        "Science",
+        "Technology",
+        "Pop Culture",
+        "Business",
+        "World",
+        "Politics",
+    )
     assert category_rank("Sports") < category_rank("Politics")
 
 
@@ -77,3 +87,10 @@ def test_category_rank_sinks_unknown_and_none_to_last():
     assert category_rank(None) == len(CATEGORY_PRIORITY)
     assert category_rank("Handmade Category") == len(CATEGORY_PRIORITY)
     assert category_rank("Politics") < category_rank(None)
+
+
+def test_every_mapped_value_is_rankable():
+    """A value outside CATEGORY_PRIORITY would tie at _UNRANKED, making
+    min() pick per PYTHONHASHSEED — the nondeterminism this module prevents."""
+    mapped = set(_CANONICAL_SLUGS.values()) | set(_ALIAS_SLUGS.values())
+    assert mapped <= set(CATEGORY_PRIORITY)
