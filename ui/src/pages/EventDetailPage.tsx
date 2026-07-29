@@ -90,7 +90,7 @@ export function EventDetailPage() {
           <Button variant="outline" size="sm" onClick={() => void refetch()}>
             Retry
           </Button>
-          <Link to="/">
+          <Link to="/markets">
             <Button variant="ghost" size="sm">
               ← Back
             </Button>

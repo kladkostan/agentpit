@@ -6,6 +6,7 @@ import { AgentPage } from "@/pages/AgentPage";
 import { AgentArenaPage } from "@/pages/AgentArenaPage";
 import { EventDetailPage } from "@/pages/EventDetailPage";
 import { GetStartedPage } from "@/pages/GetStartedPage";
+import { LandingPage } from "@/pages/LandingPage";
 import { MarketsPage } from "@/pages/MarketsPage";
 import { MarketDetailPage } from "@/pages/MarketDetailPage";
 import { ProfilePage } from "@/pages/ProfilePage";
@@ -18,7 +19,8 @@ export default function App() {
         <TopNav />
         <main className="container py-8">
           <Routes>
-            <Route path="/" element={<MarketsPage />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/markets" element={<MarketsPage />} />
             <Route path="/events/:slug" element={<EventDetailPage />} />
             <Route path="/markets/:id" element={<MarketDetailPage />} />
             <Route path="/agents" element={<AgentArenaPage />} />

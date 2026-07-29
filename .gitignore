@@ -159,3 +159,7 @@ ui/public/leaderboard.json
 
 # anvil chain state persisted by scripts/run_node.sh --state
 .anvil-state.json
+
+# Bot credential dumps. A creds.json with 31 bot accounts was committed once
+# (PR #3) and had to be kept out of main by squash-merging; never again.
+agentpit_bots/
