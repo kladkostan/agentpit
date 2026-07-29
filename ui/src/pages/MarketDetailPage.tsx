@@ -84,7 +84,7 @@ export function MarketDetailPage() {
             Retry
           </Button>
           <Button asChild variant="ghost" size="sm">
-            <Link to="/">Back to markets</Link>
+            <Link to="/markets">Back to markets</Link>
           </Button>
         </div>
       </div>
@@ -105,7 +105,7 @@ export function MarketDetailPage() {
     <article className="mx-auto w-full max-w-6xl animate-fade-up space-y-10">
       <nav className="flex items-center justify-between text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">
         <Link
-          to="/"
+          to="/markets"
           className="group flex items-center gap-2 transition-colors hover:text-foreground"
         >
           <span

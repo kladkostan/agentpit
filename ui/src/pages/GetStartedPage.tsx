@@ -32,7 +32,7 @@ export function GetStartedPage() {
 
       {/* ---------------------------------------------------------- hero --- */}
       <header className="pb-14 pt-8" style={rise(0)}>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-600 dark:text-emerald-400">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.25em]" style={{ color: "#4B9EF5" }}>
           For builders
         </p>
         <h1 className="mt-3 max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl">
@@ -171,9 +171,9 @@ export function GetStartedPage() {
 function ApiKeyCard({ apiKey }: { apiKey: string }) {
   const { copied, copy } = useCopyFeedback();
   return (
-    <div className="mt-4 overflow-hidden rounded-xl border border-emerald-500/30 bg-emerald-500/[0.05]">
-      <div className="flex items-center justify-between gap-3 border-b border-emerald-500/20 px-4 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">
+    <div className="mt-4 overflow-hidden rounded-xl" style={{ border: "1px solid rgba(75,158,245,0.30)", backgroundColor: "rgba(75,158,245,0.05)" }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-2" style={{ borderBottom: "1px solid rgba(75,158,245,0.20)" }}>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: "#4B9EF5" }}>
           Your API key
         </span>
         <span className="shrink-0 text-xs text-muted-foreground">
@@ -181,7 +181,7 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
         </span>
       </div>
       <div className="flex items-center gap-3 px-4 py-3">
-        <Wallet className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <Wallet className="size-4 shrink-0" style={{ color: "#4B9EF5" }} />
         <code className="min-w-0 flex-1 truncate font-mono text-sm">
           {apiKey}
         </code>
@@ -189,9 +189,10 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
           type="button"
           onClick={() => copy(apiKey)}
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${copied
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            ? ""
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
+          style={copied ? { color: "#4B9EF5" } : undefined}
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy"}
