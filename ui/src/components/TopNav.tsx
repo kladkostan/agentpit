@@ -6,55 +6,21 @@ import { useSearch } from "@/lib/searchContext";
 import { useTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { Bot, LogOut, Moon, Settings, TrendingUp, User } from "lucide-react";
-
-const menuPaperSx = {
-  width: 220,
-  borderRadius: 2.5,
-  mt: 1,
-  border: "1px solid hsl(var(--border) / 0.7)",
-  backgroundColor: "hsl(var(--popover))",
-  color: "hsl(var(--popover-foreground))",
-  boxShadow:
-    "0 16px 40px -20px hsl(var(--foreground) / 0.45), 0 2px 12px -4px hsl(var(--foreground) / 0.25)",
-  overflow: "hidden",
-};
-
-const menuListSx = { p: 0.75 };
-
-const menuItemSx = {
-  minHeight: 38,
-  borderRadius: 1.5,
-  px: 1.5,
-  py: 0.75,
-  fontSize: "0.875rem",
-  color: "hsl(var(--foreground))",
-  "&:hover": {
-    backgroundColor: "hsl(var(--muted))",
-  },
-};
-
-const logoutItemSx = {
-  ...menuItemSx,
-  color: "rgb(220 38 38)",
-  "&:hover": {
-    backgroundColor: "rgb(239 68 68 / 0.1)",
-  },
-};
+import { TrendingUp, LogOut, Moon, Settings, Sun, User, Bot } from "lucide-react";
 
 export function TopNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  const isDarkMode = theme === "dark";
-  const showSearch = pathname === "/markets" || pathname.startsWith("/events/");
+  const showSearch = pathname === "/markets";
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
     : undefined;
   const avatarLabelSource = user?.handle || user?.email || "?";
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const { theme, toggleTheme } = useTheme();
+  const isDarkMode = theme === "dark";
   const open = Boolean(anchorEl);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -80,12 +46,39 @@ export function TopNav() {
     navigate("/settings");
   };
 
-  const handleToggleDarkMode = (
-    event: React.MouseEvent<HTMLLIElement>,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleTheme();
+  const menuPaperSx = {
+    width: 220,
+    borderRadius: "1rem", // match menu item rounded-xl
+    mt: 1,
+    border: "1px solid hsl(var(--border) / 0.7)",
+    backgroundColor: "hsl(var(--popover))",
+    color: "hsl(var(--popover-foreground))",
+    boxShadow:
+      "0 16px 40px -20px hsl(var(--foreground) / 0.45), 0 2px 12px -4px hsl(var(--foreground) / 0.25)",
+    overflow: "hidden",
+  };
+
+  const menuItemSx = {
+    minHeight: 38,
+    px: 1.5,
+    py: 0.75,
+    fontSize: "0.875rem",
+    color: "hsl(var(--popover-foreground))",
+    borderRadius: "0.5rem",
+    transition: "background-color 0.15s, border-radius 0.15s",
+    "&:hover": {
+      backgroundColor: "hsl(var(--muted))",
+      borderRadius: "1rem",
+    },
+  };
+
+  const logoutItemSx = {
+    ...menuItemSx,
+    color: "rgb(220 38 38)",
+    "&:hover": {
+      backgroundColor: "rgb(239 68 68 / 0.1)",
+      borderRadius: "1rem",
+    },
   };
 
   return (
@@ -123,8 +116,31 @@ export function TopNav() {
             Arena
           </NavLink>
         </div>
-        {showSearch ? <SearchBar /> : null}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
+        {showSearch && <SearchBar />}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={
+              isDarkMode ? "Switch to light mode" : "Switch to dark mode"
+            }
+            onClick={toggleTheme}
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-border/70 bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            {isDarkMode ? (
+              <Moon className="size-3.5" />
+            ) : (
+              <Sun className="size-3.5" />
+            )}
+            <span>{isDarkMode ? "Dark" : "Light"}</span>
+            <span
+              className={`inline-flex h-4.5 w-8 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
+              aria-hidden
+            >
+              <span
+                className={`inline-block size-3.5 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-4" : "translate-x-0.5"}`}
+              />
+            </span>
+          </button>
           {user ? (
             <>
               <IconButton
@@ -148,31 +164,16 @@ export function TopNav() {
                 anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
                 transformOrigin={{ vertical: "top", horizontal: "center" }}
                 slotProps={{
-                  paper: { sx: menuPaperSx },
-                  list: { sx: menuListSx },
+                  paper: {
+                    sx: menuPaperSx,
+                  },
+                  list: {
+                    sx: { p: 0.75 },
+                  },
                 }}
               >
                 <MenuItem onClick={handleProfile} sx={menuItemSx}>
                   <User className="mr-2 size-4" /> Profile
-                </MenuItem>
-                <MenuItem
-                  sx={menuItemSx}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    handleToggleDarkMode(event);
-                  }}
-                >
-                  <Moon className="mr-2 size-4" />
-                  <span className="mr-3">Dark mode</span>
-                  <span
-                    className={`ml-auto inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
-                    aria-hidden
-                  >
-                    <span
-                      className={`inline-block size-4 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-4" : "translate-x-0.5"}`}
-                    />
-                  </span>
                 </MenuItem>
                 <MenuItem onClick={handleSettings} sx={menuItemSx}>
                   <Settings className="mr-2 size-4" /> Settings
@@ -192,14 +193,9 @@ export function TopNav() {
 
 function SearchBar() {
   const { query, setQuery } = useSearch();
-  const { pathname } = useLocation();
-  const navigate = useNavigate();
 
   const onChange = (next: string) => {
     setQuery(next);
-    // The results grid lives on the markets route, so searching from an event
-    // page jumps there where matches can render.
-    if (pathname !== "/markets") navigate("/markets");
   };
 
   return (

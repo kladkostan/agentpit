@@ -4,8 +4,12 @@ import type { GammaMarket } from "@/types/gamma";
 import type { Market, MarketState, PricesHistoryResponse } from "@/types/market";
 import { isoToUnix } from "@/api/gamma-utils";
 
+// `closed` wins over `active`: upstream Gamma can report a resolved market as
+// active AND closed, and every "live" surface in the UI (the resolved-event
+// filter in listEvents, the Active quick filter, the "N live" counter) must
+// agree on one definition — a closed market is never live.
 const _stateOf = (g: GammaMarket): MarketState =>
-  g.active ? "ACTIVE" : g.closed ? "CLOSED" : "DRAFT";
+  g.closed ? "CLOSED" : g.active ? "ACTIVE" : "DRAFT";
 
 /** Map a Gamma wire market into the UI's internal Market shape. */
 export function gammaToMarket(g: GammaMarket): Market {

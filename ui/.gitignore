@@ -8,6 +8,9 @@ dist-ssr
 .env.test.local
 .env.production.local
 
+# npm lockfile — this project is yarn-4 only, npm lockfiles must not be committed
+package-lock.json
+
 # Yarn Berry
 .pnp.*
 .yarn/*

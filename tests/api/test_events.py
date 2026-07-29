@@ -97,6 +97,66 @@ def test_list_events_rejects_bad_pagination(client_and_db):
     assert resp.status_code == 400
 
 
+def test_list_events_can_filter_by_category(client_and_db):
+    client, session = client_and_db
+    with session.write() as conn:
+        sports = TableWrite.upsert_event(
+            conn, slug="wc", title="World Cup", category="Sports"
+        )
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+    _seed_market(
+        session,
+        question="france?",
+        cond_id=_hex32("fr"),
+        event_id=sports.event_id,
+        outcome_label="France",
+    )
+
+    resp = client.get("/events?limit=10&offset=0&category=Sports")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Gamma shape: a bare list, no {events, total} envelope.
+    assert isinstance(body, list)
+    assert [e["slug"] for e in body] == ["wc"]
+    assert body[0]["category"] == "Sports"
+
+
+def test_list_events_category_filter_is_case_insensitive(client_and_db):
+    """The UI sends its own canonical label; a case drift must not silently
+    return zero events."""
+    client, session = client_and_db
+    with session.write() as conn:
+        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+
+    resp = client.get("/events?limit=10&offset=0&category=sPoRtS")
+    assert resp.status_code == 200
+    assert [e["slug"] for e in resp.json()] == ["wc"]
+
+
+def test_list_events_blank_category_is_treated_as_no_filter(client_and_db):
+    client, session = client_and_db
+    with session.write() as conn:
+        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+
+    resp = client.get("/events?limit=10&offset=0&category=%20")
+    assert resp.status_code == 200
+    assert {e["slug"] for e in resp.json()} == {"wc", "btc"}
+
+
+def test_list_event_categories_returns_distinct_categories(client_and_db):
+    client, session = client_and_db
+    with session.write() as conn:
+        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+        TableWrite.upsert_event(conn, slug="election", title="Election", category="Sports")
+
+    resp = client.get("/events/categories")
+    assert resp.status_code == 200
+    assert resp.json() == {"categories": ["Crypto", "Sports"]}
+
+
 # ----- GET /events/{slug} -----------------------------------------------------
 
 

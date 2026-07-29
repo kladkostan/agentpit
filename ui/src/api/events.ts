@@ -1,7 +1,12 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { GammaEvent } from "@/types/gamma";
-import type { Event, EventWithMarkets, ListEventsResponse } from "@/types/event";
+import type {
+  Event,
+  EventWithMarkets,
+  ListEventCategoriesResponse,
+  ListEventsResponse,
+} from "@/types/event";
 import { gammaToMarket } from "@/api/markets";
 import { isoToUnix } from "@/api/gamma-utils";
 import { parseVolume } from "@/lib/format";
@@ -11,6 +16,9 @@ export const EVENTS_PAGE_SIZE = 20;
 export interface ListEventsParams {
   limit: number;
   offset: number;
+  /** Case-insensitive event category filter; omitted/blank means "all".
+   *  Explicit `| undefined` because tsconfig sets exactOptionalPropertyTypes. */
+  category?: string | undefined;
 }
 
 function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
@@ -36,6 +44,9 @@ export async function listEvents(
     limit: String(params.limit),
     offset: String(params.offset),
   });
+  if (params.category) {
+    search.set("category", params.category);
+  }
   const wire = await apiFetch<GammaEvent[]>(`/events?${search.toString()}`);
   // A fully-resolved event has nothing tradeable left — hide it from listings
   // (its price is frozen at the pre-resolution level and only confuses).
@@ -53,23 +64,41 @@ export async function listEvents(
   };
 }
 
+export async function listEventCategories(): Promise<ListEventCategoriesResponse> {
+  return apiFetch<ListEventCategoriesResponse>("/events/categories");
+}
+
 export async function getEvent(slug: string): Promise<EventWithMarkets> {
   const g = await apiFetch<GammaEvent>(`/events/${encodeURIComponent(slug)}`);
   return gammaToEventWithMarkets(g);
 }
 
-export function useEventsInfinite() {
+export function useEventsInfinite(category: string | null = null) {
+  const normalizedCategory = category?.trim() || null;
   return useInfiniteQuery({
-    queryKey: ["events", "infinite", EVENTS_PAGE_SIZE],
+    // The category is part of the key so switching categories starts a fresh
+    // page chain instead of appending onto the previous category's pages.
+    queryKey: ["events", "infinite", EVENTS_PAGE_SIZE, normalizedCategory],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
-      listEvents({ limit: EVENTS_PAGE_SIZE, offset: pageParam }),
+      listEvents({
+        limit: EVENTS_PAGE_SIZE,
+        offset: pageParam,
+        category: normalizedCategory ?? undefined,
+      }),
     getNextPageParam: (lastPage) =>
       lastPage.hasMore ? lastPage.nextOffset : undefined,
     // Poll so newly-synced markets appear on the home page without a manual
     // refresh (a sync streams markets in over a few seconds). Only refetches
     // while the tab is visible (refetchIntervalInBackground defaults to false).
     refetchInterval: 5000,
+  });
+}
+
+export function useEventCategories() {
+  return useQuery({
+    queryKey: ["events", "categories"],
+    queryFn: listEventCategories,
   });
 }
 

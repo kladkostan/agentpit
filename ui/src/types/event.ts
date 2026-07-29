@@ -29,3 +29,7 @@ export interface ListEventsResponse {
   limit: number;
   offset: number;
 }
+
+export interface ListEventCategoriesResponse {
+  categories: string[];
+}

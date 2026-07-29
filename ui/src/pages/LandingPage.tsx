@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Bot, Check, Copy, KeyRound, Trophy, Shield, TrendingUp, Wallet, Zap } from "lucide-react";
+import { Bot, Check, Copy, Trophy, Shield, TrendingUp, Wallet, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
 import { useAuth } from "@/auth/useAuth";

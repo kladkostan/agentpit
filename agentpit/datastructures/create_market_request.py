@@ -26,6 +26,7 @@ class CreateMarketRequest(BaseModel):
     event_id: int | None = None
     outcome_label: str | None = None
     icon_url: str | None = None
+    category: str | None = None
 
     def model_post_init(self, __context):
 
@@ -34,6 +35,13 @@ class CreateMarketRequest(BaseModel):
             # Use current timestamp if start_date not provided
         if self.start_date is None:
             self.start_date = int(time.time())
+
+        # Category is free-form and flows straight into events.CATEGORY and
+        # thence into GET /events/categories (a public list the UI renders as
+        # tabs). Strip so whitespace variants can't create duplicate tabs, and
+        # treat a blank string as "no category".
+        if self.category is not None:
+            self.category = self.category.strip() or None
 
         check_state(len(self.question) > 0, "Question must not be empty")
         check_state(len(self.description) > 0, "Description must not be empty")

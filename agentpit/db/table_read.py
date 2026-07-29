@@ -362,7 +362,10 @@ class TableRead:
 
     @staticmethod
     def list_events_with_markets(
-        db: psycopg.Connection, limit: int = 100, offset: int = 0
+        db: psycopg.Connection,
+        limit: int = 100,
+        offset: int = 0,
+        category: str | None = None,
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ranked by upstream 24h volume, each paired with its
         child markets.
@@ -374,12 +377,27 @@ class TableRead:
         to the bottom, ordered newest-first as a stable tiebreak. One query for
         the event page + one for all member markets (bucketed in Python) — no
         N+1.
+
+        When ``category`` is given (blank/whitespace counts as absent) the page
+        is restricted to that category case-insensitively, so a case drift
+        between the label the UI sends and the label stored can't silently
+        return an empty page. ``total`` reflects the same filter.
         """
-        total = db.execute("SELECT COUNT(*) as CNT FROM events").fetchone()["CNT"]
+        where = ""
+        params: list[object] = []
+        normalized_category = category.strip() if category else None
+        if normalized_category:
+            where = " WHERE LOWER(CATEGORY) = LOWER(%s)"
+            params.append(normalized_category)
+
+        total = db.execute(
+            f"SELECT COUNT(*) as CNT FROM events{where}",
+            tuple(params),
+        ).fetchone()["CNT"]
         events_cur = db.execute(
-            f"SELECT {TableRead._EVENT_COLS} FROM events "
+            f"SELECT {TableRead._EVENT_COLS} FROM events{where} "
             "ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC LIMIT %s OFFSET %s",
-            (limit, offset),
+            tuple(params + [limit, offset]),
         )
         events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]
         if not events:
@@ -446,6 +464,27 @@ class TableRead:
             (*params, limit, offset),
         )
         return [_row_to_market(row) for row in cur.fetchall()]
+
+    @staticmethod
+    def list_event_categories(db: psycopg.Connection) -> "list[str]":
+        """Every distinct, non-blank event category, case-insensitively sorted.
+
+        Postgres rejects ``SELECT DISTINCT ... ORDER BY <expr>`` when the
+        expression is not in the select list, so the DISTINCT happens in a
+        subquery. ``COLLATE "C"`` is the explicit tiebreak that keeps the order
+        total (and "Sports" before "sports") whatever the server's lc_collate.
+        """
+        cur = db.execute(
+            """
+            SELECT c FROM (
+                SELECT DISTINCT CATEGORY AS c
+                FROM events
+                WHERE CATEGORY IS NOT NULL AND TRIM(CATEGORY) <> ''
+            ) s
+            ORDER BY LOWER(c) ASC, c COLLATE "C" ASC
+            """
+        )
+        return [str(row["c"]) for row in cur.fetchall()]
 
     @staticmethod
     def list_orphan_markets(db: psycopg.Connection) -> "list[Market]":

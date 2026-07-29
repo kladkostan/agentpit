@@ -43,13 +43,13 @@ def test_sync_polymarket_markets_syncs_real_markets_to_db(db):
     client = Web3Client(settings, deployment)
     admin = OnchainAdmin(client, Contracts(client.web3, deployment))
 
-    # Capture a small, single-page trending set ONCE. `order=volume_24hr` is a
+    # Capture a small, single-page trending set ONCE. `order=volume24hr` is a
     # live, churning feed, so re-fetching between syncs is non-deterministic
     # (the top-N shifts) — capture the upstream set and reuse it so the
     # idempotency check below is stable. A small cap also keeps the on-chain
     # prepareCondition work fast.
     pm_markets = fetch_all_polymarket_markets(
-        order="volume_24hr", max_markets=25, liquidity_threshold=0
+        order="volume24hr", max_markets=25, liquidity_threshold=0
     )
     created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
 
@@ -92,3 +92,20 @@ def test_build_request_extracts_upstream_token_ids():
     req = build_create_market_request_from_json(pm_market)
     assert req.polymarket_yes_token_id == "777"
     assert req.polymarket_no_token_id == "888"
+
+
+def test_fetch_all_polymarket_markets_requests_tags(monkeypatch):
+    """Without include_tag=true every market comes back with `tags: null`."""
+    from agentpit.polymarket import polymarket_sync
+
+    seen: list[str] = []
+
+    def fake_get(url: str):
+        seen.append(url)
+        return []
+
+    monkeypatch.setattr(polymarket_sync, "get", fake_get)
+    polymarket_sync.fetch_all_polymarket_markets(host="https://gamma.test")
+
+    assert seen
+    assert "include_tag=true" in seen[0]

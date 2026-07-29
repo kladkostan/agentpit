@@ -58,6 +58,29 @@ Consumed by BOTH compose (`--env-file`) and `deploy_exchange.sh` (sources it):
 - **uvicorn stays at 1 worker** — in-process caches + lifespan background loops (sync, liquidity engine, resolution mirror) must not run in N copies.
 - **anvil degrades as state grows** (seen in dev) — paper-reset ritual = stop stack, wipe `agentpit_anvil` volume + drop DB, re-run chain-init (documented, deliberate, wipes balances).
 
+## Incidents (2026-07-29) — both were silent, both are now guarded
+
+1. **Container logs filled the disk to 97%.** anvil logs every RPC call and the
+   mirror re-quotes ~1000 books continuously (~170 lines/s combined): 32 GB +
+   24 GB of json logs in 12 days, 2.6 GB free of 75 GB. Postgres would have
+   failed writes next. Fixed by the `x-logging` anchor (json-file, 50m x 3) on
+   every service. **Check on any deploy:** `df -h /` and
+   `du -sh /var/lib/docker/containers/*/*-json.log`.
+2. **anvil never persisted chain state — 12 days of chain silently lost.** The
+   foundry image runs as uid 1000, but Docker creates a named volume's
+   mountpoint root-owned when the path is absent from the image, so the
+   periodic `--state` dump failed with no error in the log. The chain looked
+   healthy until the first container recreate, which wiped every contract,
+   balance and position; the DB then pointed at conditions that no longer
+   existed (sync failed with `BadFunctionCallOutput` on all 1000 markets).
+   Fixed with `user: root` on the anvil service.
+   **Verify after EVERY first deploy — the failure mode is invisible otherwise:**
+   `docker run --rm -v agentpit_agentpit_anvil:/state alpine ls -la /state/`
+   must show `anvil-state.json` within one `--state-interval` (30s).
+   Recovery when it happens: re-run `chain-init`, then reset the DB (drop +
+   create; the app rebuilds the schema and re-syncs) — the two must be wiped
+   together, since market rows reference on-chain condition ids.
+
 ## Out of scope (this pass)
 
 - Domain/TLS (3-line switch later), CI builds/registry (build on server), moving the

@@ -166,6 +166,7 @@ Create a market. If `condition_id` is omitted and `outcome_labels` is supplied, 
 | `event_id` | int \| null | no | |
 | `outcome_label` | string \| null | no | |
 | `icon_url` | string \| null | no | |
+| `category` | string \| null | no | sets the category of the auto-wrapped singleton event; blank/whitespace is normalised to `null` |
 
 Response: `Market` — internal shape: `question`, `slug`, `market_id`, `polymarket_*` fields, `condition_id`, `description`, `erc1155_tokens`, `start_date`, `end_date`, `resolved_outcome`, `market_state`, `event_id`, `outcome_label`, `icon_url`, `fully_redeemed`.
 
@@ -207,14 +208,20 @@ Response: `Market` (with `resolved_outcome` set). Errors: `404` (`MarketNotFound
 Public, no auth.
 
 ### `GET /events`
-List events (each with its nested markets), Gamma shape. Response is cached per-process for 3s per `(limit, offset)` key to absorb polling bursts.
+List events (each with its nested markets), Gamma shape. Response is cached per-process for 3s per `(limit, offset, category)` key to absorb polling bursts.
 
 | Param | Type | Required | Notes |
 |---|---|---|---|
 | `limit` | int | no | default 100 |
 | `offset` | int | no | default 0 |
+| `category` | string | no | filter to one category; exact match, case-insensitive, surrounding whitespace stripped. Omitted, empty or whitespace-only means "no filter". |
 
-Response: array of `GammaEvent` — `id`, `slug`, `title`, `description`, `icon`, `category`, `startDate`, `endDate`, `volume24hr`, `markets` (array of `GammaMarket`).
+Response: array of `GammaEvent` — `id`, `slug`, `title`, `description`, `icon`, `category`, `startDate`, `endDate`, `volume24hr`, `markets` (array of `GammaMarket`). Note there is **no** `{events, total}` envelope — the array is the whole body.
+
+### `GET /events/categories`
+List the distinct categories currently in use, for populating the filter control. Public, no auth, no params.
+
+Response: `ListEventCategoriesResponse` — `{"categories": [string]}`. Values are distinct and sorted case-insensitively; `NULL` and empty categories are excluded, so a database with nothing categorised returns `{"categories": []}`. Declared **before** `GET /events/{slug}` so FastAPI's in-order matching does not read `categories` as a slug.
 
 ### `GET /events/{slug}`
 Fetch one event by slug.
@@ -532,3 +539,5 @@ Response: `{"version": "1.0"}` (freeform string map in the schema, but the handl
 ## Changelog
 
 Generated from the live OpenAPI schema (`app.openapi()`) on 2026-07-13, cross-checked against the route/service source. Regenerate by dumping `app.openapi()` again after route changes and diffing against this file.
+
+- **2026-07-28 — event categories.** `GET /events` gained an optional `category` query param (case-insensitive exact match; blank == no filter) and its response cache key widened from `(limit, offset)` to `(limit, offset, category)`. New public endpoint `GET /events/categories`. `POST /markets` gained an optional `category` field, applied to the auto-wrapped singleton event.

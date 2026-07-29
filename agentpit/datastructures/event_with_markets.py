@@ -14,3 +14,7 @@ class ListEventsResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class ListEventCategoriesResponse(BaseModel):
+    categories: list[str]

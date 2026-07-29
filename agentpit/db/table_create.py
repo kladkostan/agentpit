@@ -220,6 +220,13 @@ class TableCreate:
             "CREATE INDEX IF NOT EXISTS idx_events_volume_24hr "
             "ON events(VOLUME_24HR)"
         )
+        # Expression index matching the category filter's LOWER(CATEGORY)
+        # predicate in TableRead.list_events_with_markets — a plain btree on
+        # CATEGORY would not be usable there.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_category_lower "
+            "ON events(LOWER(CATEGORY))"
+        )
 
     @staticmethod
     def create_transactions_table(conn: psycopg.Connection) -> None:

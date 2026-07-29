@@ -1,4 +1,5 @@
 from agentpit.datastructures.event_with_markets import (
+    ListEventCategoriesResponse,
     EventWithMarkets,
     ListEventsResponse,
 )
@@ -15,14 +16,19 @@ class EventService:
     def __init__(self, db: DbSession):
         self._db = db
 
-    def list_events(self, limit: int, offset: int) -> ListEventsResponse:
+    def list_events(
+        self, limit: int, offset: int, category: str | None = None
+    ) -> ListEventsResponse:
         if limit < 1 or limit > 1000:
             raise InvalidPaginationError("limit must be between 1 and 1000")
         if offset < 0:
             raise InvalidPaginationError("offset must be non-negative")
         with self._db.read() as conn:
             pairs, total = TableRead.list_events_with_markets(
-                conn, limit=limit, offset=offset
+                conn,
+                limit=limit,
+                offset=offset,
+                category=category,
             )
         events = [
             EventWithMarkets(event=event, markets=markets) for event, markets in pairs
@@ -31,14 +37,16 @@ class EventService:
             events=events, total=total, limit=limit, offset=offset
         )
 
-    def list_events_gamma(self, limit: int, offset: int) -> list[GammaEvent]:
+    def list_events_gamma(
+        self, limit: int, offset: int, category: str | None = None
+    ) -> list[GammaEvent]:
         if limit < 1 or limit > 1000:
             raise InvalidPaginationError("limit must be between 1 and 1000")
         if offset < 0:
             raise InvalidPaginationError("offset must be non-negative")
         with self._db.read() as conn:
             pairs, _total = TableRead.list_events_with_markets(
-                conn, limit=limit, offset=offset
+                conn, limit=limit, offset=offset, category=category
             )
             all_markets = [m for _event, markets in pairs for m in markets]
             prices = prices_for_markets(conn, all_markets)
@@ -52,6 +60,11 @@ class EventService:
             markets = TableRead.list_markets_by_event_id(conn, event.event_id)
             prices = prices_for_markets(conn, markets)
         return to_gamma_event(event, markets, prices)
+
+    def list_categories(self) -> ListEventCategoriesResponse:
+        with self._db.read() as conn:
+            categories = TableRead.list_event_categories(conn)
+        return ListEventCategoriesResponse(categories=categories)
 
     def get_event_by_slug(self, slug: str) -> EventWithMarkets:
         with self._db.read() as conn:
@@ -77,7 +90,11 @@ class EventService:
                 wrapped += 1
         return wrapped
 
-    def wrap_market_in_singleton_event_if_needed(self, market_id: int) -> None:
+    def wrap_market_in_singleton_event_if_needed(
+        self,
+        market_id: int,
+        category: str | None = None,
+    ) -> None:
         """Enforce the "every market belongs to an event" invariant for a
         single market — e.g. after `POST /markets` creates a local market
         with no event_id. No-op if the market is already bound.
@@ -86,15 +103,16 @@ class EventService:
             market = TableRead.read_market(conn, market_id)
             if market is None or market.event_id is not None:
                 return
-            _bind_singleton(conn, market)
+            _bind_singleton(conn, market, category=category)
 
 
-def _bind_singleton(conn, market) -> None:
+def _bind_singleton(conn, market, category: str | None = None) -> None:
     event = TableWrite.upsert_event(
         conn,
         slug=market.slug,
         title=market.question,
         description=market.description,
+        category=category,
         start_date=market.start_date,
         end_date=market.end_date,
     )
