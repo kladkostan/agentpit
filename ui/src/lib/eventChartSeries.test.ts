@@ -19,6 +19,9 @@ function fakeMarket(id: number, label: string): Market {
     event_id: null,
     outcome_label: label,
     icon_url: null,
+    outcome_prices: [],
+    best_bid: null,
+    best_ask: null,
   } as Market;
 }
 

@@ -26,3 +26,33 @@ export function sortMarketsByYesMid(
     })
     .map(({ market }) => market);
 }
+
+/** YES price per market id, taken straight from the list payload
+ *  (`outcome_prices[0]`). Markets with no usable price are absent from the
+ *  map — which is exactly what `sortMarketsByYesMid` treats as unknown and
+ *  sorts last. */
+export function yesPriceMap(
+  markets: readonly Market[],
+): ReadonlyMap<number, number> {
+  const out = new Map<number, number>();
+  for (const m of markets) {
+    const price = m.outcome_prices[0];
+    if (typeof price === "number" && Number.isFinite(price)) {
+      out.set(m.market_id, price);
+    }
+  }
+  return out;
+}
+
+/** Cents to BUY each side. YES costs its own best ask. NO is acquired through
+ *  the YES book — the payload carries one bid/ask pair, describing YES — so it
+ *  costs 1 − the YES best bid. */
+export function buyChipCents(market: Market): {
+  yes: number | null;
+  no: number | null;
+} {
+  return {
+    yes: market.best_ask !== null ? market.best_ask * 100 : null,
+    no: market.best_bid !== null ? (1 - market.best_bid) * 100 : null,
+  };
+}

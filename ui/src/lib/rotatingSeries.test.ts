@@ -25,6 +25,9 @@ function win(id: number, endSec: number, state: MarketState = "ACTIVE"): Market 
     event_id: 1,
     outcome_label: null,
     icon_url: null,
+    outcome_prices: [],
+    best_bid: null,
+    best_ask: null,
   };
 }
 

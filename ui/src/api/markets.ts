@@ -11,6 +11,25 @@ import { isoToUnix } from "@/api/gamma-utils";
 const _stateOf = (g: GammaMarket): MarketState =>
   g.closed ? "CLOSED" : g.active ? "ACTIVE" : "DRAFT";
 
+/** Parse Gamma's JSON-encoded price array (e.g. `'["0.16","0.84"]'`). These
+ *  values are presentational, so any malformed input yields [] instead of
+ *  throwing — a bad payload must never blank a page. */
+function parseOutcomePrices(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const nums = parsed.map((p) => Number(p));
+    return nums.every((n) => Number.isFinite(n)) ? nums : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The wire uses 0.0 for "no resting order on this side". */
+const _touch = (value: number | null | undefined): number | null =>
+  typeof value === "number" && value > 0 ? value : null;
+
 /** Map a Gamma wire market into the UI's internal Market shape. */
 export function gammaToMarket(g: GammaMarket): Market {
   const labels = JSON.parse(g.outcomes) as string[];
@@ -30,6 +49,9 @@ export function gammaToMarket(g: GammaMarket): Market {
     event_id: null,
     outcome_label: g.groupItemTitle ?? null,
     icon_url: g.icon,
+    outcome_prices: parseOutcomePrices(g.outcomePrices),
+    best_bid: _touch(g.bestBid),
+    best_ask: _touch(g.bestAsk),
   };
 }
 
