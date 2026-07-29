@@ -102,4 +102,23 @@ describe("buyChipCents", () => {
     expect(yes).toBeNull();
     expect(no).toBeNull();
   });
+
+  it("computes each side independently in the mixed shape (one side quoted, one not)", () => {
+    // 19 of 203 production markets have exactly one side resting.
+    const bidOnly = buyChipCents({
+      ...m(1, "a", 0.62),
+      best_bid: 0.6,
+      best_ask: null,
+    });
+    expect(bidOnly.yes).toBeNull();
+    expect(bidOnly.no).toBeCloseTo(40, 5);
+
+    const askOnly = buyChipCents({
+      ...m(1, "a", 0.62),
+      best_bid: null,
+      best_ask: 0.64,
+    });
+    expect(askOnly.yes).toBeCloseTo(64, 5);
+    expect(askOnly.no).toBeNull();
+  });
 });

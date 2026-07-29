@@ -83,8 +83,9 @@ export function useMarket(id: number | string | undefined) {
       return getMarket(id);
     },
     enabled: id !== undefined,
-    // The probability now rides on the market payload rather than a 30s book
-    // poll, so this query has to refresh it — one request instead of N.
+    // MarketDetailPage renders no payload-derived price (Orderbook/OrderTicket
+    // own their own book polls) — this poll exists to keep market_state
+    // current, since that's what gates trading (isTradingDisabled).
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   });

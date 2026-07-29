@@ -122,3 +122,56 @@ than the 30 s they have today.
 - Batching `prices-history` (11 requests on the event page — sparklines).
 - A server-side TTL cache for `/book` or `/prices-history`.
 - Any backend change: every field this needs is already in the payload.
+
+## Correction (post-ship review, 2026-07-29)
+
+The final review found this design understated its user-visible surface. It is
+not just the No-chip fidelity change in §2 — two more changes ship with it:
+
+**(a) The event page's auto-expanded row now selects a different market.**
+Before this change, `useYesMidMap` returned an empty map on the first render
+that had data, so `ordered` (`sortMarketsByYesMid`) was still payload order on
+that render, and `autoSelectedSlugRef` in `EventDetailPage` latched onto
+`markets[0]` — whichever market Gamma happened to list first, not the most
+likely outcome. Now `yesPriceMap` is populated synchronously from the same
+render that has `data`, so `ordered[0]` is genuinely the top-probability
+market and that is what gets auto-selected. This matches the code's own
+stated intent at `ui/src/pages/EventDetailPage.tsx:64-66` ("otherwise the
+top-ranked outcome") — the comment was already describing the desired
+behavior, the implementation just raced it on first paint. It already
+happened correctly when navigating from a warm home page (react-query cache
+hit → synchronous data on mount), so this is an accidental fix of a
+first-load-only bug, not a new behavior — it should not be reverted.
+
+The same root cause makes `EventChart`'s top-4 series pick
+(`pickChartSeries(markets, midByMarket, CHART_PALETTE, 4)`) stable from first
+paint instead of reshuffling as individual book requests landed and
+`midByMarket` grew entry by entry.
+
+**(b) The "no price" state is now effectively unreachable, not merely rare.**
+The design above (and the plan) treats a market with no book and no tape as
+still producing `null`/absent prices, rendered as a dimmed em dash. That is no
+longer true of the server this UI talks to: `_price_fields`
+(`agentpit/polymarket/gamma.py:40-47`) falls back to `outcomePrices:
+["0.5", ...]`, `bestBid: 0.0`, `bestAsk: 0.0` whenever there is no
+`MarketPrices` or an outcome-count mismatch, and `compute_market_prices`
+(`agentpit/polymarket/pricing.py:69-75`) falls back further, per outcome, to
+the binary complement and then to `PRICE_ONE // 2` (0.5) — there is no path
+through either function that omits `outcomePrices` or leaves an outcome
+price absent. The server **always** emits a price. A market with no book and
+no tape therefore renders a confident, undimmed "50" — not the dimmed "—" a
+genuinely-missing price would produce. As of this review, 0 of 203 production
+markets hit this path.
+
+The UI's defensive "no price" branches — `formatProbabilityPct(null)` → "—",
+`MarketCard`'s `outcome_prices[0] === undefined` dim check,
+`EventLeaderboardRow`'s `yesMid === null` dim check, and
+`sortMarketsByYesMid`'s "unknown mid sorts last" branch in
+`ui/src/lib/eventOutcomes.ts` — are kept deliberately, even though none of
+them currently fire against this server. They are correct for the `Market`
+type's actual contract (`outcome_prices: number[]`, which can be `[]`, and
+`best_bid`/`best_ask: number | null`) and for any payload that doesn't carry
+the server's always-fill-0.5 guarantee (a different backend, a test fixture,
+a future change to `_price_fields`). Removing them would be optimizing for
+one server implementation detail rather than the type the UI actually
+declares.

@@ -28,8 +28,9 @@ const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
 
 export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
+  const yesPrice = market.outcome_prices[0];
   const { data: spark } = usePricesHistory(yesTokenId);
-  const yesPctLabel = formatProbabilityPct(market.outcome_prices[0] ?? null);
+  const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
   const closes = formatShortDate(market.end_date);
   const href = eventSlug
@@ -77,7 +78,7 @@ export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
             <div
               className={cn(
                 "flex items-baseline gap-1",
-                market.outcome_prices[0] === undefined
+                yesPrice === undefined
                   ? "text-muted-foreground/50"
                   : "text-foreground",
               )}

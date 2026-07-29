@@ -3,7 +3,8 @@ import type { Market } from "@/types/market";
 /**
  * Sort markets by descending YES mid price (cents in [0, 1]).
  * Markets with no known mid fall to the bottom in their original order so
- * outcomes never disappear from the list while their orderbook is loading.
+ * outcomes never disappear from the list — no orderbook loads for this
+ * anymore, but the price can still be absent (an empty `outcome_prices`).
  */
 export function sortMarketsByYesMid(
   markets: readonly Market[],

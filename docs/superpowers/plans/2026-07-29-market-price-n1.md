@@ -465,8 +465,36 @@ refresh the book queries used to provide."
 
 - [ ] **Step 1: Serve the built UI against the production API**
 
+> **Correction (post-ship review, 2026-07-29):** the command below does not
+> work as written. Serving the UI on `localhost:5199` and pointing
+> `VITE_API_BASE_URL` at `http://23.88.62.130:8000` fails outright — every
+> request is blocked by CORS, because production's `AGENTPIT_CORS_ORIGINS`
+> allowlist contains only `http://23.88.62.130` (`agentpit/config.py:116-117`
+> / `agentpit/api/app.py:499-500`), not `http://localhost:5199`. The method
+> that actually worked was a **temporary same-origin proxy**: add a `proxy`
+> block to `ui/vite.config.ts` for the duration of the measurement (not
+> committed) so the browser only ever talks to `localhost`, and Vite forwards
+> `/api/*` server-side to production —
+>
+> ```ts
+> server: {
+>   port: 5199,
+>   proxy: {
+>     "/api": {
+>       target: "http://23.88.62.130:8000",
+>       changeOrigin: true,
+>       rewrite: (path) => path.replace(/^\/api/, ""),
+>     },
+>   },
+> },
+> ```
+>
+> then point the app at the proxy instead of the raw host: `VITE_API_BASE_URL=/api`.
+> Revert `vite.config.ts` after measuring — this is a throwaway measurement
+> rig, not a feature.
+
 ```bash
-cd ui && VITE_API_BASE_URL=http://23.88.62.130:8000 npx vite --port 5199
+cd ui && VITE_API_BASE_URL=/api npx vite --port 5199
 ```
 
 Leave it running for the next steps. (The production API is public; no key is needed for `/events`, `/markets` or `/book`.)
@@ -508,4 +536,17 @@ Stop the vite process. Report the before/after table in the final summary: home 
 
 - The whole change is UI-only. If you find yourself editing anything under `agentpit/`, stop — the data you need is already on the wire.
 - Do not "fix" `deriveNoAsk` or delete it: it is still exercised by `orderMath.test.ts` and belongs to the order-book module.
-- `formatProbabilityPct` already renders `null` as an em dash, so a market with no price shows "—" exactly as it does today.
+- **Correction (post-ship review, 2026-07-29):** the line that used to be here —
+  "`formatProbabilityPct` already renders `null` as an em dash, so a market
+  with no price shows '—' exactly as it does today" — was wrong about the
+  server contract. `agentpit/polymarket/gamma.py:40-47` and
+  `agentpit/polymarket/pricing.py:69-75` guarantee `outcomePrices` is always
+  populated, falling back all the way to `0.5` per outcome when there is no
+  book and no trade. `outcome_prices[0]` is therefore never absent from a
+  live server today, so the dimmed "—" path is not reachable in production —
+  a market with truly no price now renders a confident, undimmed "50", which
+  is a real behavior change from the pre-migration client (whose own book
+  fetch could genuinely come back empty). `formatProbabilityPct(null)` and
+  the dimmed-state checks in `MarketCard` / `EventLeaderboardRow` are kept
+  because they are still correct for the `Market` type's declared contract
+  (`outcome_prices` can be `[]`), not because this server will exercise them.
