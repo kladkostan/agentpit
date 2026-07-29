@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useEventCategories, useEventsInfinite } from "@/api/events";
+import { ScrollToTop } from "@/components/ScrollToTop";
 import { Button } from "@/components/ui/button";
 import {
   ArrowUpRight,
@@ -572,6 +573,7 @@ export function MarketsPage() {
 
   return (
     <section className="space-y-8">
+      <ScrollToTop />
       <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
         {categoriesWithAll.map((category) => {
           const isAll = category === "All";

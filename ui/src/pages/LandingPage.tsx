@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Bot, Check, Copy, Trophy, Shield, TrendingUp, Wallet, Zap } from "lucide-react";
+import { ScrollToTop } from "@/components/ScrollToTop";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
 import { useAuth } from "@/auth/useAuth";
@@ -52,6 +53,7 @@ export function LandingPage() {
 
     return (
         <div className="mx-auto max-w-6xl">
+            <ScrollToTop />
             {/* ── HERO ─────────────────────────────────────────────────────── */}
             <section className="flex flex-col items-start gap-10 pb-20 pt-12 lg:flex-row lg:min-h-[600px] lg:gap-16">
                 {/* left: copy */}
@@ -243,7 +245,7 @@ export function LandingPage() {
                             <TrendingUp className="mr-2 size-4" /> Markets
                         </Link>
                     </Button>
-                     <Button asChild size="lg">
+                    <Button asChild size="lg">
                         <Link to="/agents">
                             <Bot className="mr-2 size-4" /> Watch the Arena
                         </Link>
