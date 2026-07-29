@@ -1,6 +1,5 @@
-import { bestAsk, deriveNoAsk } from "@/components/orders/orderMath";
+import { buyChipCents } from "@/lib/eventOutcomes";
 import { formatProbabilityPct } from "@/lib/format";
-import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
 
@@ -51,21 +50,15 @@ export function EventLeaderboardRow({
   onToggleMarket,
   onPickOutcome,
 }: EventLeaderboardRowProps) {
-  const yesTokenId = market.erc1155_tokens[0]?.[0];
-  const noTokenId = market.erc1155_tokens[1]?.[0];
   const yesLabel = market.erc1155_tokens[0]?.[1];
   const noLabel = market.erc1155_tokens[1]?.[1];
-  const yes = useOutcomeMid(yesTokenId);
-  const no = useOutcomeMid(noTokenId);
-  // The Yes/No chips are buy entry points, so show the price to BUY each
-  // outcome — the order book's best ask — which agrees with the book to the
-  // cent. The big % stays the mid (the market's implied probability).
-  const yesAsk = yes.data ? bestAsk(yes.data.asks) : null;
-  const noAsk = deriveNoAsk(no.data?.asks ?? [], yes.data?.bids ?? []);
-  // Convert dollars to cents for display
-  const yesCents = yesAsk !== null ? yesAsk * 100 : null;
-  const noCents = noAsk !== null ? noAsk * 100 : null;
-  const yesPctLabel = formatProbabilityPct(yes.mid);
+  // The Yes/No chips are buy entry points: YES costs its own best ask, and NO
+  // is acquired through the YES book, so it costs 1 − the YES best bid. Both
+  // come from the market payload — the row used to fetch two order books for
+  // this, which is 52 of the event page's 58 book requests.
+  const { yes: yesCents, no: noCents } = buyChipCents(market);
+  const yesMid = market.outcome_prices[0] ?? null;
+  const yesPctLabel = formatProbabilityPct(yesMid);
   const label = market.outcome_label ?? market.question;
 
   return (
@@ -94,7 +87,7 @@ export function EventLeaderboardRow({
           <span
             className={cn(
               "text-2xl font-semibold leading-none tabular-nums",
-              yes.mid === null && "text-muted-foreground/40",
+              yesMid === null && "text-muted-foreground/40",
             )}
           >
             {yesPctLabel}

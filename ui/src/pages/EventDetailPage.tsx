@@ -8,10 +8,9 @@ import { OrderTicket } from "@/components/orders/OrderTicket";
 import { RotatingSeriesPanel } from "@/components/RotatingSeriesPanel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
+import { sortMarketsByYesMid, yesPriceMap } from "@/lib/eventOutcomes";
 import { detectRotatingSeries } from "@/lib/rotatingSeries";
 import { formatLongDate } from "@/lib/format";
-import { useYesMidMap } from "@/lib/useYesMid";
 import type { MarketState } from "@/types/market";
 
 const NON_TRADEABLE: ReadonlySet<MarketState> = new Set([
@@ -45,7 +44,7 @@ export function EventDetailPage() {
     autoSelectedSlugRef.current = null;
   }, [slug]);
 
-  const midByMarket = useYesMidMap(data?.markets ?? []);
+  const midByMarket = useMemo(() => yesPriceMap(data?.markets ?? []), [data]);
   const ordered = useMemo(
     () => (data ? sortMarketsByYesMid(data.markets, midByMarket) : []),
     [data, midByMarket],
