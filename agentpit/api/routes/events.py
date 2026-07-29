@@ -16,6 +16,10 @@ router = APIRouter(tags=["events"])
 # filtered page would be served to an unfiltered request (and vice versa) for
 # up to one TTL. Per-process; staleness is bounded by the TTL.
 _EVENTS_TTL_S = 3.0
+# `category` is caller-supplied, so the key space is unbounded: without a cap,
+# `/events?category=<random>` in a loop grows this dict forever (entries are
+# never swept — a stale one is only overwritten when its exact key repeats).
+_EVENTS_CACHE_MAX = 256
 _events_cache: dict[tuple[int, int, str | None], tuple[float, list[GammaEvent]]] = {}
 
 
@@ -36,6 +40,9 @@ def _list_events_cached(
     if hit is not None and now - hit[0] < _EVENTS_TTL_S:
         return hit[1]
     result = service.list_events_gamma(limit=limit, offset=offset, category=normalized)
+    # Entries live 3s, so a plain flush at the cap is enough — no LRU needed.
+    if len(_events_cache) >= _EVENTS_CACHE_MAX:
+        _events_cache.clear()
     _events_cache[key] = (now, result)
     return result
 

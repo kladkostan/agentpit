@@ -7,7 +7,11 @@ page to every other category.
 """
 
 import agentpit.api.routes.events as events
-from agentpit.api.routes.events import _EVENTS_TTL_S, _list_events_cached
+from agentpit.api.routes.events import (
+    _EVENTS_CACHE_MAX,
+    _EVENTS_TTL_S,
+    _list_events_cached,
+)
 
 
 class _FakeService:
@@ -76,3 +80,12 @@ def test_unfiltered_page_is_not_served_to_a_filtered_request():
     )
     assert svc.calls == 2
     assert unfiltered != filtered
+
+
+def test_cache_is_bounded_against_junk_categories():
+    """`category` is caller-supplied, so the key space is unbounded. A flood of
+    distinct categories must not grow the cache without limit."""
+    svc = _FakeService()
+    for i in range(_EVENTS_CACHE_MAX * 2):
+        _list_events_cached(svc, limit=20, offset=0, category=f"junk-{i}", now=100.0)
+    assert len(events._events_cache) <= _EVENTS_CACHE_MAX
