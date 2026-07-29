@@ -6,6 +6,7 @@ non-crossed per token AND across the YES/NO complement map, so the mirror can
 never self-match — provided cancels are applied before placements.
 """
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -104,15 +105,24 @@ def is_hot_level(
 
 
 def diff_levels(
-    desired: list[Placement], current: list[LiveLevel]
+    desired: list[Placement],
+    current: list[LiveLevel],
+    protect: "Callable[[LiveLevel], bool] | None" = None,
 ) -> tuple[list[str], list[Placement]]:
     """(order_ids to cancel, placements to make). Orders are immutable, so a
     size change at a level is cancel + re-place. One live order per
-    (token, side, price) is kept; duplicates are cancelled."""
+    (token, side, price) is kept; duplicates are cancelled.
+
+    `protect` marks live orders that are OUT OF SCOPE for this pass: they are
+    neither cancelled nor counted as satisfying a desired level. A hot pass
+    protects the cold band so it does not wipe the deep book on every update.
+    """
     want = {(d.token_id, d.side, d.price_micro): d.size_micro for d in desired}
     keep: set[tuple[str, str, int]] = set()
     cancels: list[str] = []
     for o in current:
+        if protect is not None and protect(o):
+            continue
         key = (o.token_id, o.side, o.price_micro)
         if key in want and want[key] == o.size_micro and key not in keep:
             keep.add(key)

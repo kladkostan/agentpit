@@ -197,3 +197,39 @@ def test_is_hot_level_follows_the_touch_when_price_moves():
     assert is_hot_level(YES, "BUY", 380_000, hot_cuts(deep, 2), YES) is False
     moved = _snap(bids=[(380_000, 1), (370_000, 1)], asks=[(410_000, 1)])
     assert is_hot_level(YES, "BUY", 380_000, hot_cuts(moved, 2), YES) is True
+
+
+def test_diff_leaves_protected_levels_alone():
+    # Desired covers only the top level; the deep one is protected and must
+    # survive untouched — this is the regression that would wipe the cold book.
+    desired = [Placement(YES, "BUY", 400_000, 10)]
+    current = [
+        LiveLevel("o-hot", YES, "BUY", 400_000, 10),
+        LiveLevel("o-cold", YES, "BUY", 300_000, 10),
+    ]
+    cancels, places = diff_levels(
+        desired, current, protect=lambda o: o.price_micro == 300_000
+    )
+    assert cancels == []          # neither the kept hot level nor the cold one
+    assert places == []           # hot level already matches
+
+
+def test_diff_without_protect_still_cancels_everything_unwanted():
+    desired = [Placement(YES, "BUY", 400_000, 10)]
+    current = [
+        LiveLevel("o-hot", YES, "BUY", 400_000, 10),
+        LiveLevel("o-cold", YES, "BUY", 300_000, 10),
+    ]
+    cancels, places = diff_levels(desired, current)
+    assert cancels == ["o-cold"]  # unchanged legacy behaviour
+    assert places == []
+
+
+def test_diff_protected_level_is_not_treated_as_satisfying_a_desired_level():
+    # A protected order at a desired price must not suppress the placement:
+    # protection means "out of scope", not "already handled".
+    desired = [Placement(YES, "BUY", 400_000, 10)]
+    current = [LiveLevel("o-x", YES, "BUY", 400_000, 10)]
+    cancels, places = diff_levels(desired, current, protect=lambda o: True)
+    assert cancels == []
+    assert places == [Placement(YES, "BUY", 400_000, 10)]
