@@ -43,6 +43,12 @@ services:
     image: ghcr.io/foundry-rs/foundry:latest
     restart: unless-stopped
     logging: *default-logging
+    # The image runs as uid 1000 (foundry), but Docker creates the mountpoint
+    # for a named volume root-owned when the path doesn't exist in the image —
+    # so anvil could not write /state/anvil-state.json and its periodic dump
+    # failed SILENTLY. The chain looked healthy for 12 days and was wiped clean
+    # by the first container recreate. Run as root so the dump always lands.
+    user: root
     entrypoint:
       - anvil
       - --host
