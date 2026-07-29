@@ -104,6 +104,32 @@ def is_hot_level(
     return p <= cuts.ask_cut
 
 
+def tier_plan(
+    snap: BookSnapshot,
+    yes_token: str,
+    no_token: str,
+    *,
+    hot_depth: int,
+    max_depth: int,
+    cold: bool,
+) -> tuple[list[Placement], "Callable[[LiveLevel], bool] | None"]:
+    """What one reconcile pass should target, and what it must leave alone.
+
+    Cold pass: the full cap, protecting nothing — it also prunes deep levels
+    that vanished upstream. Hot pass: the hot band only, protecting every live
+    order outside it. When the hot depth already covers the cap there is no
+    cold band, so the hot pass IS the full reconcile and protects nothing —
+    that is the shipped default and it is identical to the legacy behaviour.
+    """
+    if cold or hot_depth <= 0 or (0 < max_depth <= hot_depth):
+        return desired_levels(snap, yes_token, no_token, max_depth), None
+    cuts = hot_cuts(snap, hot_depth)
+    desired = desired_levels(snap, yes_token, no_token, hot_depth)
+    return desired, lambda o: not is_hot_level(
+        o.token_id, o.side, o.price_micro, cuts, yes_token
+    )
+
+
 def diff_levels(
     desired: list[Placement],
     current: list[LiveLevel],
@@ -211,6 +237,8 @@ def reconcile_market(
     ref,                       # feed.MarketRef (duck-typed to avoid an import cycle)
     snap: BookSnapshot,
     cfg: Settings,
+    *,
+    cold: bool = False,
 ) -> dict:
     """Converge the local books (YES + NO complement) to the snapshot.
     Cancels strictly before placements (spec §5). Placements that would cross
@@ -231,9 +259,13 @@ def reconcile_market(
                   int(r["PRICE"]), int(r["REMAINING_AMOUNT"]))
         for r in rows
     ]
-    cancels, places = diff_levels(
-        desired_levels(snap, ref.yes_token, ref.no_token, cfg.mirror_book_depth),
-        current)
+    desired, protect = tier_plan(
+        snap, ref.yes_token, ref.no_token,
+        hot_depth=cfg.mirror_hot_depth,
+        max_depth=cfg.mirror_book_depth,
+        cold=cold,
+    )
+    cancels, places = diff_levels(desired, current, protect=protect)
 
     splits = 0
     try:

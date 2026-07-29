@@ -2,7 +2,7 @@
 from agentpit.liquidity.replica import MICRO, BookSnapshot
 from agentpit.liquidity.reconciler import (
     HotCuts, LiveLevel, Placement, cap_sells_to_inventory, desired_levels,
-    diff_levels, hot_cuts, is_hot_level, split_target_micro,
+    diff_levels, hot_cuts, is_hot_level, split_target_micro, tier_plan,
 )
 
 YES, NO = "tok-yes", "tok-no"
@@ -233,3 +233,37 @@ def test_diff_protected_level_is_not_treated_as_satisfying_a_desired_level():
     cancels, places = diff_levels(desired, current, protect=lambda o: True)
     assert cancels == []
     assert places == [Placement(YES, "BUY", 400_000, 10)]
+
+
+def test_tier_plan_hot_pass_targets_only_the_hot_band():
+    snap = _snap(
+        bids=[(400_000, 1), (390_000, 1), (380_000, 1)],
+        asks=[(410_000, 1), (420_000, 1), (430_000, 1)],
+    )
+    desired, protect = tier_plan(snap, YES, NO, hot_depth=2, max_depth=50, cold=False)
+    yes_buys = sorted(d.price_micro for d in desired if d.token_id == YES and d.side == "BUY")
+    assert yes_buys == [390_000, 400_000]          # only the hot 2 bids
+    assert protect is not None
+    # a live cold order is protected, a live hot order is not
+    assert protect(LiveLevel("c", YES, "BUY", 380_000, 1)) is True
+    assert protect(LiveLevel("h", YES, "BUY", 400_000, 1)) is False
+
+
+def test_tier_plan_cold_pass_targets_the_full_cap_and_protects_nothing():
+    snap = _snap(
+        bids=[(400_000, 1), (390_000, 1), (380_000, 1)],
+        asks=[(410_000, 1)],
+    )
+    desired, protect = tier_plan(snap, YES, NO, hot_depth=2, max_depth=3, cold=True)
+    yes_buys = sorted(d.price_micro for d in desired if d.token_id == YES and d.side == "BUY")
+    assert yes_buys == [380_000, 390_000, 400_000]  # full cap
+    assert protect is None                          # cold prunes stale levels
+
+
+def test_tier_plan_hot_equals_cap_behaves_like_today():
+    # The shipped default: hot 8 == cap 8. Nothing is protected, so a hot pass
+    # is exactly the legacy single-tier reconcile.
+    snap = _snap(bids=[(400_000, 1), (390_000, 1)], asks=[(410_000, 1)])
+    desired, protect = tier_plan(snap, YES, NO, hot_depth=8, max_depth=8, cold=False)
+    assert desired == desired_levels(snap, YES, NO, 8)
+    assert protect is None
