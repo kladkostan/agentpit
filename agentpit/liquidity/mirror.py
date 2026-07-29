@@ -52,13 +52,17 @@ def cold_seed(asset: str, interval: float, now: float) -> float:
     Without this every market is due for its first cold sweep the moment the
     process starts, and a boot would place the whole deep book for every
     market at once. Hashing with hashlib (not the salted built-in hash) keeps
-    a market's slot stable across restarts.
+    a market's slot stable across restarts. The offset is a fraction of the
+    interval rather than `% int(interval)`, so this is well-defined for any
+    positive interval — including sub-second ones, where the integer modulo
+    raised `ZeroDivisionError`, and ones in `[1, 2)`, where it collapsed to a
+    constant 0 and defeated the stagger.
     """
     if interval <= 0:
         return now
     digest = hashlib.sha256(asset.encode()).digest()
-    offset = int.from_bytes(digest[:8], "big") % int(interval)
-    return now - offset
+    frac = int.from_bytes(digest[:8], "big") / 2**64  # [0, 1)
+    return now - frac * interval
 
 
 def cold_due(last_cold: float, interval: float, now: float) -> bool:

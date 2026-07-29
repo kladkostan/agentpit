@@ -191,8 +191,12 @@ class Settings(BaseSettings):
         default=15.0, validation_alias="AGENTPIT_MIRROR_TARGET_REFRESH_SECONDS"
     )
     # Total depth cap per side. The cold sweep converges the local book to this
-    # many levels; 0 = unbounded (full 1:1). Each level is ~4 DB order ops, so
-    # this bounds the size of the orders table, not the hot-path cost.
+    # many levels; 0 = unbounded (full 1:1). This is a convergence target, not
+    # a hard ceiling: a hot pass never cancels a cold-classified order, so the
+    # live count between sweeps can exceed it on a fast-moving market. Each
+    # level is ~4 DB order ops, and reconcile_market reads ALL house levels
+    # for the market on every hot pass, so hot-path cost tracks that
+    # accumulated live set, not mirror_hot_depth.
     mirror_book_depth: int = Field(
         default=8, validation_alias="AGENTPIT_MIRROR_BOOK_DEPTH"
     )

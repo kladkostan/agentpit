@@ -117,7 +117,7 @@ work the pass runs once, in cold mode, rather than twice.
 | setting | default | meaning |
 |---|---|---|
 | `AGENTPIT_MIRROR_HOT_DEPTH` | 8 | levels per side reconciled on every dirty event |
-| `AGENTPIT_MIRROR_BOOK_DEPTH` | 50 | **now the total cap**, converged by the cold sweep |
+| `AGENTPIT_MIRROR_BOOK_DEPTH` | 8 | **now the total cap**, converged by the cold sweep |
 | `AGENTPIT_MIRROR_COLD_INTERVAL_SECONDS` | 1800 | per-market cold cadence |
 
 Production currently sets `AGENTPIT_MIRROR_BOOK_DEPTH=8`. With hot depth also 8,
@@ -157,11 +157,33 @@ To enable, raise the cap in the production `.env` to
 `AGENTPIT_MIRROR_BOOK_DEPTH=50` and restart the api container. Expect the
 deep book to fill in gradually over the first `AGENTPIT_MIRROR_COLD_INTERVAL_SECONDS`
 (30 min) rather than at once — the sweeps are staggered per market by design.
+That "fills in gradually" describes the steady-state population, not every
+individual market — see the cold-sweep caveat below.
+
+**The live-order count is a floor, not a ceiling.** A hot pass never cancels
+a cold-classified order, so levels the touch walks past accumulate until
+that market's next sweep — `mirror_book_depth` is the depth the cold sweep
+converges *toward*, not a cap on live orders between sweeps. Measured on a
+drifting 40x40 book with hot 8 / cap 50 over one sweep interval: **116** live
+orders at 1 tick of drift per pass, **268** at 3 ticks, **980** at 10 ticks —
+all well past the `4 x cap = 200` naive ceiling. Hot-path cost tracks this
+accumulated live set, not `mirror_hot_depth`, since `reconcile_market` reads
+all house levels for the market on every hot pass.
+
+**The cold sweep is a permission gate on dirty events, not an independent
+timer.** `run_reconciler` only considers assets in `state.dirty`, so a market
+with no upstream book updates never gets a cold pass: a quiet market never
+converges to the deep book, and one that goes quiet keeps whatever deep
+levels it already placed until it updates again. This matters most for the
+deliberately short-lived rotating-series markets (~5 min windows): with a
+uniform startup offset spread over the full 1800 s cold interval, only about
+one in six of them reaches its first sweep before expiring.
 
 Watch during the first hour, on a 2 vCPU host:
 - `docker stats` for the api container's CPU,
 - `SELECT count(*) FROM orders WHERE STATUS = 'live'` — expect roughly 5x
-  today's ~35k as depth converges toward 50 levels,
+  today's ~35k as depth converges toward 50 levels, and more than that on
+  fast-moving markets between sweeps (see above),
 - `df -h /` and the json log sizes, since more placements mean more log lines.
 
 To roll back, set the cap to 8 and restart: the next cold sweep per market

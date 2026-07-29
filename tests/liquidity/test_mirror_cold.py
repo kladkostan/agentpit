@@ -41,3 +41,20 @@ def test_cold_seed_spreads_assets_across_the_interval():
     now, interval = 0.0, 1000.0
     buckets = {int((now - cold_seed(f"asset-{i}", interval, now)) // 100) for i in range(200)}
     assert len(buckets) == 10
+
+
+def test_cold_seed_handles_a_sub_second_interval():
+    # `% int(interval)` raised ZeroDivisionError for interval < 1 — the
+    # fractional offset must stay well-defined and within one interval.
+    now, interval = 10_000.0, 0.5
+    for asset in ("a", "b", "c", "d", "e"):
+        seed = cold_seed(asset, interval, now)
+        assert now - interval <= seed <= now
+
+
+def test_cold_seed_still_spreads_assets_when_interval_is_just_above_one():
+    # `% int(interval)` collapsed every offset to a constant 0 for any
+    # interval in [1, 2), defeating the stagger entirely.
+    now, interval = 10_000.0, 1.5
+    seeds = {cold_seed(f"asset-{i}", interval, now) for i in range(50)}
+    assert len(seeds) > 1
