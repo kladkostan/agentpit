@@ -9,6 +9,7 @@ Two lifespan tasks (siblings of polymarket_sync / snapshot):
 Blocking work (DB/chain/REST) runs via asyncio.to_thread.
 """
 import asyncio
+import hashlib
 import logging
 
 from agentpit.config import Settings
@@ -43,6 +44,27 @@ def _load_refs(db: DbSession) -> list[MarketRef]:
     with db.read() as conn:
         markets = TableRead.list_active_synced_markets(conn)
     return [r for r in (_ref_of(m) for m in markets) if r is not None]
+
+
+def cold_seed(asset: str, interval: float, now: float) -> float:
+    """Initial `last_cold` for an asset, offset deterministically.
+
+    Without this every market is due for its first cold sweep the moment the
+    process starts, and a boot would place the whole deep book for every
+    market at once. Hashing with hashlib (not the salted built-in hash) keeps
+    a market's slot stable across restarts.
+    """
+    if interval <= 0:
+        return now
+    digest = hashlib.sha256(asset.encode()).digest()
+    offset = int.from_bytes(digest[:8], "big") % int(interval)
+    return now - offset
+
+
+def cold_due(last_cold: float, interval: float, now: float) -> bool:
+    """Are this market's deep levels due for a sweep? `interval <= 0` disables
+    the cold tier entirely, so every pass stays hot."""
+    return interval > 0 and now - last_cold >= interval
 
 
 class MirrorEngine:
@@ -163,6 +185,7 @@ class MirrorEngine:
 
     async def run_reconciler(self) -> None:
         last_run: dict[str, float] = {}
+        last_cold: dict[str, float] = {}
         last_refresh = 0.0
         while True:
             try:
@@ -183,10 +206,16 @@ class MirrorEngine:
                     snap = rep.snapshot() if rep is not None else None
                     if ref is None or snap is None:
                         continue
+                    interval = self._cfg.mirror_cold_interval_seconds
+                    if asset not in last_cold:
+                        last_cold[asset] = cold_seed(asset, interval, now)
+                    cold = cold_due(last_cold[asset], interval, now)
+                    if cold:
+                        last_cold[asset] = now
                     last_run[asset] = now
                     stats = await asyncio.to_thread(
                         reconcile_market, self._db, self._order, self._onchain,
-                        self._user, ref, snap, self._cfg)
+                        self._user, ref, snap, self._cfg, cold=cold)
                     if stats["deferred"] or stats["failed"]:
                         # Incomplete cycle — converge on a later pass even if
                         # no new upstream event arrives.
