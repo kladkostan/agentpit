@@ -61,7 +61,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
       const tokenId = s.market.erc1155_tokens[0]?.[0] ?? "";
       // The event chart shows a 30-day trend, so request the "1m" (≈720h)
       // window; the interval is part of the key to avoid colliding with the
-      // 1d cache entry used by MarketCard/useYesMid.
+      // 1d cache entry used by MarketCard.
       return {
         queryKey: ["prices-history", tokenId, CHART_INTERVAL],
         queryFn: () => getPricesHistory(tokenId, CHART_INTERVAL),

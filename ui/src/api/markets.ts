@@ -83,6 +83,10 @@ export function useMarket(id: number | string | undefined) {
       return getMarket(id);
     },
     enabled: id !== undefined,
+    // The probability now rides on the market payload rather than a 30s book
+    // poll, so this query has to refresh it — one request instead of N.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 }
 

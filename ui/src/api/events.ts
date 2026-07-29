@@ -110,5 +110,9 @@ export function useEvent(slug: string | undefined) {
       return getEvent(slug);
     },
     enabled: Boolean(slug),
+    // Same reason as useMarket: the leaderboard's probabilities and chip
+    // prices arrive with the event payload now.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 }
