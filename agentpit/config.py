@@ -190,10 +190,23 @@ class Settings(BaseSettings):
     mirror_target_refresh_seconds: float = Field(
         default=15.0, validation_alias="AGENTPIT_MIRROR_TARGET_REFRESH_SECONDS"
     )
-    # Cap how many price levels per side the mirror replicates onto the local
-    # book. Each level is ~4 on-chain/DB order ops, so a deep book is the main
-    # cost when re-quoting a fast-moving window. The top levels carry the price
-    # the user sees; deeper levels rarely matter. 0 = unbounded (full 1:1).
+    # Total depth cap per side. The cold sweep converges the local book to this
+    # many levels; 0 = unbounded (full 1:1). Each level is ~4 DB order ops, so
+    # this bounds the size of the orders table, not the hot-path cost.
     mirror_book_depth: int = Field(
         default=8, validation_alias="AGENTPIT_MIRROR_BOOK_DEPTH"
+    )
+    # Levels per side reconciled on EVERY book update. These carry the price the
+    # user sees and the spread a bot trades against, so they must stay live.
+    # Everything between this and mirror_book_depth is the cold band, refreshed
+    # only by the sweep below. hot == book depth means no cold band at all,
+    # which is byte-identical to the pre-two-tier behaviour.
+    mirror_hot_depth: int = Field(
+        default=8, validation_alias="AGENTPIT_MIRROR_HOT_DEPTH"
+    )
+    # How often each market's deep levels are reconciled. Deep levels move
+    # rarely and nobody trades against them, so this is deliberately slow — it
+    # is what keeps a 50-level book from multiplying the hot path.
+    mirror_cold_interval_seconds: float = Field(
+        default=1800.0, validation_alias="AGENTPIT_MIRROR_COLD_INTERVAL_SECONDS"
     )
