@@ -146,3 +146,23 @@ ships dark and is switched on by raising that one value in the prod `.env`.
   shows up.
 - Any change to crossing classification, settlement budgets, or inventory.
 - UI, API, and frontend work of any kind.
+
+## Rollout
+
+The code ships inert: production's `.env` sets `AGENTPIT_MIRROR_BOOK_DEPTH=8`
+and the new `AGENTPIT_MIRROR_HOT_DEPTH` defaults to 8, so the cold band is
+empty and every pass is the legacy full reconcile.
+
+To enable, raise the cap in the production `.env` to
+`AGENTPIT_MIRROR_BOOK_DEPTH=50` and restart the api container. Expect the
+deep book to fill in gradually over the first `AGENTPIT_MIRROR_COLD_INTERVAL_SECONDS`
+(30 min) rather than at once — the sweeps are staggered per market by design.
+
+Watch during the first hour, on a 2 vCPU host:
+- `docker stats` for the api container's CPU,
+- `SELECT count(*) FROM orders WHERE STATUS = 'live'` — expect roughly 5x
+  today's ~35k as depth converges toward 50 levels,
+- `df -h /` and the json log sizes, since more placements mean more log lines.
+
+To roll back, set the cap to 8 and restart: the next cold sweep per market
+prunes the deep levels back out, since a cold pass protects nothing.
