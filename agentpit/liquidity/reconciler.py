@@ -58,6 +58,51 @@ def desired_levels(
     return out
 
 
+@dataclass(frozen=True)
+class HotCuts:
+    """Price boundary of the hot band, per side of the YES book.
+
+    `bid_cut` is the price of the hot-depth-th bid, `ask_cut` that of the
+    hot-depth-th ask. `None` means the side has fewer levels than the hot
+    depth (or the hot depth is unbounded), so the whole side is hot.
+    """
+    bid_cut: int | None
+    ask_cut: int | None
+
+
+def hot_cuts(snap: BookSnapshot, hot_depth: int) -> HotCuts:
+    """Derive the hot band from a snapshot. `hot_depth <= 0` = everything hot."""
+    if hot_depth <= 0:
+        return HotCuts(None, None)
+    bid_cut = snap.bids[hot_depth - 1][0] if len(snap.bids) >= hot_depth else None
+    ask_cut = snap.asks[hot_depth - 1][0] if len(snap.asks) >= hot_depth else None
+    return HotCuts(bid_cut, ask_cut)
+
+
+def is_hot_level(
+    token_id: str, side: str, price_micro: int, cuts: HotCuts, yes_token: str
+) -> bool:
+    """Is this (token, side, price) inside the hot band?
+
+    The YES book is mirrored verbatim and the NO book as the MICRO-p
+    complement, so each of the four placement shapes tests a different
+    inequality. Derived from the CURRENT snapshot, so a level migrates
+    between tiers on its own as the touch moves.
+    """
+    is_yes = token_id == yes_token
+    if (is_yes and side == "BUY") or (not is_yes and side == "SELL"):
+        # Bid side: YES BUY @p, or its complement NO SELL @MICRO-p.
+        if cuts.bid_cut is None:
+            return True
+        p = price_micro if is_yes else MICRO - price_micro
+        return p >= cuts.bid_cut
+    # Ask side: YES SELL @p, or its complement NO BUY @MICRO-p.
+    if cuts.ask_cut is None:
+        return True
+    p = price_micro if is_yes else MICRO - price_micro
+    return p <= cuts.ask_cut
+
+
 def diff_levels(
     desired: list[Placement], current: list[LiveLevel]
 ) -> tuple[list[str], list[Placement]]:
