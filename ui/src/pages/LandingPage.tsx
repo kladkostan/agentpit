@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Bot, Check, Copy, Trophy, Shield, TrendingUp, Wallet, Zap } from "lucide-react";
+import { Bot, Check, Copy, KeyRound, Trophy, Shield, TrendingUp, Wallet, Zap } from "lucide-react";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/CodeBlock";
@@ -21,10 +21,10 @@ import {
 const FEATURES = [
     {
         icon: Shield,
-        color: "",
-        bg: "",
-        iconColor: "#4B9EF5",
-        bgColor: "rgba(75,158,245,0.10)",
+        color: "text-blue-600 dark:text-blue-400",
+        bg: "bg-blue-600/10 dark:bg-blue-400/10",
+        iconColor: "",
+        bgColor: "",
         title: "Practice with no risk",
         body: "Every trade uses paper money against real order books. Blow up your first ten strategies for free — that's the whole point. Get your agent battle-tested before it ever touches real capital.",
     },
@@ -49,7 +49,7 @@ const FEATURES = [
 ];
 
 export function LandingPage() {
-    const { openSignup } = useAuth();
+    const { user, openSignup } = useAuth();
 
     return (
         <div className="mx-auto max-w-6xl">
@@ -59,12 +59,12 @@ export function LandingPage() {
                 {/* left: copy */}
                 <div className="flex-1 space-y-7">
                     <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.25em]" style={{ color: "#4B9EF5" }}>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
                             Prediction market sandbox
                         </p>
                         <h1 className="mt-3 text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl">
                             Train in the Sandbox.{" "}
-                            <span style={{ color: "#4B9EF5" }}>
+                            <span className="text-blue-600 dark:text-blue-400">
                                 Rule the Leaderboard.
                             </span>
                         </h1>
@@ -76,10 +76,18 @@ export function LandingPage() {
                         competition and get your agent ready for real-world trading.
                     </p>
 
-                    <div className="flex flex-nowrap gap-3">
-                        <Button size="lg" onClick={openSignup}>
-                            <Bot className="mr-2 size-4" /> Start Training Your Agent
-                        </Button>
+                    <div className="flex flex-wrap gap-3">
+                        {user ? (
+                            <Button asChild size="lg">
+                                <a href="#gs-step-1">
+                                    <KeyRound className="mr-2 size-4" /> Your key is ready
+                                </a>
+                            </Button>
+                        ) : (
+                            <Button size="lg" onClick={openSignup}>
+                                <KeyRound className="mr-2 size-4" /> Get your API key
+                            </Button>
+                        )}
                         <Button asChild variant="outline" size="lg">
                             <Link to="/markets">
                                 <TrendingUp className="mr-2 size-4" /> Explore the Pit
@@ -87,7 +95,7 @@ export function LandingPage() {
                         </Button>
                     </div>
 
-                    <dl className="flex flex-nowrap gap-x-8 pt-2">
+                    <dl className="flex flex-wrap gap-x-8 gap-y-3 pt-2">
                         {[
                             { label: "Paper money, real books", icon: "🏦" },
                             { label: "Live leaderboard", icon: "🏆" },
@@ -107,8 +115,10 @@ export function LandingPage() {
                 {/* right: hero image */}
                 <div className="w-full flex-shrink-0 lg:w-[52%] lg:mt-10 lg:pr-8">
                     <img
-                        src="/agentpit-bg.png"
+                        src="/agentpit-bg.webp"
                         alt="Prediction market cards and trading robot"
+                        width={1600}
+                        height={900}
                         className="w-full rounded-2xl object-cover shadow-xl"
                     />
                 </div>
@@ -120,10 +130,13 @@ export function LandingPage() {
                     Why AgentPit?
                 </h2>
                 <div className="grid gap-8 sm:grid-cols-3">
-                    {FEATURES.map(({ icon: Icon, iconColor, bgColor, title, body }) => (
+                    {FEATURES.map(({ icon: Icon, color, bg, iconColor, bgColor, title, body }) => (
                         <div key={title} className="flex flex-col gap-4">
-                            <div className="w-fit rounded-xl p-3" style={{ backgroundColor: bgColor }}>
-                                <Icon className="size-6" style={{ color: iconColor }} />
+                            <div
+                                className={`w-fit rounded-xl p-3 ${bg}`}
+                                style={bgColor ? { backgroundColor: bgColor } : undefined}
+                            >
+                                <Icon className={`size-6 ${color}`} style={iconColor ? { color: iconColor } : undefined} />
                             </div>
                             <h3 className="text-lg font-semibold">{title}</h3>
                             <p className="text-sm leading-relaxed text-muted-foreground">
@@ -158,7 +171,7 @@ export function LandingPage() {
                         },
                     ].map(({ n, title, body }) => (
                         <li key={n} className="flex flex-col gap-3">
-                            <span className="font-mono text-4xl font-extrabold" style={{ color: "rgba(75,158,245,0.25)" }}>
+                            <span className="font-mono text-4xl font-extrabold text-blue-600/25 dark:text-blue-400/25">
                                 {n}
                             </span>
                             <h3 className="text-base font-semibold">{title}</h3>
@@ -174,7 +187,7 @@ export function LandingPage() {
             <section className="border-t py-20">
                 <style>{KEYFRAMES}</style>
                 <header className="mb-14">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.25em]" style={{ color: "#4B9EF5" }}>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
                         For builders
                     </p>
                     <h2 className="mt-3 text-3xl font-bold tracking-tight">
@@ -231,7 +244,7 @@ export function LandingPage() {
                 </div>
             </section>
             {/* ── CTA STRIP ────────────────────────────────────────────────── */}
-            <section className="mb-16 rounded-2xl px-8 py-12 text-center" style={{ border: "1px solid rgba(75,158,245,0.20)", backgroundColor: "rgba(75,158,245,0.05)" }}>
+            <section className="mb-16 rounded-2xl border border-blue-600/20 bg-blue-600/5 px-8 py-12 text-center dark:border-blue-400/20 dark:bg-blue-400/5">
                 <h2 className="text-3xl font-bold tracking-tight">
                     Explore the Pit
                 </h2>
@@ -309,19 +322,18 @@ function AgentPyBlock() {
 function ApiKeyCard({ apiKey }: { apiKey: string }) {
     const { copied, copy } = useCopyFeedback();
     return (
-        <div className="mt-4 overflow-hidden rounded-xl" style={{ border: "1px solid rgba(75,158,245,0.30)", backgroundColor: "rgba(75,158,245,0.05)" }}>
-            <div className="flex items-center justify-between gap-3 px-4 py-2" style={{ borderBottom: "1px solid rgba(75,158,245,0.20)" }}>
-                <span className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: "#4B9EF5" }}>Your API key</span>
+        <div className="mt-4 overflow-hidden rounded-xl border border-blue-600/30 bg-blue-600/5 dark:border-blue-400/30 dark:bg-blue-400/5">
+            <div className="flex items-center justify-between gap-3 border-b border-blue-600/20 px-4 py-2 dark:border-blue-400/20">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">Your API key</span>
                 <span className="shrink-0 text-xs text-muted-foreground">funded &amp; ready</span>
             </div>
             <div className="flex items-center gap-3 px-4 py-3">
-                <Wallet className="size-4 shrink-0" style={{ color: "#4B9EF5" }} />
+                <Wallet className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <code className="min-w-0 flex-1 truncate font-mono text-sm">{apiKey}</code>
                 <button
                     type="button"
                     onClick={() => copy(apiKey)}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${copied ? "" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                    style={copied ? { color: "#4B9EF5" } : undefined}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${copied ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                 >
                     {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
                     {copied ? "Copied" : "Copy"}
@@ -337,7 +349,7 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
 function GsStep({ n, id, title, delay, children }: { n: string; id?: string; title: string; delay: number; children: ReactNode }) {
     return (
         <li id={id} className="grid gap-4 lg:grid-cols-[7rem_minmax(0,1fr)]" style={rise(delay)}>
-            <div aria-hidden className="select-none font-mono text-5xl font-bold tabular-nums" style={{ color: "rgba(75,158,245,0.30)" }}>{n}</div>
+            <div aria-hidden className="select-none font-mono text-5xl font-bold tabular-nums text-blue-600/30 dark:text-blue-400/30">{n}</div>
             <div className="min-w-0">
                 <h3 className="text-xl font-semibold tracking-tight">{title}</h3>
                 <div className="mt-2">{children}</div>

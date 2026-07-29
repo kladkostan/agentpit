@@ -12,7 +12,7 @@ export function TopNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const showSearch = pathname === "/markets";
+  const showSearch = pathname === "/markets" || pathname.startsWith("/events/");
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
     : undefined;
@@ -193,9 +193,14 @@ export function TopNav() {
 
 function SearchBar() {
   const { query, setQuery } = useSearch();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
 
   const onChange = (next: string) => {
     setQuery(next);
+    // The results grid lives on the markets route, so searching from an
+    // event page jumps back there where matches can render.
+    if (pathname !== "/markets") navigate("/markets");
   };
 
   return (
