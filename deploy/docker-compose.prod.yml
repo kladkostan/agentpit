@@ -12,10 +12,21 @@
 # accounts + operator key).
 name: agentpit
 
+# Log rotation is NOT optional here: anvil logs every RPC call and the liquidity
+# mirror re-quotes ~1000 books continuously (~170 lines/s between them). Without
+# a cap the two json logs reached 32 GB and 24 GB in 12 days and filled the disk
+# to 97%, which would have taken Postgres down with it. 50m x 3 per service.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: agentpit
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
@@ -31,6 +42,7 @@ services:
   anvil:
     image: ghcr.io/foundry-rs/foundry:latest
     restart: unless-stopped
+    logging: *default-logging
     entrypoint:
       - anvil
       - --host
@@ -71,6 +83,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.api
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - ../.env
     environment:
@@ -91,6 +104,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set in .env}
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "80:80"
       - "8000:8000"
