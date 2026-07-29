@@ -6,13 +6,13 @@ import { useSearch } from "@/lib/searchContext";
 import { useTheme } from "@/lib/theme";
 import { useState } from "react";
 import { Menu, MenuItem, IconButton } from "@mui/material";
-import { KeyRound, LogOut, Moon, Settings, Sun, User } from "lucide-react";
+import { TrendingUp, LogOut, Moon, Settings, Sun, User, Bot } from "lucide-react";
 
 export function TopNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const showSearch = pathname === "/" || pathname.startsWith("/events/");
+  const showSearch = pathname === "/markets" || pathname.startsWith("/events/");
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
     : undefined;
@@ -90,34 +90,34 @@ export function TopNav() {
             AgentPit
           </span>
         </NavLink>
-        <NavLink
-          to="/agents"
-          className={({ isActive }) =>
-            `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${
-              isActive
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : "border-border text-muted-foreground hover:text-foreground"
-            }`
-          }
-        >
-          <span className="inline-flex size-1.5 animate-pulse rounded-full bg-emerald-500" />
-          Arena
-        </NavLink>
-        {showSearch ? <SearchBar /> : null}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
+        <div className="flex items-center gap-2">
           <NavLink
-            to="/get-started"
+            to="/markets"
             className={({ isActive }) =>
-              `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${
-                isActive
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "border-border text-muted-foreground hover:text-foreground"
+              `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${isActive
+                ? "border-blue-400/40 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                : "border-border text-muted-foreground hover:text-foreground"
               }`
             }
           >
-            <KeyRound className="size-3.5" />
-            Get started
+            <TrendingUp className="size-3.5" />
+            Markets
           </NavLink>
+          <NavLink
+            to="/agents"
+            className={({ isActive }) =>
+              `hidden shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:inline-flex ${isActive
+                ? "border-blue-400/40 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                : "border-border text-muted-foreground hover:text-foreground"
+              }`
+            }
+          >
+            <Bot className="size-3.5" />
+            Arena
+          </NavLink>
+        </div>
+        {showSearch && <SearchBar />}
+        <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
             aria-label={
@@ -198,9 +198,9 @@ function SearchBar() {
 
   const onChange = (next: string) => {
     setQuery(next);
-    // The results grid lives on the home route, so searching from an event
-    // page jumps back home where matches can render.
-    if (pathname !== "/") navigate("/");
+    // The results grid lives on the markets route, so searching from an
+    // event page jumps back there where matches can render.
+    if (pathname !== "/markets") navigate("/markets");
   };
 
   return (
