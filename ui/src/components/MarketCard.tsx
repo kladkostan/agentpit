@@ -3,7 +3,6 @@ import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
 import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
-import { useOutcomeMid } from "@/lib/useYesMid";
 import { cn } from "@/lib/utils";
 import type { Market, MarketState } from "@/types/market";
 
@@ -29,9 +28,9 @@ const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
 
 export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
-  const { mid: yesMid } = useOutcomeMid(yesTokenId);
+  const yesPrice = market.outcome_prices[0];
   const { data: spark } = usePricesHistory(yesTokenId);
-  const yesPctLabel = formatProbabilityPct(yesMid);
+  const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
   const closes = formatShortDate(market.end_date);
   const href = eventSlug
@@ -79,7 +78,7 @@ export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
             <div
               className={cn(
                 "flex items-baseline gap-1",
-                yesMid === null
+                yesPrice === undefined
                   ? "text-muted-foreground/50"
                   : "text-foreground",
               )}

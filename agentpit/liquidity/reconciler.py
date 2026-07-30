@@ -6,6 +6,7 @@ non-crossed per token AND across the YES/NO complement map, so the mirror can
 never self-match — provided cancels are applied before placements.
 """
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -58,16 +59,96 @@ def desired_levels(
     return out
 
 
+@dataclass(frozen=True)
+class HotCuts:
+    """Price boundary of the hot band, per side of the YES book.
+
+    `bid_cut` is the price of the hot-depth-th bid, `ask_cut` that of the
+    hot-depth-th ask. `None` means the side has fewer levels than the hot
+    depth (or the hot depth is unbounded), so the whole side is hot.
+    """
+    bid_cut: int | None
+    ask_cut: int | None
+
+
+def hot_cuts(snap: BookSnapshot, hot_depth: int) -> HotCuts:
+    """Derive the hot band from a snapshot. `hot_depth <= 0` = everything hot."""
+    if hot_depth <= 0:
+        return HotCuts(None, None)
+    bid_cut = snap.bids[hot_depth - 1][0] if len(snap.bids) >= hot_depth else None
+    ask_cut = snap.asks[hot_depth - 1][0] if len(snap.asks) >= hot_depth else None
+    return HotCuts(bid_cut, ask_cut)
+
+
+def is_hot_level(
+    token_id: str, side: str, price_micro: int, cuts: HotCuts, yes_token: str
+) -> bool:
+    """Is this (token, side, price) inside the hot band?
+
+    The YES book is mirrored verbatim and the NO book as the MICRO-p
+    complement, so each of the four placement shapes tests a different
+    inequality. Derived from the CURRENT snapshot, so a level migrates
+    between tiers on its own as the touch moves.
+    """
+    is_yes = token_id == yes_token
+    if (is_yes and side == "BUY") or (not is_yes and side == "SELL"):
+        # Bid side: YES BUY @p, or its complement NO SELL @MICRO-p.
+        if cuts.bid_cut is None:
+            return True
+        p = price_micro if is_yes else MICRO - price_micro
+        return p >= cuts.bid_cut
+    # Ask side: YES SELL @p, or its complement NO BUY @MICRO-p.
+    if cuts.ask_cut is None:
+        return True
+    p = price_micro if is_yes else MICRO - price_micro
+    return p <= cuts.ask_cut
+
+
+def tier_plan(
+    snap: BookSnapshot,
+    yes_token: str,
+    no_token: str,
+    *,
+    hot_depth: int,
+    max_depth: int,
+    cold: bool,
+) -> tuple[list[Placement], "Callable[[LiveLevel], bool] | None"]:
+    """What one reconcile pass should target, and what it must leave alone.
+
+    Cold pass: the full cap, protecting nothing — it also prunes deep levels
+    that vanished upstream. Hot pass: the hot band only, protecting every live
+    order outside it. When the hot depth already covers the cap there is no
+    cold band, so the hot pass IS the full reconcile and protects nothing —
+    that is the shipped default and it is identical to the legacy behaviour.
+    """
+    if cold or hot_depth <= 0 or (0 < max_depth <= hot_depth):
+        return desired_levels(snap, yes_token, no_token, max_depth), None
+    cuts = hot_cuts(snap, hot_depth)
+    desired = desired_levels(snap, yes_token, no_token, hot_depth)
+    return desired, lambda o: not is_hot_level(
+        o.token_id, o.side, o.price_micro, cuts, yes_token
+    )
+
+
 def diff_levels(
-    desired: list[Placement], current: list[LiveLevel]
+    desired: list[Placement],
+    current: list[LiveLevel],
+    protect: "Callable[[LiveLevel], bool] | None" = None,
 ) -> tuple[list[str], list[Placement]]:
     """(order_ids to cancel, placements to make). Orders are immutable, so a
     size change at a level is cancel + re-place. One live order per
-    (token, side, price) is kept; duplicates are cancelled."""
+    (token, side, price) is kept; duplicates are cancelled.
+
+    `protect` marks live orders that are OUT OF SCOPE for this pass: they are
+    neither cancelled nor counted as satisfying a desired level. A hot pass
+    protects the cold band so it does not wipe the deep book on every update.
+    """
     want = {(d.token_id, d.side, d.price_micro): d.size_micro for d in desired}
     keep: set[tuple[str, str, int]] = set()
     cancels: list[str] = []
     for o in current:
+        if protect is not None and protect(o):
+            continue
         key = (o.token_id, o.side, o.price_micro)
         if key in want and want[key] == o.size_micro and key not in keep:
             keep.add(key)
@@ -156,6 +237,8 @@ def reconcile_market(
     ref,                       # feed.MarketRef (duck-typed to avoid an import cycle)
     snap: BookSnapshot,
     cfg: Settings,
+    *,
+    cold: bool = False,
 ) -> dict:
     """Converge the local books (YES + NO complement) to the snapshot.
     Cancels strictly before placements (spec §5). Placements that would cross
@@ -176,9 +259,13 @@ def reconcile_market(
                   int(r["PRICE"]), int(r["REMAINING_AMOUNT"]))
         for r in rows
     ]
-    cancels, places = diff_levels(
-        desired_levels(snap, ref.yes_token, ref.no_token, cfg.mirror_book_depth),
-        current)
+    desired, protect = tier_plan(
+        snap, ref.yes_token, ref.no_token,
+        hot_depth=cfg.mirror_hot_depth,
+        max_depth=cfg.mirror_book_depth,
+        cold=cold,
+    )
+    cancels, places = diff_levels(desired, current, protect=protect)
 
     splits = 0
     try:

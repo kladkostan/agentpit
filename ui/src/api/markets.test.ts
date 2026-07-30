@@ -42,6 +42,31 @@ describe("gammaToMarket", () => {
   });
 });
 
+describe("gammaToMarket prices", () => {
+  it("maps outcomePrices into numbers, in order", () => {
+    const m = gammaToMarket({ ...baseGamma, outcomePrices: '["0.16","0.84"]' });
+    expect(m.outcome_prices).toEqual([0.16, 0.84]);
+  });
+
+  it("yields [] for empty, malformed or non-numeric prices", () => {
+    for (const raw of ["[]", "", "not json", '["a","b"]', '{"a":1}']) {
+      expect(
+        gammaToMarket({ ...baseGamma, outcomePrices: raw }).outcome_prices,
+      ).toEqual([]);
+    }
+  });
+
+  it("treats a 0.0 touch as 'no book' and passes real quotes through", () => {
+    const none = gammaToMarket({ ...baseGamma, bestBid: 0, bestAsk: 0 });
+    expect(none.best_bid).toBeNull();
+    expect(none.best_ask).toBeNull();
+
+    const quoted = gammaToMarket({ ...baseGamma, bestBid: 0.14, bestAsk: 0.18 });
+    expect(quoted.best_bid).toBeCloseTo(0.14, 5);
+    expect(quoted.best_ask).toBeCloseTo(0.18, 5);
+  });
+});
+
 describe("getMarket", () => {
   beforeEach(() => vi.mocked(apiFetch).mockReset());
 

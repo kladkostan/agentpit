@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { useYesMidMap } from "@/lib/useYesMid";
-import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
+import { sortMarketsByYesMid, yesPriceMap } from "@/lib/eventOutcomes";
 import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/types/event";
@@ -66,7 +65,7 @@ export function MultiMarketEventCard({
   event,
   markets,
 }: MultiMarketEventCardProps) {
-  const midByMarket = useYesMidMap(markets);
+  const midByMarket = useMemo(() => yesPriceMap(markets), [markets]);
   const ranked = useMemo(
     () => sortMarketsByYesMid(markets, midByMarket),
     [markets, midByMarket],
