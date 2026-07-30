@@ -139,3 +139,15 @@ export function pickSellOutcome(
   }
   return currentOutcome;
 }
+
+/** Cents as typed in the limit-price field → the probability the API takes.
+ *
+ *  The field shows cents (50) while `placeOrder` wants a probability (0.5), and
+ *  this is the ONLY place the two units meet. Malformed or empty input yields
+ *  NaN rather than 0, so the caller's `Number.isFinite` guard still blocks
+ *  submission — returning 0 would look like a valid free order. */
+export function centsToPrice(input: string): number {
+  const trimmed = input.trim().replace(/,/g, ".");
+  if (trimmed === "") return NaN;
+  return Number(trimmed) / 100;
+}

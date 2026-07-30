@@ -12,11 +12,11 @@ interface MarketCardProps {
   /** When provided, the card links to /events/:slug instead of /markets/:id.
    * Used for singleton-market events so the URL surface stays event-centric. */
   eventSlug?: string;
-  /** Parent event's upstream 24h volume (USD); null hides the stat. */
-  volume24hr?: number | null;
+  /** Parent event's upstream all-time volume (USD); null hides the stat. */
+  volume?: number | null;
 }
 
-export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
+export function MarketCard({ market, eventSlug, volume }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
   const yesPrice = market.outcome_prices[0];
   const { data: spark } = usePricesHistory(yesTokenId);
@@ -96,12 +96,12 @@ export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
           </div>
         </div>
 
-        {volume24hr != null ? (
+        {volume != null ? (
           <div className="flex items-center gap-1.5 border-t pt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             <span className="tabular-nums text-foreground/70">
-              {formatVolume(volume24hr)}
+              {formatVolume(volume)}
             </span>
-            <span>24h vol</span>
+            <span>vol</span>
           </div>
         ) : null}
       </article>

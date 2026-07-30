@@ -219,20 +219,33 @@ class TableWrite:
 
     @staticmethod
     def update_event_volume(
-        db: psycopg.Connection, event_id: int, volume_24hr: float | None
+        db: psycopg.Connection,
+        event_id: int,
+        volume_24hr: float | None,
+        volume: float | None = None,
     ) -> None:
-        """Refresh an event's captured upstream 24h volume.
+        """Refresh an event's captured upstream volumes.
 
-        No-op when ``volume_24hr`` is None, so a degraded sync pass (e.g. a
-        recurring window with no series metadata, whose own 24h volume is null)
-        never clobbers a previously-captured good value. Called on every bind
-        pass so the figure tracks the latest sync.
+        Each figure is skipped independently when None, so a degraded sync pass
+        (e.g. a recurring window with no series metadata, whose own 24h volume is
+        null) never clobbers a previously-captured good value -- and a payload
+        carrying only one of the two updates only that one. Called on every bind
+        pass so the figures track the latest sync.
         """
-        if volume_24hr is None:
+        sets = []
+        params: list[object] = []
+        if volume_24hr is not None:
+            sets.append("VOLUME_24HR = %s")
+            params.append(volume_24hr)
+        if volume is not None:
+            sets.append("VOLUME = %s")
+            params.append(volume)
+        if not sets:
             return
+        params.append(event_id)
         db.execute(
-            "UPDATE events SET VOLUME_24HR = %s WHERE EVENT_ID = %s",
-            (volume_24hr, event_id),
+            f"UPDATE events SET {', '.join(sets)} WHERE EVENT_ID = %s",
+            tuple(params),
         )
 
     @staticmethod

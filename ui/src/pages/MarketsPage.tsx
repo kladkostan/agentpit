@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useEventCategories, useEventsInfinite } from "@/api/events";
 import { useMarketStats } from "@/api/markets";
+import { useDismissOnOutside } from "@/lib/useDismissOnOutside";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { Button } from "@/components/ui/button";
 import {
@@ -323,6 +324,16 @@ export function MarketsPage() {
   const [selectedSubcategories, setSelectedSubcategories] = useState<string[]>([]);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showFilterTabs, setShowFilterTabs] = useState(false);
+  // Each menu closes on a press outside it or on Escape; without this they
+  // stayed open until their own trigger was clicked again.
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
+  useDismissOnOutside(sortMenuRef, () => setShowSortMenu(false), showSortMenu);
+  useDismissOnOutside(
+    filterMenuRef,
+    () => setShowFilterTabs(false),
+    showFilterTabs,
+  );
   const [selectedQuickFilter, setSelectedQuickFilter] =
     useState<QuickFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("volume24h");
@@ -417,12 +428,14 @@ export function MarketsPage() {
     const sorted = [...withQuickFilter];
     sorted.sort((a, b) => {
       if (sortMode === "volume24h" || sortMode === "totalVolume") {
-        // Sort on the upstream 24h volume the server ranks by
-        // (ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC), so the
-        // client ordering agrees with the server's instead of silently
-        // reverting the home page to roughly newest-first.
-        const aVolume = a.event.volume_24hr ?? 0;
-        const bVolume = b.event.volume_24hr ?? 0;
+        // "24hr Volume" sorts on the figure the server ranks by
+        // (ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC), so the client
+        // ordering agrees with the server's instead of silently reverting the
+        // page to roughly newest-first. "Total Volume" sorts on the all-time
+        // figure — until it existed, the two menu entries were the same sort.
+        const key = sortMode === "totalVolume" ? "volume" : "volume_24hr";
+        const aVolume = a.event[key] ?? 0;
+        const bVolume = b.event[key] ?? 0;
         if (bVolume !== aVolume) return bVolume - aVolume;
         const aLiveCount = a.markets.filter((m) => m.market_state === "ACTIVE").length;
         const bLiveCount = b.markets.filter((m) => m.market_state === "ACTIVE").length;
@@ -745,7 +758,7 @@ export function MarketsPage() {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
-                <div className="relative">
+                <div className="relative" ref={sortMenuRef}>
                   <Button
                     type="button"
                     variant="outline"
@@ -798,7 +811,7 @@ export function MarketsPage() {
                   ) : null}
                 </div>
 
-                <div className="relative">
+                <div className="relative" ref={filterMenuRef}>
                   <Button
                     type="button"
                     variant="outline"

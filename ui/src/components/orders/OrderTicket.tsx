@@ -13,6 +13,7 @@ import {
   SLIPPAGE_CAP,
   bestAsk,
   bestBid,
+  centsToPrice,
   computeMarketBuy,
   computeMarketSell,
   dollarsFromShares,
@@ -78,7 +79,13 @@ export function OrderTicket({
 }: OrderTicketProps) {
   const [side, setSide] = useState<OrderSide>("BUY");
   const [mode, setMode] = useState<Mode>("Limit");
-  const [limitPrice, setLimitPrice] = useState<string>("0.50");
+  // Held in CENTS, which is what the field shows. The API takes a
+  // probability in [0,1], so the single conversion below is the only place
+  // the two units meet — everything downstream reads limitPriceUsd.
+  const [limitCents, setLimitCents] = useState<string>("50");
+  // NaN for empty or malformed input, exactly as parseDecimal returned before,
+  // so every downstream Number.isFinite guard keeps working unchanged.
+  const limitPriceUsd = centsToPrice(limitCents);
   const [limitShares, setLimitShares] = useState<string>("");
   const [marketAmount, setMarketAmount] = useState<string>("");
 
@@ -129,7 +136,7 @@ export function OrderTicket({
 
   const limitMutation = useMutation({
     mutationFn: async () => {
-      const price = parseDecimal(limitPrice);
+      const price = limitPriceUsd;
       const shares = parseDecimal(limitShares);
       return placeOrder({
         token_id: tokenId,
@@ -204,7 +211,7 @@ export function OrderTicket({
 
   const preview = useMemo(() => {
     if (mode === "Limit") {
-      const price = parseDecimal(limitPrice);
+      const price = limitPriceUsd;
       const shares = parseDecimal(limitShares);
       if (!Number.isFinite(price) || !Number.isFinite(shares)) return null;
       if (price <= 0 || price >= 1 || shares <= 0) return null;
@@ -245,7 +252,7 @@ export function OrderTicket({
           ? `Cap clamped to ${MIN_PROB.toFixed(2)}`
           : null,
     };
-  }, [mode, side, limitPrice, limitShares, marketAmount, book]);
+  }, [mode, side, limitPriceUsd, limitShares, marketAmount, book]);
 
   const canSubmit =
     !isTradingDisabled &&
@@ -281,7 +288,7 @@ export function OrderTicket({
   // Live cost hint shown next to the Shares label as user types.
   const sharesValue = parseDecimal(limitShares);
   const priceForCost = (() => {
-    if (mode === "Limit") return parseDecimal(limitPrice);
+    if (mode === "Limit") return limitPriceUsd;
     if (side === "BUY") return bestAskPrice ?? NaN;
     return bestBidPrice ?? NaN;
   })();
@@ -321,11 +328,11 @@ export function OrderTicket({
 
         {mode === "Limit" ? (
           <div className="space-y-3">
-            <Field label="Limit price" hint="USDC">
+            <Field label="Limit price" hint="¢">
               <ValueInput
                 id="limit-price"
-                value={limitPrice}
-                onChange={setLimitPrice}
+                value={limitCents}
+                onChange={setLimitCents}
                 disabled={isTradingDisabled}
                 suffix="per share"
               />
@@ -564,7 +571,7 @@ function SegmentedMode({
 }) {
   return (
     <div className="flex items-center gap-4 border-b border-border/60">
-      {(["Limit", "Market"] as const).map((m) => {
+      {(["Market", "Limit"] as const).map((m) => {
         const active = mode === m;
         return (
           <button

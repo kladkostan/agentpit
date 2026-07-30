@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bestAsk,
   bestBid,
+  centsToPrice,
   computeMarketBuy,
   computeMarketSell,
   cumulativeTotals,
@@ -198,5 +199,31 @@ describe("pickSellOutcome", () => {
   it("never picks an outcome with a non-positive balance", () => {
     const holdings = new Map([["YES", 0], ["NO", -5]]);
     expect(pickSellOutcome("YES", holdings)).toBe("YES");
+  });
+});
+
+describe("centsToPrice", () => {
+  it("converts the field's cents to the API's probability", () => {
+    expect(centsToPrice("50")).toBeCloseTo(0.5);
+    expect(centsToPrice("1")).toBeCloseTo(0.01);
+    expect(centsToPrice("99")).toBeCloseTo(0.99);
+    expect(centsToPrice("2.5")).toBeCloseTo(0.025);
+  });
+
+  it("accepts a comma as the decimal separator", () => {
+    expect(centsToPrice("2,5")).toBeCloseTo(0.025);
+  });
+
+  it("yields NaN — not 0 — for empty or malformed input", () => {
+    // 0 would read as a valid free order and pass the submit guard.
+    expect(centsToPrice("")).toBeNaN();
+    expect(centsToPrice("   ")).toBeNaN();
+    expect(centsToPrice("abc")).toBeNaN();
+  });
+
+  it("keeps the ticket's own validity window intact", () => {
+    // OrderTicket rejects price <= 0 or >= 1; in cents that is 0 and 100.
+    expect(centsToPrice("0")).toBe(0);
+    expect(centsToPrice("100")).toBe(1);
   });
 });

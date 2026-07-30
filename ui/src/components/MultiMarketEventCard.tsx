@@ -131,12 +131,12 @@ export function MultiMarketEventCard({
           ) : null}
         </div>
 
-        {event.volume_24hr !== null ? (
+        {event.volume !== null ? (
           <div className="mt-auto flex items-center gap-1.5 border-t pt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             <span className="tabular-nums text-foreground/70">
-              {formatVolume(event.volume_24hr)}
+              {formatVolume(event.volume)}
             </span>
-            <span>24h vol</span>
+            <span>vol</span>
           </div>
         ) : null}
       </article>

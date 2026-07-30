@@ -17,6 +17,9 @@ class Event(BaseModel):
     # Upstream Polymarket 24h volume (event- or series-level), captured at sync
     # time. Drives the homepage ordering. None when never synced from upstream.
     volume_24hr: Optional[float] = None
+    # Upstream all-time volume, captured at the same time. This is the figure
+    # the cards display; volume_24hr stays the ranking key.
+    volume: Optional[float] = None
 
     def model_post_init(self, _context):
         check_state(len(self.title) > 0, "Event title must not be empty")

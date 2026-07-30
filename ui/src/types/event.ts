@@ -12,6 +12,9 @@ export interface Event {
   polymarket_event_id: string | null;
   /** Upstream 24h volume in USD; null when never synced from upstream. */
   volume_24hr: number | null;
+  /** Upstream all-time volume in USD; null when never synced from upstream.
+   *  This is the figure the cards show — volume_24hr stays the ranking key. */
+  volume: number | null;
 }
 
 export interface EventWithMarkets {

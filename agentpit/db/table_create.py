@@ -211,6 +211,11 @@ class TableCreate:
         conn.execute(
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS VOLUME_24HR DOUBLE PRECISION"
         )
+        # All-time upstream volume, alongside the 24h figure. The cards show
+        # this one; the 24h figure still drives the default ordering.
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS VOLUME DOUBLE PRECISION"
+        )
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_polymarket_event_id "

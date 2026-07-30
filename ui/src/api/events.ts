@@ -33,6 +33,7 @@ function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
     end_date: isoToUnix(g.endDate),
     polymarket_event_id: null,
     volume_24hr: parseVolume(g.volume24hr),
+    volume: parseVolume(g.volume),
   };
   return { event, markets: g.markets.map(gammaToMarket) };
 }

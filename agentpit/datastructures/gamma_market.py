@@ -48,4 +48,7 @@ class GammaEvent(BaseModel):
     # Upstream 24h volume (stringified, Gamma's wire convention). "0" when the
     # event was never synced from upstream. Drives the homepage ordering.
     volume24hr: str = "0"
+    # Upstream all-time volume, same wire convention. This is what the cards
+    # show; volume24hr stays the ranking key.
+    volume: str = "0"
     markets: list[GammaMarket]

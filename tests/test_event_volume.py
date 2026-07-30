@@ -107,3 +107,48 @@ def test_to_gamma_event_emits_volume24hr():
 def test_to_gamma_event_volume_zero_when_none():
     g = to_gamma_event(Event(event_id=1, slug="s", title="T"), [])
     assert g.volume24hr == "0"
+
+
+# ----- all-time volume (what the cards show) ----------------------------------
+
+
+def test_update_event_volume_stores_all_time_alongside_24h():
+    conn = fresh_test_conn()
+    e = TableWrite.upsert_event(conn, slug="x", title="X")
+    TableWrite.update_event_volume(conn, e.event_id, 42.0, 253_887_562.7)
+    got = TableRead.get_event_by_slug(conn, "x")
+    assert got.volume_24hr == 42.0
+    assert got.volume == 253_887_562.7
+    conn.close()
+
+
+def test_each_volume_is_skipped_independently_when_none():
+    # A degraded pass carrying only one figure must not blank the other.
+    conn = fresh_test_conn()
+    e = TableWrite.upsert_event(conn, slug="x", title="X")
+    TableWrite.update_event_volume(conn, e.event_id, 42.0, 900.0)
+    TableWrite.update_event_volume(conn, e.event_id, None, 1000.0)
+    got = TableRead.get_event_by_slug(conn, "x")
+    assert got.volume_24hr == 42.0      # preserved
+    assert got.volume == 1000.0         # updated
+    TableWrite.update_event_volume(conn, e.event_id, 50.0, None)
+    got = TableRead.get_event_by_slug(conn, "x")
+    assert got.volume_24hr == 50.0      # updated
+    assert got.volume == 1000.0         # preserved
+    conn.close()
+
+
+def test_extract_event_metadata_pulls_all_time_volume():
+    meta = _extract_event_metadata(
+        {"events": [{"id": "e", "slug": "s", "title": "T",
+                     "volume24hr": 7967.7, "volume": 253_887_562.7}]}
+    )
+    assert meta["volume_24hr"] == 7967.7
+    assert meta["volume"] == 253_887_562.7
+
+
+def test_extract_event_metadata_all_time_volume_absent_is_none():
+    meta = _extract_event_metadata(
+        {"events": [{"id": "e", "slug": "s", "title": "T", "volume24hr": 1.0}]}
+    )
+    assert meta["volume"] is None

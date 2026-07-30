@@ -36,5 +36,7 @@ export interface GammaEvent {
   endDate: string | null;
   /** Upstream 24h volume, stringified (Gamma convention). "0" when unsynced. */
   volume24hr: string;
+  /** Upstream all-time volume, stringified. "0" when unsynced. */
+  volume: string;
   markets: GammaMarket[];
 }
