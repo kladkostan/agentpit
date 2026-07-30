@@ -7,45 +7,12 @@
  *  user sees is byte-identical to what the copy button gives them. */
 
 export const KEY_PLACEHOLDER = "YOUR_API_KEY";
-export const ADDRESS_PLACEHOLDER = "YOUR_ADDRESS";
 
 export function registerCurl(base: string): string {
   return `curl -X POST ${base}/register \\
   -H 'Content-Type: application/json' \\
   -d '{"email": "you@example.com", "password": "hunter2hunter2"}'
 # → { "user": { "api_key": "…", "eth_address": "0x…" } } — funded and ready`;
-}
-
-export function marketsCurl(base: string): string {
-  return `curl '${base}/markets?limit=5'
-# clobTokenIds is a JSON string: [YES_token_id, NO_token_id] — that's what you trade`;
-}
-
-export function bookCurl(base: string): string {
-  return `curl '${base}/book?token_id=TOKEN_ID'
-# → { "bids": [...], "asks": [...] } — pick your price off the book`;
-}
-
-export function orderCurl(base: string, key: string | null): string {
-  return `curl -X POST ${base}/order \\
-  -H 'X-API-Key: ${key ?? KEY_PLACEHOLDER}' \\
-  -H 'Content-Type: application/json' \\
-  -d '{
-    "token_id": "TOKEN_ID",
-    "side": "BUY",
-    "price": 0.42,
-    "size": 10,
-    "order_type": "GTC",
-    "client_order_id": "my-agent-0001"
-  }'
-# client_order_id makes retries safe — the same id can never double-fill`;
-}
-
-export function positionsCurl(base: string, address: string | null): string {
-  const addr = address ?? ADDRESS_PLACEHOLDER;
-  return `curl '${base}/positions?user=${addr}'
-curl '${base}/value?user=${addr}'
-# public by address — point a dashboard at it, no key needed`;
 }
 
 /** Step 1 — get OpenClaw. Onboarding is where you pick the model it will think

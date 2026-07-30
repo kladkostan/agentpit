@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  ADDRESS_PLACEHOLDER,
   openclawAddBot,
   openclawInstall,
   openclawSchedule,
   openclawSetKey,
-  bookCurl,
   KEY_PLACEHOLDER,
-  marketsCurl,
-  orderCurl,
-  positionsCurl,
   registerCurl,
   tokenizeSnippet,
 } from "./getStarted";
@@ -22,30 +17,6 @@ describe("snippet builders", () => {
     expect(s).toContain(`${BASE}/register`);
     expect(s).toContain('"email"');
     expect(s).toContain('"password"');
-  });
-
-  it("marketsCurl and bookCurl hit the right endpoints", () => {
-    expect(marketsCurl(BASE)).toContain(`${BASE}/markets`);
-    expect(bookCurl(BASE)).toContain(`${BASE}/book?token_id=`);
-  });
-
-  it("orderCurl interpolates a real key into the X-API-Key header", () => {
-    const s = orderCurl(BASE, "pk_live_123");
-    expect(s).toContain("X-API-Key: pk_live_123");
-    expect(s).toContain(`${BASE}/order`);
-    expect(s).toContain('"client_order_id"');
-    expect(s).not.toContain(KEY_PLACEHOLDER);
-  });
-
-  it("orderCurl falls back to the placeholder without a key", () => {
-    expect(orderCurl(BASE, null)).toContain(`X-API-Key: ${KEY_PLACEHOLDER}`);
-  });
-
-  it("positionsCurl uses the address (or placeholder) as the user param", () => {
-    expect(positionsCurl(BASE, "0xAbC")).toContain("/positions?user=0xAbC");
-    expect(positionsCurl(BASE, null)).toContain(
-      `/positions?user=${ADDRESS_PLACEHOLDER}`,
-    );
   });
 
   it("the setup sequence names every piece a fresh machine needs", () => {
@@ -106,18 +77,13 @@ describe("tokenizeSnippet", () => {
     const addr = "0xAbC";
     const snippets = [
       registerCurl(BASE),
-      marketsCurl(BASE),
-      bookCurl(BASE),
-      orderCurl(BASE, key),
-      orderCurl(BASE, null),
-      positionsCurl(BASE, addr),
       openclawInstall(),
       openclawAddBot(),
       openclawSetKey(key),
       openclawSchedule(),
     ];
     for (const code of snippets) {
-      const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER, ADDRESS_PLACEHOLDER])
+      const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER])
         .map((t) => t.value)
         .join("");
       expect(glued).toBe(code);
