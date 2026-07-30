@@ -3,21 +3,10 @@ import { Link, useParams } from "react-router-dom";
 import { useMarket } from "@/api/markets";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { STATE_TONE } from "@/lib/marketState";
 import { cn } from "@/lib/utils";
-import type { MarketState } from "@/types/market";
 import { Orderbook } from "@/components/orders/Orderbook";
 import { OrderTicket } from "@/components/orders/OrderTicket";
-
-const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
-  DRAFT: { dot: "bg-amber-500", label: "text-amber-700 dark:text-amber-400" },
-  ACTIVE: {
-    dot: "bg-emerald-500",
-    label: "text-emerald-700 dark:text-emerald-400",
-  },
-  CLOSED: { dot: "bg-slate-400", label: "text-slate-600 dark:text-slate-300" },
-  RESOLVED: { dot: "bg-sky-500", label: "text-sky-700 dark:text-sky-400" },
-  CANCELLED: { dot: "bg-rose-500", label: "text-rose-700 dark:text-rose-400" },
-};
 
 const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
   month: "short",

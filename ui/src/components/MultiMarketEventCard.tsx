@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { sortMarketsByYesMid, yesPriceMap } from "@/lib/eventOutcomes";
 import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
+import { STATE_TONE, eventState } from "@/lib/marketState";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/types/event";
 import type { Market } from "@/types/market";
@@ -73,6 +74,11 @@ export function MultiMarketEventCard({
   const previewMarkets = ranked.slice(0, PREVIEW_COUNT);
   const extra = ranked.length - previewMarkets.length;
   const closes = formatShortDate(event.end_date);
+  // Same badge as a single-market card: the two card shapes describe the same
+  // thing, so they must not label it differently. The outcome count is still on
+  // the card, in the "+N more outcomes" line below the preview.
+  const state = eventState(markets);
+  const tone = STATE_TONE[state];
 
   return (
     <Link
@@ -81,11 +87,11 @@ export function MultiMarketEventCard({
     >
       <article className="flex h-full flex-col gap-4 rounded-2xl border bg-card p-5 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-foreground/25 group-hover:shadow-[0_18px_36px_-22px_rgba(0,0,0,0.25)]">
         <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span aria-hidden className="size-1.5 rounded-full bg-foreground/30" />
-            Event · {markets.length} outcomes
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+            <span className={cn("truncate", tone.label)}>{state}</span>
           </span>
-          <span>
+          <span className="shrink-0 whitespace-nowrap">
             {closes ? (
               <>
                 <span className="text-foreground/40">closes</span> {closes}

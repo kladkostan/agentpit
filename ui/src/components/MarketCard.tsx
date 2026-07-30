@@ -3,8 +3,9 @@ import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
 import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
+import { STATE_TONE } from "@/lib/marketState";
 import { cn } from "@/lib/utils";
-import type { Market, MarketState } from "@/types/market";
+import type { Market } from "@/types/market";
 
 interface MarketCardProps {
   market: Market;
@@ -14,17 +15,6 @@ interface MarketCardProps {
   /** Parent event's upstream 24h volume (USD); null hides the stat. */
   volume24hr?: number | null;
 }
-
-const STATE_TONE: Record<MarketState, { dot: string; label: string }> = {
-  DRAFT: { dot: "bg-amber-500", label: "text-amber-700 dark:text-amber-400" },
-  ACTIVE: {
-    dot: "bg-emerald-500",
-    label: "text-emerald-700 dark:text-emerald-400",
-  },
-  CLOSED: { dot: "bg-slate-400", label: "text-slate-600 dark:text-slate-300" },
-  RESOLVED: { dot: "bg-sky-500", label: "text-sky-700 dark:text-sky-400" },
-  CANCELLED: { dot: "bg-rose-500", label: "text-rose-700 dark:text-rose-400" },
-};
 
 export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
@@ -54,11 +44,11 @@ export function MarketCard({ market, eventSlug, volume24hr }: MarketCardProps) {
     >
       <article className="flex h-full flex-col gap-5 rounded-2xl border bg-card p-5 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-foreground/25 group-hover:shadow-[0_18px_36px_-22px_rgba(0,0,0,0.25)]">
         <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span aria-hidden className={cn("size-1.5 rounded-full", tone.dot)} />
-            <span className={tone.label}>{market.market_state}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+            <span className={cn("truncate", tone.label)}>{market.market_state}</span>
           </span>
-          <span>
+          <span className="shrink-0 whitespace-nowrap">
             {closes ? (
               <>
                 <span className="text-foreground/40">closes</span> {closes}
