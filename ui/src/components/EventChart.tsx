@@ -82,6 +82,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
       picked.map((s, i) => ({
         id: s.market.market_id,
         color: s.color,
+        label: s.label,
         points: queryData[i]?.history ?? [],
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
