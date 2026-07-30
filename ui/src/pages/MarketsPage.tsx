@@ -98,15 +98,13 @@ interface SubcategoryOption {
   keywords: string[];
 }
 
-type QuickFilter = "all" | "live" | "endingSoon" | "new";
 type SortMode =
   | "volume24h"
   | "totalVolume"
   | "liquidity"
   | "newest"
   | "endingSoon"
-  | "competitive"
-  | "earn";
+  | "competitive";
 
 const SORT_OPTIONS: {
   key: SortMode;
@@ -119,30 +117,12 @@ const SORT_OPTIONS: {
     { key: "newest", label: "Newest", icon: Sparkles },
     { key: "endingSoon", label: "Ending Soon", icon: Clock3 },
     { key: "competitive", label: "Competitive", icon: Trophy },
-    { key: "earn", label: "Earn 3.25%", icon: CircleDollarSign },
   ];
 
 const DEFAULT_SORT_OPTION = SORT_OPTIONS[0] ?? {
   key: "volume24h" as SortMode,
   label: "24hr Volume",
   icon: ArrowUpRight,
-};
-
-const QUICK_FILTER_OPTIONS: {
-  key: QuickFilter;
-  label: string;
-  icon: LucideIcon;
-}[] = [
-    { key: "all", label: "All", icon: LayoutGrid },
-    { key: "live", label: "Active", icon: Check },
-    { key: "endingSoon", label: "Ending Soon", icon: Clock3 },
-    { key: "new", label: "Newest", icon: Sparkles },
-  ];
-
-const DEFAULT_QUICK_FILTER_OPTION = QUICK_FILTER_OPTIONS[0] ?? {
-  key: "all" as QuickFilter,
-  label: "All",
-  icon: LayoutGrid,
 };
 
 const CATEGORY_SUBCATEGORIES: Record<string, SubcategoryOption[]> = {
@@ -323,19 +303,10 @@ export function MarketsPage() {
   >({});
   const [selectedSubcategories, setSelectedSubcategories] = useState<string[]>([]);
   const [showSortMenu, setShowSortMenu] = useState(false);
-  const [showFilterTabs, setShowFilterTabs] = useState(false);
   // Each menu closes on a press outside it or on Escape; without this they
   // stayed open until their own trigger was clicked again.
   const sortMenuRef = useRef<HTMLDivElement>(null);
-  const filterMenuRef = useRef<HTMLDivElement>(null);
   useDismissOnOutside(sortMenuRef, () => setShowSortMenu(false), showSortMenu);
-  useDismissOnOutside(
-    filterMenuRef,
-    () => setShowFilterTabs(false),
-    showFilterTabs,
-  );
-  const [selectedQuickFilter, setSelectedQuickFilter] =
-    useState<QuickFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("volume24h");
   const { data: categoriesData } = useEventCategories();
   const {
@@ -382,10 +353,6 @@ export function MarketsPage() {
   }, [selectedCategory, selectedSubcategories]);
 
   const filtered = useMemo(() => {
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const sevenDaysFromNow = nowUnix + 7 * 24 * 60 * 60;
-    const sevenDaysAgo = nowUnix - 7 * 24 * 60 * 60;
-
     const queryFiltered =
       trimmedQuery.length === 0
         ? events
@@ -405,27 +372,7 @@ export function MarketsPage() {
           ),
         );
 
-    const withQuickFilter = withSubcategories.filter(({ event, markets }) => {
-      if (selectedQuickFilter === "all") return true;
-
-      if (selectedQuickFilter === "live") {
-        return markets.some((m) => m.market_state === "ACTIVE");
-      }
-
-      if (selectedQuickFilter === "endingSoon") {
-        if (!event.end_date) return false;
-        return event.end_date >= nowUnix && event.end_date <= sevenDaysFromNow;
-      }
-
-      if (selectedQuickFilter === "new") {
-        if (!event.start_date) return false;
-        return event.start_date >= sevenDaysAgo;
-      }
-
-      return true;
-    });
-
-    const sorted = [...withQuickFilter];
+    const sorted = [...withSubcategories];
     sorted.sort((a, b) => {
       if (sortMode === "volume24h" || sortMode === "totalVolume") {
         // "24hr Volume" sorts on the figure the server ranks by
@@ -464,13 +411,6 @@ export function MarketsPage() {
         return b.event.event_id - a.event.event_id;
       }
 
-      if (sortMode === "earn") {
-        const aLiveCount = a.markets.filter((m) => m.market_state === "ACTIVE").length;
-        const bLiveCount = b.markets.filter((m) => m.market_state === "ACTIVE").length;
-        if (bLiveCount !== aLiveCount) return bLiveCount - aLiveCount;
-        return b.event.event_id - a.event.event_id;
-      }
-
       const aStart = a.event.start_date ?? 0;
       const bStart = b.event.start_date ?? 0;
       if (bStart !== aStart) return bStart - aStart;
@@ -480,7 +420,6 @@ export function MarketsPage() {
     return sorted;
   }, [
     events,
-    selectedQuickFilter,
     selectedSubcategoryOptions,
     sortMode,
     trimmedQuery,
@@ -494,9 +433,7 @@ export function MarketsPage() {
 
   const isSearching = trimmedQuery.length > 0;
   const hasClientSideFilter =
-    isSearching ||
-    selectedSubcategoryOptions.length > 0 ||
-    selectedQuickFilter !== "all";
+    isSearching || selectedSubcategoryOptions.length > 0;
 
   // Any filter that runs client-side only sees the pages already loaded, so
   // eagerly pull the remaining pages while one is active. The
@@ -521,16 +458,11 @@ export function MarketsPage() {
     setQuery("");
     setSelectedCategory(null);
     setSelectedSubcategories([]);
-    setSelectedQuickFilter("all");
   }
 
   const selectedSortOption =
     SORT_OPTIONS.find((option) => option.key === sortMode) ?? DEFAULT_SORT_OPTION;
   const SelectedSortIcon = selectedSortOption.icon;
-  const selectedQuickFilterOption =
-    QUICK_FILTER_OPTIONS.find((option) => option.key === selectedQuickFilter) ??
-    DEFAULT_QUICK_FILTER_OPTION;
-  const SelectedQuickFilterIcon = selectedQuickFilterOption.icon;
 
   function handleCategorySelect(nextCategory: string | null) {
     // Re-clicking the active category should clear category filters.
@@ -763,10 +695,7 @@ export function MarketsPage() {
                     type="button"
                     variant="outline"
                     className={tabTriggerClassName}
-                    onClick={() => {
-                      setShowSortMenu((prev) => !prev);
-                      setShowFilterTabs(false);
-                    }}
+                    onClick={() => setShowSortMenu((prev) => !prev)}
                   >
                     <SelectedSortIcon className="size-4" aria-hidden />
                     {selectedSortOption.label}
@@ -801,62 +730,10 @@ export function MarketsPage() {
                           </button>
                         );
                       })}
-                      {/* Paging is server-side but this sort is client-side,
-                          so be explicit that it ranks what is loaded rather
-                          than the whole market universe. */}
-                      <p className="px-3 pb-1 pt-2 text-[11px] leading-snug text-muted-foreground">
-                        Ranks the results loaded so far — scroll to load more.
-                      </p>
                     </div>
                   ) : null}
                 </div>
 
-                <div className="relative" ref={filterMenuRef}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className={tabTriggerClassName}
-                    onClick={() => {
-                      setShowFilterTabs((prev) => !prev);
-                      setShowSortMenu(false);
-                    }}
-                  >
-                    <SelectedQuickFilterIcon className="size-4" aria-hidden />
-                    {selectedQuickFilterOption.label}
-                    <ChevronDown
-                      className={`size-4 transition-transform ${showFilterTabs ? "rotate-180" : ""
-                        }`}
-                      aria-hidden
-                    />
-                  </Button>
-
-                  {showFilterTabs ? (
-                    <div className={`${tabMenuSurfaceClassName} w-56`}>
-                      {QUICK_FILTER_OPTIONS.map((option) => {
-                        const OptionIcon = option.icon;
-                        const isSelected = selectedQuickFilter === option.key;
-
-                        return (
-                          <button
-                            key={option.key}
-                            type="button"
-                            className={tabMenuItemClassName}
-                            onClick={() => {
-                              setSelectedQuickFilter(option.key);
-                              setShowFilterTabs(false);
-                            }}
-                          >
-                            <OptionIcon className="size-4 text-current" aria-hidden />
-                            <span className="flex-1">{option.label}</span>
-                            {isSelected ? (
-                              <span className={tabSelectedIndicatorClassName} aria-hidden />
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
               </div>
 
               <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">

@@ -77,7 +77,11 @@ export function MarketCard({
         </h3>
 
         <div className="flex items-end justify-between gap-3">
-          <div className="flex min-w-0 flex-col gap-1">
+          {/* The sparkline is wider than the space left for it, so the two
+              overlap on a narrow card. Being later in the DOM it used to paint
+              on top of the probability; `relative z-10` puts the number in
+              front, where the reader needs it. */}
+          <div className="relative z-10 flex min-w-0 flex-col gap-1">
             <div
               className={cn(
                 "flex items-baseline gap-1",
