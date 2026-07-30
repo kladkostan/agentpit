@@ -1,4 +1,4 @@
-/** Snippet builders + tinting tokenizer for the /get-started guide.
+/** Snippet builders + tinting tokenizer for the landing page's builder guide.
  *
  *  One source of truth: each builder returns the RAW string that is (a) shown,
  *  (b) copied to the clipboard, and (c) tested. `tokenizeSnippet` splits that
@@ -48,48 +48,64 @@ curl '${base}/value?user=${addr}'
 # public by address — point a dashboard at it, no key needed`;
 }
 
-export function agentPy(
-  base: string,
-  key: string | null,
-  address: string | null,
-): string {
-  return `"""A complete agentpit agent: pick a market, read the book, trade it."""
-import json, random, time, requests
+/** The decision loop — what actually makes it an agent.
+ *
+ *  Steps 1-4 are the API. This is the part that decides: ask a model for a
+ *  probability, compare it with the price, act only on a gap worth acting on.
+ *  Kept short on purpose; the full version lives in the examples repo. */
+export function agentLoop(base: string, key: string | null): string {
+  return `"""One decision: is the market wrong enough to trade?"""
+import json, urllib.request
+from anthropic import Anthropic
 
-BASE = "${base}"
-KEY  = "${key ?? KEY_PLACEHOLDER}"
-H    = {"X-API-Key": KEY}
+BASE, KEY = "${base}", "${key ?? KEY_PLACEHOLDER}"
+EDGE = 0.10                      # ignore anything smaller — the spread eats it
 
-def mid(book):
-    bid = float(book["bids"][0]["price"]) if book.get("bids") else 0.0
-    ask = float(book["asks"][0]["price"]) if book.get("asks") else 1.0
-    return (bid + ask) / 2
+def get(path):
+    r = urllib.request.Request(f"{BASE}{path}", headers={"X-API-Key": KEY})
+    return json.loads(urllib.request.urlopen(r).read())
 
-# 1) find something worth trading
-markets = requests.get(f"{BASE}/markets", params={"limit": 25}).json()
-m = random.choice([x for x in markets if x.get("acceptingOrders")] or markets)
-yes_token = json.loads(m["clobTokenIds"])[0]
+event  = get("/events?limit=1")[0]      # /events is ordered by 24h volume
+market = event["markets"][0]
+bid, ask = float(market["bestBid"]), float(market["bestAsk"])
 
-# 2) quote it
-book = requests.get(f"{BASE}/book", params={"token_id": yes_token}).json()
-p = mid(book)
-print(f"{m['question']}  YES mid = {p:.3f}")
+# The model never sees the price. Shown it, a model drifts toward it and hands
+# back the number you were trying to beat.
+reply = Anthropic().messages.create(
+    model="claude-opus-5",
+    max_tokens=200,
+    output_config={"effort": "medium"},
+    messages=[{"role": "user", "content":
+        f'Probability this resolves YES? Reply JSON '
+        f'{{"probability": <0..1>}}.\\n\\n{market["question"]}'}],
+)
+p_model = json.loads(reply.content[0].text)["probability"]
 
-# 3) your alpha goes here — we just bid one cent under mid
-order = requests.post(f"{BASE}/order", headers=H, json={
-    "token_id": yes_token,
-    "side": "BUY",
-    "price": round(max(0.001, p - 0.01), 3),
-    "size": 10,
-    "order_type": "GTC",
-    "client_order_id": f"my-agent-{int(time.time())}",
-}).json()
-print("order:", order)
+edge = p_model - (bid + ask) / 2
+print(f"market {(bid + ask) / 2:.2f}  model {p_model:.2f}  edge {edge:+.2f}")
 
-# 4) see what you hold
-positions = requests.get(f"{BASE}/positions",
-                         params={"user": "${address ?? ADDRESS_PLACEHOLDER}"}).json()
-print(f"open positions: {len(positions)}")`;
+if abs(edge) < EDGE:
+    print("no edge — no trade")     # the correct answer most of the time
+else:
+    yes, no = json.loads(market["clobTokenIds"])
+    token, price = (yes, ask) if edge > 0 else (no, round(1 - bid, 3))
+    body = json.dumps({"token_id": token, "side": "BUY", "price": price,
+                       "size": 10, "order_type": "GTC"}).encode()
+    req = urllib.request.Request(f"{BASE}/order", data=body, method="POST",
+        headers={"X-API-Key": KEY, "Content-Type": "application/json"})
+    print(json.loads(urllib.request.urlopen(req).read()))`;
+}
+
+/** Same agent, scheduled — the answer to "and how does it run without me?". */
+export function openclawInstall(key: string | null): string {
+  return `# install the reference agent as an OpenClaw skill
+openclaw skills install git:https://github.com/skalenetwork/agentpit-examples
+
+export AGENTPIT_API_KEY=${key ?? KEY_PLACEHOLDER}
+export AGENTPIT_DRY_RUN=1        # first run: see what it WOULD trade
+
+# then let it run every 15 minutes, using the model OpenClaw already has
+openclaw cron add --every 15m "run the agentpit-reference skill"`;
 }
 
 /* -------------------------------------------------- display tokenizer --- */

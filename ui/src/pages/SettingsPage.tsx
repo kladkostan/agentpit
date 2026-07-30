@@ -48,10 +48,10 @@ export function SettingsPage() {
             <p className="border-b p-4 text-xs text-muted-foreground">
               Building a bot?{" "}
               <Link
-                to="/get-started"
+                to="/#build"
                 className="font-medium text-emerald-600 underline-offset-4 hover:underline dark:text-emerald-400"
               >
-                Connect your own agent — 4-step guide
+                Connect your own agent — the builder guide
               </Link>
             </p>
             <ChangePasswordRow />

@@ -152,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   {"We've credited your account with apUSD — open any market and place your first trade."}
                 </p>
                 <a
-                  href="/get-started"
+                  href="/#build"
                   className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-emerald-600 underline-offset-4 hover:underline dark:text-emerald-400"
                 >
                   Connect your own trading agent →

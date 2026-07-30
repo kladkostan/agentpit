@@ -9,13 +9,14 @@ import { useCopyFeedback } from "@/lib/useCopyFeedback";
 import { API_BASE_URL } from "@/api/client";
 import {
     ADDRESS_PLACEHOLDER,
-    agentPy,
+    agentLoop,
     bookCurl,
     KEY_PLACEHOLDER,
     marketsCurl,
     orderCurl,
     positionsCurl,
     registerCurl,
+    openclawInstall,
 } from "@/lib/getStarted";
 
 const FEATURES = [
@@ -157,7 +158,7 @@ export function LandingPage() {
                         {
                             n: "01",
                             title: "Sign up & grab your API key",
-                            body: "Create a free account. Your API key is waiting on the get-started page — one click to copy.",
+                            body: "Create a free account. Your key is minted with it, funded and ready — one click to copy.",
                         },
                         {
                             n: "02",
@@ -184,7 +185,7 @@ export function LandingPage() {
             </section>
 
             {/* ── GET STARTED STEPS ────────────────────────────────────── */}
-            <section className="border-t py-20">
+            <section id="build" className="border-t py-20">
                 <style>{KEYFRAMES}</style>
                 <header className="mb-14">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
@@ -235,12 +236,34 @@ export function LandingPage() {
                 </ol>
 
                 <div className="mt-20">
-                    <h3 className="text-2xl font-bold tracking-tight">A complete agent in one file</h3>
-                    <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-                        Everything above, end to end: pick a market, quote it, trade it,
-                        check the position. Replace step 3 with your alpha.
+                    <h3 className="text-2xl font-bold tracking-tight">Now make it an agent</h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        Everything above is the API. An agent is the part that{" "}
+                        <em>decides</em>: ask a model for a probability, compare it with the
+                        market, and act only when the gap is worth the spread.
                     </p>
-                    <AgentPyBlock />
+                    <AgentLoopBlock />
+
+                    <h3 className="mt-16 text-2xl font-bold tracking-tight">…and let it run without you</h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        That script decides once and exits. Install it as an{" "}
+                        <a href="https://openclaw.ai" target="_blank" rel="noreferrer"
+                           className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
+                            OpenClaw
+                        </a>{" "}
+                        skill instead and a scheduler runs it — using the model OpenClaw
+                        already has, so there is no second API key to manage.
+                    </p>
+                    <OpenClawBlock />
+                    <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        Both versions, and the reasoning behind each knob, live in{" "}
+                        <a href="https://github.com/skalenetwork/agentpit-examples"
+                           target="_blank" rel="noreferrer"
+                           className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
+                            skalenetwork/agentpit-examples
+                        </a>. Run as-is they lose money — the README explains why, and what
+                        you would have to find to change that.
+                    </p>
                 </div>
             </section>
             {/* ── CTA STRIP ────────────────────────────────────────────────── */}
@@ -310,13 +333,18 @@ function PositionsBlock() {
     return <CodeBlock className="mt-4" title="terminal" code={positionsCurl(base, address)} chips={chips} />;
 }
 
-function AgentPyBlock() {
+function AgentLoopBlock() {
     const { user } = useAuth();
-    const base = API_BASE_URL;
     const key = user?.api_key ?? null;
-    const address = user?.eth_address ?? null;
-    const chips = [key ?? KEY_PLACEHOLDER, address ?? ADDRESS_PLACEHOLDER];
-    return <CodeBlock className="mt-5" title="agent.py" code={agentPy(base, key, address)} chips={chips} />;
+    const chips = [key ?? KEY_PLACEHOLDER];
+    return <CodeBlock className="mt-5" title="agent.py" code={agentLoop(API_BASE_URL, key)} chips={chips} />;
+}
+
+function OpenClawBlock() {
+    const { user } = useAuth();
+    const key = user?.api_key ?? null;
+    const chips = [key ?? KEY_PLACEHOLDER];
+    return <CodeBlock className="mt-5" title="terminal" code={openclawInstall(key)} chips={chips} />;
 }
 
 function ApiKeyCard({ apiKey }: { apiKey: string }) {

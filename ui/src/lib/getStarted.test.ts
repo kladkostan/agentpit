@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ADDRESS_PLACEHOLDER,
-  agentPy,
+  agentLoop,
+  openclawInstall,
   bookCurl,
   KEY_PLACEHOLDER,
   marketsCurl,
@@ -45,20 +46,35 @@ describe("snippet builders", () => {
     );
   });
 
-  it("agentPy is wired to the real API surface", () => {
-    const s = agentPy(BASE, "pk_live_123", "0xAbC");
-    expect(s).toContain(`BASE = "${BASE}"`);
-    expect(s).toContain('KEY  = "pk_live_123"');
+  it("agentLoop is wired to the real API surface", () => {
+    const s = agentLoop(BASE, "pk_live_123");
+    expect(s).toContain(`BASE, KEY = "${BASE}"`);
+    expect(s).toContain('"pk_live_123"');
     expect(s).toContain("X-API-Key");
     expect(s).toContain("clobTokenIds");
-    expect(s).toContain("client_order_id");
-    expect(s).toContain('params={"user": "0xAbC"}');
+    expect(s).toContain("/events?limit=1");   // volume-ordered, not /markets
+    expect(s).toContain("/order");
   });
 
-  it("agentPy uses placeholders when logged out", () => {
-    const s = agentPy(BASE, null, null);
-    expect(s).toContain(`KEY  = "${KEY_PLACEHOLDER}"`);
-    expect(s).toContain(`params={"user": "${ADDRESS_PLACEHOLDER}"}`);
+  it("agentLoop keeps the model blind to the price", () => {
+    // The whole point: a model shown the price re-derives the price.
+    const s = agentLoop(BASE, "pk_live_123");
+    const prompt = s.slice(s.indexOf("messages=["), s.indexOf("p_model ="));
+    expect(prompt).toContain("question");
+    expect(prompt).not.toContain("bestBid");
+    expect(prompt).not.toContain("bestAsk");
+    expect(prompt).not.toContain("edge");
+  });
+
+  it("agentLoop uses a placeholder when logged out", () => {
+    expect(agentLoop(BASE, null)).toContain(`"${KEY_PLACEHOLDER}"`);
+  });
+
+  it("openclawInstall names the public repo and starts in dry run", () => {
+    const s = openclawInstall("pk_live_123");
+    expect(s).toContain("skalenetwork/agentpit-examples");
+    expect(s).toContain("AGENTPIT_DRY_RUN=1");
+    expect(s).toContain("pk_live_123");
   });
 });
 
@@ -98,8 +114,9 @@ describe("tokenizeSnippet", () => {
       orderCurl(BASE, key),
       orderCurl(BASE, null),
       positionsCurl(BASE, addr),
-      agentPy(BASE, key, addr),
-      agentPy(BASE, null, null),
+      agentLoop(BASE, key),
+      agentLoop(BASE, null),
+      openclawInstall(key),
     ];
     for (const code of snippets) {
       const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER, ADDRESS_PLACEHOLDER])
