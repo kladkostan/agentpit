@@ -20,6 +20,20 @@ def email_for(i: int) -> str:
     return _EMAIL.format(i=i)
 
 
+def gas_topup_wei(balance_wei: int, floor_wei: int, target_wei: int) -> int:
+    """Wei to send so the account sits at `target_wei`; 0 while it is above the floor.
+
+    Triggering on a floor rather than on exhaustion is the whole point. The
+    account signs a transaction per inventory split, so it drains steadily, and
+    it cannot pay for the transaction that would refill it once it is empty --
+    production stalled on dust (0.0000112 ETH), a balance that is starved but
+    emphatically not zero.
+    """
+    if floor_wei <= 0 or balance_wei >= floor_wei:
+        return 0
+    return max(0, target_wei - balance_wei)
+
+
 class HouseAccountProvisioner:
     def __init__(self, db: DbSession, onchain: OnchainAdmin, settings: Settings):
         self._db = db
@@ -69,6 +83,41 @@ class HouseAccountProvisioner:
             acct.address, self._settings.signup_gas_grant_wei, timeout=timeout
         )
         self._onchain.grant_user_approvals(acct, timeout=timeout)
+
+    def top_up_gas(self, users: list[User]) -> int:
+        """Refill any house account that has dropped below the gas floor.
+
+        Gas ONLY. `_fund` also drips collateral and re-sends the three approvals,
+        which is right for a fresh or chain-reset account and wrong for a routine
+        refill -- the approvals are already set, and each one costs the very gas
+        we are short of. Returns the number of accounts funded.
+        """
+        floor = self._settings.liquidity_gas_floor_wei
+        target = self._settings.liquidity_gas_target_wei
+        funded = 0
+        for user in users:
+            try:
+                balance = self._onchain.native_balance(user.eth_address)
+            except Exception as exc:
+                log.warning("gas balance check failed for %s: %s", user.email, exc)
+                continue
+            add = gas_topup_wei(balance, floor, target)
+            if add <= 0:
+                continue
+            try:
+                self._onchain.fund_gas(
+                    user.eth_address, add,
+                    timeout=self._settings.tx_confirmations_timeout_s,
+                )
+            except Exception:
+                log.exception("gas top-up failed for %s", user.email)
+                continue
+            log.info(
+                "house account %s gas topped up: %.4f -> %.4f ETH",
+                user.email, balance / 1e18, (balance + add) / 1e18,
+            )
+            funded += 1
+        return funded
 
     def _maybe_reonboard(self, user: User) -> None:
         try:

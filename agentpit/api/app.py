@@ -39,6 +39,7 @@ from agentpit.onchain.admin import OnchainAdmin
 from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
+from agentpit.datastructures.user import User
 from agentpit.liquidity.house_accounts import HouseAccountProvisioner, email_for
 from agentpit.liquidity.mirror import MirrorEngine
 from agentpit.polymarket.pinned import (
@@ -129,6 +130,27 @@ async def _resolution_mirror_loop(
         except Exception:
             log.exception("Resolution cycle failed")
         await asyncio.sleep(settings.resolution_mirror_interval_seconds)
+
+
+async def _house_gas_loop(
+    provisioner: HouseAccountProvisioner, users: list[User], settings: Settings
+) -> None:
+    """Keep the house accounts above the gas floor for as long as the API runs.
+
+    Provisioning only happens at startup, so before this loop existed the house
+    had exactly one grant per process and no way to earn more: it drained in
+    ~82 minutes and every inventory split after that failed silently.
+    """
+    while True:
+        try:
+            funded = await asyncio.to_thread(provisioner.top_up_gas, users)
+            if funded:
+                log.info("House gas: %d account(s) topped up", funded)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("House gas top-up cycle failed")
+        await asyncio.sleep(settings.liquidity_gas_check_interval_seconds)
 
 
 def _run_pin_sync(db: DbSession, admin: OnchainAdmin, settings: Settings) -> list[int]:
@@ -390,7 +412,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             mirror_tasks = [
                 asyncio.create_task(mirror_engine.run_feed()),
                 asyncio.create_task(mirror_engine.run_reconciler()),
+                asyncio.create_task(
+                    _house_gas_loop(provisioner, house_users, settings)
+                ),
             ]
+            log.info(
+                "House gas loop enabled (every %ss, floor %.1f ETH, target %.1f ETH)",
+                settings.liquidity_gas_check_interval_seconds,
+                settings.liquidity_gas_floor_wei / 1e18,
+                settings.liquidity_gas_target_wei / 1e18,
+            )
         else:
             log.info("Liquidity mirror disabled (set LIQUIDITY_ENGINE=true to enable)")
 

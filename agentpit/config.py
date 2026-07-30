@@ -165,6 +165,23 @@ class Settings(BaseSettings):
     liquidity_funding_drips: int = Field(
         default=1, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
     )
+    # House gas. The mirror signs its own split transactions, so the account
+    # spends gas continuously and its signup grant is not a lifetime supply:
+    # production burned it in ~82 minutes and the mirror then failed silently.
+    # A floor of 5 ETH is ~45 hours of headroom at the observed post-fix rate
+    # (0.111 ETH/h), so a refill is never urgent. Topping up is gas ONLY --
+    # the zero-balance path in HouseAccountProvisioner means "the chain was
+    # reset, re-onboard from scratch" and must stay distinct from this.
+    liquidity_gas_floor_wei: int = Field(
+        default=5 * 10**18, validation_alias="AGENTPIT_LIQUIDITY_GAS_FLOOR_WEI"
+    )
+    liquidity_gas_target_wei: int = Field(
+        default=100 * 10**18, validation_alias="AGENTPIT_LIQUIDITY_GAS_TARGET_WEI"
+    )
+    liquidity_gas_check_interval_seconds: float = Field(
+        default=300.0,
+        validation_alias="AGENTPIT_LIQUIDITY_GAS_CHECK_INTERVAL_SECONDS",
+    )
     mirror_assets_per_connection: int = Field(
         default=200, validation_alias="AGENTPIT_MIRROR_ASSETS_PER_CONNECTION"
     )

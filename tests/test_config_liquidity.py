@@ -11,6 +11,9 @@ def test_liquidity_defaults():
     assert abs(s.mirror_watchdog_seconds - 120.0) < 1e-9
     assert abs(s.mirror_inventory_buffer - 1.2) < 1e-9
     assert s.mirror_inventory_seed_micro == 100_000_000_000_000  # 100M apUSD
+    assert s.liquidity_gas_floor_wei == 5 * 10**18
+    assert s.liquidity_gas_target_wei == 100 * 10**18
+    assert abs(s.liquidity_gas_check_interval_seconds - 300.0) < 1e-9
     assert s.mirror_max_settlements_per_cycle == 1
     assert s.mirror_tape_enabled is True
     assert abs(s.mirror_target_refresh_seconds - 15.0) < 1e-9
