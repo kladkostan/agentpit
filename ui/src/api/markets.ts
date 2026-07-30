@@ -114,3 +114,27 @@ export function usePricesHistory(tokenId: string | undefined, interval = "1d") {
     refetchIntervalInBackground: false,
   });
 }
+
+export interface MarketStats {
+  active: number;
+}
+
+/** Platform-wide live-market count.
+ *
+ *  Deliberately NOT derived from the paged event list: summing loaded pages
+ *  reports how far the user has scrolled, not how many markets exist (the grid
+ *  showed "93 live" against 1928 actually active). The server applies the same
+ *  predicate the grid does, so the headline and the cards agree. */
+export async function getMarketStats(): Promise<MarketStats> {
+  return apiFetch<MarketStats>("/markets/stats");
+}
+
+export function useMarketStats() {
+  return useQuery({
+    queryKey: ["markets", "stats"],
+    queryFn: getMarketStats,
+    // Matches the event list's cadence so the count and the grid move together.
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+  });
+}

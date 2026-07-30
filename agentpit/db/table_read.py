@@ -274,6 +274,23 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
+    def count_active_markets(db: psycopg.Connection) -> int:
+        """How many markets are ACTIVE, platform-wide.
+
+        This is the same predicate the UI calls "live", reduced. `to_gamma_market`
+        sets `active = (state == ACTIVE)` and `closed = (state in CLOSED, RESOLVED,
+        CANCELLED)`; the UI reads a market as live when it is active and not
+        closed, and since ACTIVE is in neither closed set that collapses to the
+        single comparison below. If either mapping changes, this must follow, or
+        the headline number stops agreeing with the grid it labels.
+        """
+        row = db.execute(
+            "SELECT COUNT(*) as CNT FROM markets WHERE MARKET_STATE = %s",
+            (MarketState.ACTIVE.value,),
+        ).fetchone()
+        return int(row["CNT"]) if row else 0
+
+    @staticmethod
     def list_markets(
         db: psycopg.Connection, limit: int = 100, offset: int = 0
     ) -> "tuple[list[Market], int]":

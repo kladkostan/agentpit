@@ -7,7 +7,10 @@ from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.gamma_market import GammaMarket
-from agentpit.datastructures.list_markets_response import ListMarketsResponse
+from agentpit.datastructures.list_markets_response import (
+    ListMarketsResponse,
+    MarketStatsResponse,
+)
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
 from agentpit.polymarket.gamma import to_gamma_market
@@ -32,6 +35,12 @@ class MarketService:
     def __init__(self, db: DbSession, onchain: OnchainAdmin):
         self._db = db
         self._onchain = onchain
+
+    def market_stats(self) -> MarketStatsResponse:
+        with self._db.read() as conn:
+            return MarketStatsResponse(
+                active=TableRead.count_active_markets(conn)
+            )
 
     def list_markets(self, limit: int, offset: int) -> ListMarketsResponse:
         if limit < 1 or limit > 1000:

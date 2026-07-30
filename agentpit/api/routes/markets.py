@@ -4,6 +4,7 @@ from agentpit.api.deps import MarketServiceDep, require_admin_token
 from agentpit.datastructures.cancel_market_response import CancelMarketResponse
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.gamma_market import GammaMarket
+from agentpit.datastructures.list_markets_response import MarketStatsResponse
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.resolve_market_request import ResolveMarketRequest
 
@@ -43,6 +44,14 @@ def list_markets(
 )
 def create_market(payload: CreateMarketRequest, service: MarketServiceDep) -> Market:
     return service.create_market(payload)
+
+
+# NOTE: declaration order is load-bearing, as for /events/categories. FastAPI
+# matches in registration order, so this MUST stay above /markets/{market_id} —
+# below it, "stats" is matched as a market_id and rejected as a non-integer (422).
+@router.get("/markets/stats", response_model=MarketStatsResponse)
+def market_stats(service: MarketServiceDep) -> MarketStatsResponse:
+    return service.market_stats()
 
 
 @router.get("/markets/{market_id}", response_model=GammaMarket)

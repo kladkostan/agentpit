@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useEventCategories, useEventsInfinite } from "@/api/events";
+import { useMarketStats } from "@/api/markets";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { Button } from "@/components/ui/button";
 import {
@@ -472,16 +473,11 @@ export function MarketsPage() {
     trimmedQuery,
   ]);
 
-  const activeCount = useMemo(
-    () =>
-      events.reduce(
-        (acc, ev) =>
-          acc +
-          ev.markets.filter((m) => m.market_state === "ACTIVE").length,
-        0,
-      ),
-    [events],
-  );
+  // Platform-wide, from the server. Counting the loaded pages instead reports
+  // how far the user has scrolled — it read "93 live" on the first page while
+  // 1928 markets were actually active, and climbed as you scrolled.
+  const { data: marketStats } = useMarketStats();
+  const activeCount = marketStats?.active ?? null;
 
   const isSearching = trimmedQuery.length > 0;
   const hasClientSideFilter =
@@ -855,7 +851,7 @@ export function MarketsPage() {
                   aria-hidden
                   className="size-1.5 animate-pulse-dot rounded-full bg-emerald-500"
                 />
-                {activeCount} live
+                {activeCount === null ? "—" : activeCount.toLocaleString()} live
               </span>
             </div>
           </div>

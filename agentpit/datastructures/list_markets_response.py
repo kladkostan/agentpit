@@ -16,3 +16,16 @@ class ListMarketsResponse(BaseModel):
         check_state(
             len(self.markets) <= self.limit, "Number of markets cannot exceed limit"
         )
+
+
+class MarketStatsResponse(BaseModel):
+    """Platform-wide market counts, for headline figures the paged list cannot give.
+
+    `/markets` and `/events` are paged, so a UI summing what it has loaded reports
+    how far the user has scrolled, not how big the platform is.
+    """
+
+    active: int
+
+    def model_post_init(self, __context):
+        check_state(self.active >= 0, "Active count must be non-negative")
