@@ -2,7 +2,12 @@ import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
-import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
+import {
+  formatProbabilityPct,
+  formatShortDate,
+  formatVolume,
+  volumeStat,
+} from "@/lib/format";
 import { STATE_TONE } from "@/lib/marketState";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
@@ -12,17 +17,25 @@ interface MarketCardProps {
   /** When provided, the card links to /events/:slug instead of /markets/:id.
    * Used for singleton-market events so the URL surface stays event-centric. */
   eventSlug?: string;
-  /** Parent event's upstream all-time volume (USD); null hides the stat. */
+  /** Parent event's upstream volumes (USD). All-time is preferred; the 24h
+   *  figure is the fallback for events no longer in the synced set. */
   volume?: number | null;
+  volume24hr?: number | null;
 }
 
-export function MarketCard({ market, eventSlug, volume }: MarketCardProps) {
+export function MarketCard({
+  market,
+  eventSlug,
+  volume,
+  volume24hr,
+}: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
   const yesPrice = market.outcome_prices[0];
   const { data: spark } = usePricesHistory(yesTokenId);
   const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
   const closes = formatShortDate(market.end_date);
+  const vol = volumeStat(volume ?? null, volume24hr ?? null);
   const href = eventSlug
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;
@@ -96,12 +109,12 @@ export function MarketCard({ market, eventSlug, volume }: MarketCardProps) {
           </div>
         </div>
 
-        {volume != null ? (
+        {vol ? (
           <div className="flex items-center gap-1.5 border-t pt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             <span className="tabular-nums text-foreground/70">
-              {formatVolume(volume)}
+              {formatVolume(vol.value)}
             </span>
-            <span>vol</span>
+            <span>{vol.label}</span>
           </div>
         ) : null}
       </article>

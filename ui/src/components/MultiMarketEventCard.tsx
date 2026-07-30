@@ -1,7 +1,12 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { sortMarketsByYesMid, yesPriceMap } from "@/lib/eventOutcomes";
-import { formatProbabilityPct, formatShortDate, formatVolume } from "@/lib/format";
+import {
+  formatProbabilityPct,
+  formatShortDate,
+  formatVolume,
+  volumeStat,
+} from "@/lib/format";
 import { STATE_TONE, eventState } from "@/lib/marketState";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/types/event";
@@ -74,6 +79,7 @@ export function MultiMarketEventCard({
   const previewMarkets = ranked.slice(0, PREVIEW_COUNT);
   const extra = ranked.length - previewMarkets.length;
   const closes = formatShortDate(event.end_date);
+  const vol = volumeStat(event.volume, event.volume_24hr);
   // Same badge as a single-market card: the two card shapes describe the same
   // thing, so they must not label it differently. The outcome count is still on
   // the card, in the "+N more outcomes" line below the preview.
@@ -131,12 +137,12 @@ export function MultiMarketEventCard({
           ) : null}
         </div>
 
-        {event.volume !== null ? (
+        {vol ? (
           <div className="mt-auto flex items-center gap-1.5 border-t pt-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             <span className="tabular-nums text-foreground/70">
-              {formatVolume(event.volume)}
+              {formatVolume(vol.value)}
             </span>
-            <span>vol</span>
+            <span>{vol.label}</span>
           </div>
         ) : null}
       </article>

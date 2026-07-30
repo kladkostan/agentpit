@@ -4,6 +4,7 @@ import {
   formatSignedUsd,
   parseVolume,
   relativeTime,
+  volumeStat,
 } from "./format";
 
 describe("parseVolume", () => {
@@ -77,5 +78,32 @@ describe("relativeTime", () => {
 
   it("clamps negative input (clock skew) to 0s", () => {
     expect(relativeTime(-7)).toBe("0s");
+  });
+});
+
+describe("volumeStat", () => {
+  it("prefers the all-time figure", () => {
+    expect(volumeStat(8_068_246, 3_341_364)).toEqual({
+      value: 8_068_246,
+      label: "vol",
+    });
+  });
+
+  it("falls back to 24h, labelled as 24h, when all-time is missing", () => {
+    // 545 of 962 production events had exactly this shape: they had dropped out
+    // of the synced top-N, so only the older 24h capture survived. Dropping the
+    // line for them would have blanked most of the grid.
+    expect(volumeStat(null, 3_341_364)).toEqual({
+      value: 3_341_364,
+      label: "24h vol",
+    });
+  });
+
+  it("is null only when neither figure exists", () => {
+    expect(volumeStat(null, null)).toBeNull();
+  });
+
+  it("treats a real zero as a figure, not as missing", () => {
+    expect(volumeStat(0, 500)).toEqual({ value: 0, label: "vol" });
   });
 });

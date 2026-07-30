@@ -108,3 +108,19 @@ export function relativeTime(secsAgo: number): string {
   if (secsAgo < 86_400) return `${Math.floor(secsAgo / 3600)}h`;
   return `${Math.floor(secsAgo / 86_400)}d`;
 }
+
+/** Which volume figure a card should show, and what to call it.
+ *
+ *  All-time is preferred, but only events touched by a recent sync carry it: an
+ *  event that has dropped out of the synced top-N keeps its last-captured 24h
+ *  figure and never gets an all-time one. Falling back to that figure — labelled
+ *  as what it is — beats dropping the line, which would have blanked 545 of 962
+ *  production events. */
+export function volumeStat(
+  volume: number | null,
+  volume24hr: number | null,
+): { value: number; label: string } | null {
+  if (volume !== null) return { value: volume, label: "vol" };
+  if (volume24hr !== null) return { value: volume24hr, label: "24h vol" };
+  return null;
+}
