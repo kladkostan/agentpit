@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ADDRESS_PLACEHOLDER,
-  agentLoop,
+  openclawAddBot,
   openclawInstall,
+  openclawSchedule,
+  openclawSetKey,
   bookCurl,
   KEY_PLACEHOLDER,
   marketsCurl,
@@ -46,36 +48,31 @@ describe("snippet builders", () => {
     );
   });
 
-  it("agentLoop is wired to the real API surface", () => {
-    const s = agentLoop(BASE, "pk_live_123");
-    expect(s).toContain(`BASE, KEY = "${BASE}"`);
-    expect(s).toContain('"pk_live_123"');
-    expect(s).toContain("X-API-Key");
-    expect(s).toContain("clobTokenIds");
-    expect(s).toContain("/events?limit=1");   // volume-ordered, not /markets
-    expect(s).toContain("/order");
+  it("the setup sequence names every piece a fresh machine needs", () => {
+    expect(openclawInstall()).toContain("openclaw.ai/install.sh");
+    expect(openclawInstall()).toContain("onboard");        // where the model is picked
+    expect(openclawAddBot()).toContain("skalenetwork/agentpit-examples");
   });
 
-  it("agentLoop keeps the model blind to the price", () => {
-    // The whole point: a model shown the price re-derives the price.
-    const s = agentLoop(BASE, "pk_live_123");
-    const prompt = s.slice(s.indexOf("messages=["), s.indexOf("p_model ="));
-    expect(prompt).toContain("question");
-    expect(prompt).not.toContain("bestBid");
-    expect(prompt).not.toContain("bestAsk");
-    expect(prompt).not.toContain("edge");
-  });
-
-  it("agentLoop uses a placeholder when logged out", () => {
-    expect(agentLoop(BASE, null)).toContain(`"${KEY_PLACEHOLDER}"`);
-  });
-
-  it("openclawInstall names the public repo and starts in dry run", () => {
-    const s = openclawInstall("pk_live_123");
-    expect(s).toContain("skalenetwork/agentpit-examples");
-    expect(s).toContain("AGENTPIT_DRY_RUN=1");
+  it("the key is scoped to the skill and the gateway is restarted", () => {
+    const s = openclawSetKey("pk_live_123");
+    expect(s).toContain("skills.entries.agentpit-reference.env.AGENTPIT_API_KEY");
     expect(s).toContain("pk_live_123");
+    // Read at startup — without this the key silently does nothing.
+    expect(s).toContain("daemon restart");
   });
+
+  it("openclawSetKey falls back to the placeholder when logged out", () => {
+    expect(openclawSetKey(null)).toContain(KEY_PLACEHOLDER);
+  });
+
+  it("the dry run comes before the schedule, and is switched off after", () => {
+    const s = openclawSchedule();
+    expect(s.indexOf("AGENTPIT_DRY_RUN 1")).toBeGreaterThan(-1);
+    expect(s.indexOf("AGENTPIT_DRY_RUN 1")).toBeLessThan(s.indexOf("cron add"));
+    expect(s).toContain("config unset");   // otherwise it schedules a no-op
+  });
+
 });
 
 describe("tokenizeSnippet", () => {
@@ -114,9 +111,10 @@ describe("tokenizeSnippet", () => {
       orderCurl(BASE, key),
       orderCurl(BASE, null),
       positionsCurl(BASE, addr),
-      agentLoop(BASE, key),
-      agentLoop(BASE, null),
-      openclawInstall(key),
+      openclawInstall(),
+      openclawAddBot(),
+      openclawSetKey(key),
+      openclawSchedule(),
     ];
     for (const code of snippets) {
       const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER, ADDRESS_PLACEHOLDER])

@@ -9,14 +9,16 @@ import { useCopyFeedback } from "@/lib/useCopyFeedback";
 import { API_BASE_URL } from "@/api/client";
 import {
     ADDRESS_PLACEHOLDER,
-    agentLoop,
     bookCurl,
     KEY_PLACEHOLDER,
     marketsCurl,
     orderCurl,
     positionsCurl,
     registerCurl,
+    openclawAddBot,
     openclawInstall,
+    openclawSchedule,
+    openclawSetKey,
 } from "@/lib/getStarted";
 
 const FEATURES = [
@@ -235,34 +237,76 @@ export function LandingPage() {
                     </GsStep>
                 </ol>
 
-                <div className="mt-20">
-                    <h3 className="text-2xl font-bold tracking-tight">Now make it an agent</h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                        Everything above is the API. An agent is the part that{" "}
-                        <em>decides</em>: ask a model for a probability, compare it with the
-                        market, and act only when the gap is worth the spread.
+                <div className="mt-20 border-t pt-16">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
+                        Or skip the code
                     </p>
-                    <AgentLoopBlock />
+                    <h3 className="mt-3 text-3xl font-bold tracking-tight">Run a ready-made agent</h3>
+                    <p className="mt-3 max-w-2xl text-muted-foreground">
+                        Four commands and a bot trades for you every 15 minutes. It reads a
+                        market, asks your model how likely it is, and buys the side the
+                        market prices too cheaply.
+                    </p>
+                    <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        You will need two things we cannot provide: a model configured in
+                        OpenClaw — your key, your spend — and a machine that stays awake,
+                        since the schedule runs where you install it.
+                    </p>
 
-                    <h3 className="mt-16 text-2xl font-bold tracking-tight">…and let it run without you</h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                        That script decides once and exits. Install it as an{" "}
-                        <a href="https://openclaw.ai" target="_blank" rel="noreferrer"
-                           className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
-                            OpenClaw
-                        </a>{" "}
-                        skill instead and a scheduler runs it — using the model OpenClaw
-                        already has, so there is no second API key to manage.
-                    </p>
-                    <OpenClawBlock />
-                    <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                        Both versions, and the reasoning behind each knob, live in{" "}
+                    <ol className="mt-12 space-y-14">
+                        <GsStep n="05" title="Install OpenClaw" delay={1}>
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                                The scheduler your agent lives in. Onboarding is also where
+                                you pick the model it thinks with — there is no separate
+                                step for that.
+                            </p>
+                            <OpenClawInstallBlock />
+                        </GsStep>
+
+                        <GsStep n="06" title="Add the agent" delay={2}>
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                                Installs from{" "}
+                                <a href="https://github.com/skalenetwork/agentpit-examples"
+                                   target="_blank" rel="noreferrer"
+                                   className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
+                                    our public repository
+                                </a>
+                                {" "}— read it first if you like, it is one small file plus
+                                three scripts.
+                            </p>
+                            <OpenClawAddBotBlock />
+                        </GsStep>
+
+                        <GsStep n="07" title="Give it your key" delay={3}>
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                                Scoped to this skill alone, not your whole machine. The
+                                gateway reads it at startup, so it has to be restarted — the
+                                one step people forget.
+                            </p>
+                            <OpenClawKeyBlock />
+                        </GsStep>
+
+                        <GsStep n="08" title="Dry run, then let it trade" delay={4}>
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                                Look before you leap: the first run prints what it{" "}
+                                <em>would</em> trade and sends nothing. Worth repeating every
+                                time you change the prompt.
+                            </p>
+                            <OpenClawScheduleBlock />
+                        </GsStep>
+                    </ol>
+
+                    <p className="mt-12 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        Run as-is it loses money, and the{" "}
                         <a href="https://github.com/skalenetwork/agentpit-examples"
                            target="_blank" rel="noreferrer"
                            className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
-                            skalenetwork/agentpit-examples
-                        </a>. Run as-is they lose money — the README explains why, and what
-                        you would have to find to change that.
+                            README
+                        </a>{" "}
+                        is blunt about why: a liquid price already aggregates people with
+                        money at stake, and the spread takes what little is left. Changing
+                        that is the exercise — the prompt, the filter and the routing are
+                        all yours to move.
                     </p>
                 </div>
             </section>
@@ -333,18 +377,22 @@ function PositionsBlock() {
     return <CodeBlock className="mt-4" title="terminal" code={positionsCurl(base, address)} chips={chips} />;
 }
 
-function AgentLoopBlock() {
-    const { user } = useAuth();
-    const key = user?.api_key ?? null;
-    const chips = [key ?? KEY_PLACEHOLDER];
-    return <CodeBlock className="mt-5" title="agent.py" code={agentLoop(API_BASE_URL, key)} chips={chips} />;
+function OpenClawInstallBlock() {
+    return <CodeBlock className="mt-4" title="terminal" code={openclawInstall()} chips={[]} />;
 }
 
-function OpenClawBlock() {
+function OpenClawAddBotBlock() {
+    return <CodeBlock className="mt-4" title="terminal" code={openclawAddBot()} chips={[]} />;
+}
+
+function OpenClawKeyBlock() {
     const { user } = useAuth();
     const key = user?.api_key ?? null;
-    const chips = [key ?? KEY_PLACEHOLDER];
-    return <CodeBlock className="mt-5" title="terminal" code={openclawInstall(key)} chips={chips} />;
+    return <CodeBlock className="mt-4" title="terminal" code={openclawSetKey(key)} chips={[key ?? KEY_PLACEHOLDER]} />;
+}
+
+function OpenClawScheduleBlock() {
+    return <CodeBlock className="mt-4" title="terminal" code={openclawSchedule()} chips={[]} />;
 }
 
 function ApiKeyCard({ apiKey }: { apiKey: string }) {
