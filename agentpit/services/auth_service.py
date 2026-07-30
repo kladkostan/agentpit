@@ -119,12 +119,22 @@ class AuthService:
     def _maybe_reonboard(self, user: User) -> None:
         """Re-run onboarding for an already-onboarded user with zero native balance.
 
-        Anvil's chain state is wiped on every restart while the SQLite DB persists,
-        so a user can end up logged in but unfunded. Native balance is the chain-wipe
-        signal: it never drops to zero through normal use (gas spent per tx is tiny
-        relative to signup_gas_grant_wei). Failures here are logged but never block
-        login — the user can still authenticate and see balance errors at trade time.
+        Anvil's chain state is wiped on every restart while the DB persists, so a
+        user can end up logged in but unfunded. Native balance is the chain-wipe
+        signal: on a chain that gets reset it never drops to zero through normal
+        use (gas spent per tx is tiny relative to signup_gas_grant_wei). Failures
+        here are logged but never block login — the user can still authenticate
+        and see balance errors at trade time.
+
+        That reading only holds while the chain is disposable. On a durable chain
+        a zero balance means the account spent its gas, and re-granting on login
+        would be a treasury faucet anyone could drain on repeat, so
+        `simulated_chain=False` turns this off and the signup grant becomes once
+        per account. (The house account does not rely on this path at all — it is
+        kept above a gas floor by the mirror's top-up loop.)
         """
+        if not self._settings.simulated_chain:
+            return
         if self._onchain is None or user.onboarded_at is None:
             return
         try:

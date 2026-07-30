@@ -34,3 +34,56 @@ def test_never_returns_negative_when_misconfigured():
     # floor above target: a balance under the floor but over the target must
     # not ask for a negative transfer.
     assert gas_topup_wei(50 * ETH, 100 * ETH, 10 * ETH) == 0
+
+
+# --- the simulated-chain gate -----------------------------------------------
+# Re-onboarding on a zero balance repairs an account a disposable chain forgot.
+# On a durable chain the same condition means the account spent its gas, and
+# re-granting on login would be a faucet anyone could drain on repeat.
+
+class _FakeOnchain:
+    def __init__(self):
+        self.funded = []
+
+    def native_balance(self, address):
+        return 0                      # looks exactly like a chain wipe
+
+    def faucet_drip(self, address, *, timeout=30):
+        self.funded.append(("drip", address))
+
+    def fund_gas(self, address, value_wei, *, timeout=30):
+        self.funded.append(("gas", address))
+
+    def grant_user_approvals(self, account, *, timeout=30):
+        self.funded.append(("approvals", account))
+
+
+def _provisioner(simulated: bool):
+    from agentpit.config import Settings
+    from agentpit.liquidity.house_accounts import HouseAccountProvisioner
+    onchain = _FakeOnchain()
+    settings = Settings(AGENTPIT_SIMULATED_CHAIN=simulated)
+    return HouseAccountProvisioner(None, onchain, settings), onchain
+
+
+class _Key:
+    address = "0x" + "11" * 20
+
+
+class _User:
+    user_id = "u1"
+    email = "house-bot-0@agentpit.local"
+    eth_address = "0x" + "11" * 20
+    eth_key = _Key()
+
+
+def test_zero_balance_reonboards_on_a_simulated_chain():
+    prov, onchain = _provisioner(True)
+    prov._maybe_reonboard(_User())
+    assert onchain.funded, "a wiped chain must be repaired"
+
+
+def test_zero_balance_does_not_regrant_on_a_durable_chain():
+    prov, onchain = _provisioner(False)
+    prov._maybe_reonboard(_User())
+    assert onchain.funded == [], "login must not mint a fresh gas grant"

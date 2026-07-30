@@ -137,6 +137,16 @@ class Settings(BaseSettings):
     signup_gas_grant_wei: int = Field(
         default=10**18, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
     )
+    # True while the chain can be wiped out from under the database (a local
+    # anvil): a zero native balance then means "the chain forgot this account"
+    # and re-running onboarding is the repair. On a durable chain a zero balance
+    # means the opposite -- the account simply spent its gas -- and re-granting
+    # would turn login into a treasury faucet, repeatable by anyone willing to
+    # empty their own wallet. Set false before pointing at a real chain: the
+    # signup grant then becomes once per account rather than once per drain.
+    simulated_chain: bool = Field(
+        default=True, validation_alias="AGENTPIT_SIMULATED_CHAIN"
+    )
     tx_confirmations_timeout_s: int = Field(
         default=30, validation_alias="AGENTPIT_TX_TIMEOUT_S"
     )

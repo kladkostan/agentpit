@@ -120,6 +120,14 @@ class HouseAccountProvisioner:
         return funded
 
     def _maybe_reonboard(self, user: User) -> None:
+        """Repair an account the chain forgot — a wipe, not ordinary spending.
+
+        Gated on `simulated_chain` for the same reason as the user-facing path:
+        only a disposable chain can forget a funded account. Routine depletion is
+        `top_up_gas`'s job, and it triggers on a floor rather than on zero.
+        """
+        if not self._settings.simulated_chain:
+            return
         try:
             if self._onchain.native_balance(user.eth_address) > 0:
                 return
