@@ -177,6 +177,18 @@ class Settings(BaseSettings):
     mirror_inventory_buffer: float = Field(
         default=1.2, validation_alias="AGENTPIT_MIRROR_INVENTORY_BUFFER"
     )
+    # Headroom minted above the requirement whenever the house is short, in
+    # micro-apUSD. The requirement only ever grows, so exact top-ups cost a
+    # transaction per upstream depth record; one generous block instead lets a
+    # market converge in a single split. 1e14 micro = 100M apUSD, comfortably
+    # above the largest requirement observed in production (39M). Collateral is
+    # minted freely on the simulated chain, so the block can be this generous —
+    # lower it on a chain where collateral costs real money. 0 restores exact
+    # top-ups.
+    mirror_inventory_seed_micro: int = Field(
+        default=100_000_000_000_000,
+        validation_alias="AGENTPIT_MIRROR_INVENTORY_SEED_MICRO",
+    )
     mirror_max_settlements_per_cycle: int = Field(
         default=1, validation_alias="AGENTPIT_MIRROR_MAX_SETTLEMENTS_PER_CYCLE"
     )

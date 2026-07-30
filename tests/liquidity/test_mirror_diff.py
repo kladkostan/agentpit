@@ -2,7 +2,8 @@
 from agentpit.liquidity.replica import MICRO, BookSnapshot
 from agentpit.liquidity.reconciler import (
     HotCuts, LiveLevel, Placement, cap_sells_to_inventory, desired_levels,
-    diff_levels, hot_cuts, is_hot_level, split_target_micro, tier_plan,
+    diff_levels, hot_cuts, inventory_mint_micro, is_hot_level, split_target_micro,
+    tier_plan,
 )
 
 YES, NO = "tok-yes", "tok-no"
@@ -267,3 +268,56 @@ def test_tier_plan_hot_equals_cap_behaves_like_today():
     desired, protect = tier_plan(snap, YES, NO, hot_depth=8, max_depth=8, cold=False)
     assert desired == desired_levels(snap, YES, NO, 8)
     assert protect is None
+
+
+# --- inventory minting ------------------------------------------------------
+# The house never spends this inventory, so `held` only grows and the
+# requirement is a running maximum. Topping up to the exact requirement buys a
+# transaction per new record, forever — production ran 64 splits/min this way.
+
+def test_inventory_mint_zero_when_stock_covers_the_requirement():
+    assert inventory_mint_micro(need_micro=100, held_micro=100, seed_micro=1_000) == 0
+    assert inventory_mint_micro(need_micro=100, held_micro=500, seed_micro=1_000) == 0
+
+
+def test_inventory_mint_zero_when_nothing_is_required():
+    assert inventory_mint_micro(need_micro=0, held_micro=0, seed_micro=1_000) == 0
+    assert inventory_mint_micro(need_micro=-5, held_micro=0, seed_micro=1_000) == 0
+
+
+def test_inventory_mint_leaves_the_stock_one_seed_above_the_requirement():
+    # The invariant that makes a market converge: after minting, the stock
+    # clears the requirement by a whole block, whatever it started from.
+    for held in (0, 40, 99):
+        add = inventory_mint_micro(need_micro=100, held_micro=held, seed_micro=1_000)
+        assert held + add == 100 + 1_000
+
+
+def test_inventory_mint_converges_in_one_split():
+    add = inventory_mint_micro(need_micro=100, held_micro=0, seed_micro=1_000)
+    # A second pass at the same requirement asks for nothing more.
+    assert inventory_mint_micro(need_micro=100, held_micro=add, seed_micro=1_000) == 0
+
+
+def test_inventory_mint_seed_zero_is_the_legacy_exact_top_up():
+    assert inventory_mint_micro(need_micro=100, held_micro=40, seed_micro=0) == 60
+
+
+def test_inventory_mint_ends_the_ratchet_seen_in_production():
+    # Six successive requirements recorded from one production market, in
+    # apUSD units (the running maximum of 1.2 x full-book depth). Each cost a
+    # split under exact top-ups; one block covers all of them.
+    needs = [16_552, 362_328, 363_832, 385_478, 388_506, 773_135]
+    seed = 100_000_000            # the shipped block, far above any of them
+
+    def replay(seed_micro):
+        held, splits = 0, 0
+        for need in needs:
+            add = inventory_mint_micro(need, held, seed_micro)
+            if add:
+                held += add
+                splits += 1
+        return splits
+
+    assert replay(0) == 6          # legacy: one transaction per new record
+    assert replay(seed) == 1       # one block, then silence

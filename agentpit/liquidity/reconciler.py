@@ -189,10 +189,31 @@ def cap_sells_to_inventory(
     return out
 
 
+def inventory_mint_micro(need_micro: int, held_micro: int, seed_micro: int) -> int:
+    """How much to split-mint, given the requirement, the stock and the block size.
+
+    Zero when the stock already covers the requirement. Otherwise enough to leave
+    the stock exactly `seed_micro` ABOVE the requirement.
+
+    The requirement is a running maximum of a fluctuating quantity — the house
+    never spends this inventory, so `held` only grows — and a running maximum
+    keeps setting records forever. Topping up to the exact requirement therefore
+    buys one transaction per record, indefinitely: production ran 64 splits/min
+    across ~1500 markets, some growing the stock by under half a percent. Minting
+    a whole block past the requirement instead converges a market in one split
+    and keeps it quiet until it genuinely outgrows the block.
+
+    `seed_micro=0` reproduces exact top-ups.
+    """
+    if need_micro <= 0 or held_micro >= need_micro:
+        return 0
+    return need_micro + seed_micro - held_micro
+
+
 def _ensure_inventory(
     onchain: OnchainAdmin, user: User, ref, snap: BookSnapshot, cfg: Settings
 ) -> int:
-    """Split-mint CTF inventory up to the snapshot's ask-side need × buffer.
+    """Split-mint CTF inventory to back every SELL, a block at a time.
     Returns the number of split txs performed (0 or 1 per call — splits are
     admin txs behind the global send_lock, budgeted by the caller)."""
     need = int(Decimal(str(cfg.mirror_inventory_buffer)) * split_target_micro(snap))
@@ -200,7 +221,9 @@ def _ensure_inventory(
         return 0
     held_yes = onchain.ctf_balance(user.eth_address, int(ref.yes_token))
     held_no = onchain.ctf_balance(user.eth_address, int(ref.no_token))
-    add = need - min(held_yes, held_no)
+    add = inventory_mint_micro(
+        need, min(held_yes, held_no), cfg.mirror_inventory_seed_micro
+    )
     if add <= 0:
         return 0
     condition_bytes = bytes.fromhex(ref.condition_id[2:])
