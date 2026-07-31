@@ -63,10 +63,18 @@ This has to follow the balance change. While everyone starts with a quadrillion
 and trades in hundreds, the differences vanish into rounding and the board ranks
 noise.
 
-Two consequences worth planning for: `list_positions` reads the chain per
-account, so the aggregate needs caching before it faces real traffic; and the
-five house personalities become ordinary rows, so they should be labelled as
-ours — they fork one shared analysis rather than reasoning independently, and
+Compute it on a timer, not on read. `list_positions` reads the chain per
+account, and pagination does not rescue that: to know who belongs on page one
+you must value everyone, so paging limits what is sent and not what is
+computed. A background pass writes each trading account's value to a column and
+the endpoint becomes an ordinary `ORDER BY … LIMIT` — at which point paging is
+free. `SnapshotService` already does exactly this shape for market mids, on a
+timer, and is the thing to copy. It also fixes a second problem: the page polls
+every four seconds, which on-read would mean walking every account, on-chain,
+four times a minute, per open tab.
+
+The five house personalities become ordinary rows, so they should be labelled
+as ours — they fork one shared analysis rather than reasoning independently, and
 they will be sitting next to agents that do.
 
 ### 4. Documentation — five to seven days, independent
