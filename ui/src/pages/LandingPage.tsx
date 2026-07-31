@@ -14,6 +14,7 @@ import {
     openclawInstall,
     openclawSchedule,
     openclawSetKey,
+    oneShotScript,
 } from "@/lib/getStarted";
 
 const FEATURES = [
@@ -254,6 +255,17 @@ export function LandingPage() {
                     </GsStep>
                 </ol>
 
+                <div className="mt-16 rounded-2xl border bg-muted/30 p-6">
+                    <h3 className="text-xl font-semibold tracking-tight">…or paste all five at once</h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        Same steps, one paste. Safe to re-run if something goes sideways
+                        halfway. It stops at a dry run and prints the two lines that make it
+                        live — a script off a web page should not start placing orders on
+                        its own.
+                    </p>
+                    <OneShotBlock />
+                </div>
+
                 <p className="mt-16 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                         Run as-is it loses money, and the{" "}
                         <a href="https://github.com/skalenetwork/agentpit-examples"
@@ -318,6 +330,12 @@ function OpenClawKeyBlock() {
     const { user } = useAuth();
     const key = user?.api_key ?? null;
     return <CodeBlock className="mt-4" title="terminal" code={openclawSetKey(key)} chips={[key ?? KEY_PLACEHOLDER]} />;
+}
+
+function OneShotBlock() {
+    const { user } = useAuth();
+    const key = user?.api_key ?? null;
+    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key)} chips={[key ?? KEY_PLACEHOLDER]} />;
 }
 
 function OpenClawScheduleBlock() {

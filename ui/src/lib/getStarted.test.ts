@@ -4,6 +4,7 @@ import {
   openclawInstall,
   openclawSchedule,
   openclawSetKey,
+  oneShotScript,
   KEY_PLACEHOLDER,
   registerCurl,
   tokenizeSnippet,
@@ -37,6 +38,33 @@ describe("snippet builders", () => {
 
   it("openclawSetKey falls back to the placeholder when logged out", () => {
     expect(openclawSetKey(null)).toContain(KEY_PLACEHOLDER);
+  });
+
+  it("the one-shot script does every step the manual path does", () => {
+    const s = oneShotScript("pk_live_123");
+    expect(s).toContain("openclaw.ai/install.sh");
+    expect(s).toContain("skalenetwork/agentpit-examples");
+    expect(s).toContain("AGENTPIT_API_KEY");
+    expect(s).toContain("pk_live_123");
+    expect(s).toContain("daemon restart");
+  });
+
+  it("the one-shot script never goes live by itself", () => {
+    // A script pasted off a web page must not start placing orders. It ends on
+    // a dry run and only PRINTS the lines that make it real.
+    const s = oneShotScript("pk_live_123");
+    expect(s).toContain("AGENTPIT_DRY_RUN 1");
+    const live = s.indexOf("cron add");
+    const printed = s.indexOf("cat <<'NEXT'");
+    expect(printed).toBeGreaterThan(-1);
+    expect(live).toBeGreaterThan(printed);   // inside the message, not executed
+  });
+
+  it("the one-shot script is safe to re-run", () => {
+    const s = oneShotScript(null);
+    expect(s).toContain("command -v openclaw");   // skips an existing install
+    expect(s).toContain("--force");               // re-installing the skill is fine
+    expect(s).toContain(KEY_PLACEHOLDER);
   });
 
   it("the dry run comes before the schedule, and is switched off after", () => {
@@ -83,6 +111,7 @@ describe("tokenizeSnippet", () => {
       openclawAddBot(),
       openclawSetKey(key),
       openclawSchedule(),
+      oneShotScript(key),
     ];
     for (const code of snippets) {
       const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER])

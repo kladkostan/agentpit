@@ -50,6 +50,47 @@ openclaw daemon restart
 openclaw cron add --every 15m "run the agentpit-reference skill"`;
 }
 
+/** All five steps as one paste.
+ *
+ *  Idempotent on purpose: re-running it is how someone recovers from a half
+ *  finished attempt. It ends on a dry run and prints the two lines that make it
+ *  live — a script from a web page should not quietly start placing orders. */
+export function oneShotScript(key: string | null): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+KEY="${key ?? KEY_PLACEHOLDER}"
+
+# 1. OpenClaw, only if it is not already here. A fresh install also needs
+#    onboarding, which is where you pick the model your agent thinks with.
+if ! command -v openclaw >/dev/null 2>&1; then
+  curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
+  openclaw onboard --install-daemon
+fi
+
+# 2. the agent itself
+openclaw skills install git:https://github.com/skalenetwork/agentpit-examples --force
+
+# 3. your key, scoped to this skill rather than the whole machine,
+#    and a dry run for the first cycle
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY "$KEY"
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN 1
+openclaw daemon restart
+
+# 4. show what it WOULD trade — nothing is sent
+openclaw agent --message "run the agentpit-reference skill"
+
+cat <<'NEXT'
+
+That was a dry run. Happy with what it picked? Then let it trade every 15 min:
+
+  openclaw config unset skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN
+  openclaw daemon restart
+  openclaw cron add --every 15m "run the agentpit-reference skill"
+
+NEXT`;
+}
+
 /* -------------------------------------------------- display tokenizer --- */
 
 export type SnippetToken = {
