@@ -21,6 +21,8 @@ describe("snippet builders", () => {
 
   it("the setup sequence names every piece a fresh machine needs", () => {
     expect(openclawInstall()).toContain("openclaw.ai/install.sh");
+    // Piping a remote script into bash — pin the protocol at least.
+    expect(openclawInstall()).toContain("--proto '=https'");
     expect(openclawInstall()).toContain("onboard");        // where the model is picked
     expect(openclawAddBot()).toContain("skalenetwork/agentpit-examples");
   });

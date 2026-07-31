@@ -18,9 +18,9 @@ export function registerCurl(base: string): string {
 /** Step 1 — get OpenClaw. Onboarding is where you pick the model it will think
  *  with, so there is no separate "configure a model" step. */
 export function openclawInstall(): string {
-  return `# detects your OS, installs Node if needed, then walks you through
-# picking the model your agent will think with
-curl -fsSL https://openclaw.ai/install.sh | bash
+  return `# macOS and Linux alike — it detects the OS, installs Node if needed,
+# then walks you through picking the model your agent will think with
+curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
 openclaw onboard --install-daemon`;
 }
 
