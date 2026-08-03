@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 
 from agentpit.config import Settings
@@ -169,3 +172,84 @@ def test_topup_when_already_ahead_does_not_touch_last_topup_at():
     check = fresh_test_conn()
     assert TableRead.get_last_topup_at(check, user_id) is None
     check.close()
+
+
+def test_lost_claim_reports_the_real_next_allowed_at():
+    """The loser of a cooldown check must be told the true wait time, never
+    the stale value it read on entry — that number drives a UI countdown."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="pinned@example.com", password_hash="x", handle=None
+    )
+    last_topup_at = 1_700_000_000
+    TableWrite.set_last_topup_at(conn, user_id, last_topup_at)
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000)  # below target
+    service = BalanceService(db, onchain, Settings())
+    user = _User(user_id, acct.address)
+    now = last_topup_at + 1  # inside the cooldown window
+
+    result = service.top_up(user, now)
+
+    assert result.minted_raw == 0
+    assert onchain.mints == []
+    assert result.next_allowed_at == last_topup_at + DAY
+    db.close()
+
+
+# ----- a genuine race: two real threads, two real connections --------------
+
+
+def test_concurrent_topups_only_mint_once():
+    """Two threads race BalanceService.top_up for the same user with the
+    same `now`, each on its own pooled connection.
+
+    This must FAIL against the pre-bf13bf9 code: with no atomic claim, both
+    threads read LAST_TOPUP_AT before either writes it, both pass the gate,
+    and both call mint_to. The barrier lines the threads up at the same
+    starting line and the sleep inside mint_to holds that unlocked window
+    open long enough for the second thread to walk through it. Against the
+    atomic claim, only one thread's UPDATE can match the row's current
+    state; the other's claim_topup call returns False and it never reaches
+    mint_to at all — so exactly one mint lands no matter how the threads are
+    scheduled.
+    """
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="thread-race@example.com", password_hash="x", handle=None
+    )
+    conn.close()
+
+    lock = threading.Lock()
+    mints: list[tuple[str, int]] = []
+    barrier = threading.Barrier(2)
+
+    class _SlowFakeOnchain:
+        def usd_balance(self, address: str) -> int:
+            return 30_000_000_000  # below target, same value for both threads
+
+        def mint_to(self, recipient: str, amount_raw: int, *, timeout: int = 30):
+            time.sleep(0.05)  # keep the unlocked window open long enough to collide
+            with lock:
+                mints.append((recipient, amount_raw))
+
+    db = fresh_test_db()
+    onchain = _SlowFakeOnchain()
+    service = BalanceService(db, onchain, Settings())
+    user = _User(user_id, acct.address)
+    now = 1_700_000_000
+
+    def worker():
+        barrier.wait()
+        service.top_up(user, now)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(mints) == 1
+    db.close()

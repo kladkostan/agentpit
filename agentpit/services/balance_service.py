@@ -62,8 +62,19 @@ class BalanceService:
         with self._db.write() as conn:
             claimed = TableWrite.claim_topup(conn, user.user_id, now, not_before)
         if not claimed:
+            # We lost the claim, which only happens once someone else's
+            # winning write has already committed (an UPDATE re-checks its
+            # WHERE clause after any conflicting row lock releases). `last`
+            # is now stale, so re-read to report the real next_allowed_at —
+            # the loser of a race must not be told it can retry immediately.
+            with self._db.read() as conn:
+                current_last = TableRead.get_last_topup_at(conn, user.user_id)
             return TopUpResult(
-                balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
+                balance_raw=balance,
+                minted_raw=0,
+                next_allowed_at=next_allowed_at(
+                    current_last, self._settings.topup_cooldown_seconds
+                ),
             )
 
         try:
