@@ -77,8 +77,9 @@ class HouseAccountProvisioner:
 
     def _fund(self, acct) -> None:
         timeout = self._settings.tx_confirmations_timeout_s
-        for _ in range(self._settings.liquidity_funding_drips):
-            self._onchain.faucet_drip(acct.address, timeout=timeout)
+        self._onchain.mint_to(
+            acct.address, self._settings.house_mint_raw, timeout=timeout
+        )
         self._onchain.fund_gas(
             acct.address, self._settings.signup_gas_grant_wei, timeout=timeout
         )
