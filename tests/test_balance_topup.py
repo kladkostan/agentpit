@@ -174,9 +174,16 @@ def test_topup_when_already_ahead_does_not_touch_last_topup_at():
     check.close()
 
 
-def test_lost_claim_reports_the_real_next_allowed_at():
-    """The loser of a cooldown check must be told the true wait time, never
-    the stale value it read on entry — that number drives a UI countdown."""
+def test_cooldown_path_reports_the_real_next_allowed_at():
+    """Ordinary in-cooldown path (no concurrent writer): a caller who is
+    genuinely still on cooldown must be told the true wait time, never 0.
+
+    This is a single sequential call, so it cannot distinguish code that
+    reports the value read on entry from code that re-reads after a failed
+    claim — both see the same row. It pins the contract for this path; the
+    lost-claim race itself is covered separately by
+    `test_concurrent_topups_only_mint_once`, which asserts on the loser's
+    `next_allowed_at` under a genuine concurrent write."""
     conn = fresh_test_conn()
     user_id, acct, _key = TableWrite.create_user(
         conn, email="pinned@example.com", password_hash="x", handle=None
@@ -215,6 +222,13 @@ def test_concurrent_topups_only_mint_once():
     state; the other's claim_topup call returns False and it never reaches
     mint_to at all — so exactly one mint lands no matter how the threads are
     scheduled.
+
+    It also pins the loser's reported `next_allowed_at`. Both threads start
+    from `last=None`, so code that reuses the value read on entry (the
+    bf13bf9 lost-claim bug) would have the loser report `0` — "top up right
+    now" — right after the winner just claimed the day. The fix re-reads
+    the row after a failed claim, so the loser must report the winner's
+    committed value: `now + cooldown_seconds`.
     """
     conn = fresh_test_conn()
     user_id, acct, _key = TableWrite.create_user(
@@ -224,6 +238,7 @@ def test_concurrent_topups_only_mint_once():
 
     lock = threading.Lock()
     mints: list[tuple[str, int]] = []
+    results: list = []
     barrier = threading.Barrier(2)
 
     class _SlowFakeOnchain:
@@ -243,7 +258,9 @@ def test_concurrent_topups_only_mint_once():
 
     def worker():
         barrier.wait()
-        service.top_up(user, now)
+        result = service.top_up(user, now)
+        with lock:
+            results.append(result)
 
     threads = [threading.Thread(target=worker) for _ in range(2)]
     for t in threads:
@@ -252,4 +269,9 @@ def test_concurrent_topups_only_mint_once():
         t.join()
 
     assert len(mints) == 1
+
+    assert len(results) == 2
+    losers = [r for r in results if r.minted_raw == 0]
+    assert len(losers) == 1
+    assert losers[0].next_allowed_at == now + DAY
     db.close()
