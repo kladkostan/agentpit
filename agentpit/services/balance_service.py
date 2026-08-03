@@ -39,15 +39,12 @@ class BalanceService:
         self._settings = settings
 
     def top_up(self, user: User, now: int) -> TopUpResult:
+        # Balance first: every early return below still needs to report it.
+        balance = self._onchain.usd_balance(user.eth_address)
+
         with self._db.read() as conn:
             last = TableRead.get_last_topup_at(conn, user.user_id)
-
         allowed_at = next_allowed_at(last, self._settings.topup_cooldown_seconds)
-        balance = self._onchain.usd_balance(user.eth_address)
-        if now < allowed_at:
-            return TopUpResult(
-                balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
-            )
 
         minted = topup_amount_raw(balance, self._settings.paper_balance_target_raw)
         if minted == 0:
@@ -57,13 +54,33 @@ class BalanceService:
                 balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
             )
 
-        self._onchain.mint_to(
-            user.eth_address,
-            minted,
-            timeout=self._settings.tx_confirmations_timeout_s,
-        )
+        # Claim the day atomically before minting, so the claim can never be
+        # outrun by a concurrent request. The predicate reads the row's own
+        # current value rather than trusting `last`, which may already be
+        # stale by the time we get here.
+        not_before = now - self._settings.topup_cooldown_seconds
         with self._db.write() as conn:
-            TableWrite.set_last_topup_at(conn, user.user_id, now)
+            claimed = TableWrite.claim_topup(conn, user.user_id, now, not_before)
+        if not claimed:
+            return TopUpResult(
+                balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
+            )
+
+        try:
+            self._onchain.mint_to(
+                user.eth_address,
+                minted,
+                timeout=self._settings.tx_confirmations_timeout_s,
+            )
+        except Exception:
+            # The mint never landed: release the claim so a failed mint does
+            # not cost the user their day. A successful mint, by contrast,
+            # must never be left unrecorded — which is why the claim is
+            # taken before, not after, the mint.
+            with self._db.write() as conn:
+                TableWrite.set_last_topup_at(conn, user.user_id, last)
+            raise
+
         return TopUpResult(
             balance_raw=balance + minted,
             minted_raw=minted,

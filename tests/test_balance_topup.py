@@ -1,7 +1,14 @@
+import pytest
+
+from agentpit.config import Settings
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
-from agentpit.services.balance_service import next_allowed_at, topup_amount_raw
-from tests.db_helpers import fresh_test_conn
+from agentpit.services.balance_service import (
+    BalanceService,
+    next_allowed_at,
+    topup_amount_raw,
+)
+from tests.db_helpers import fresh_test_conn, fresh_test_db
 
 TARGET = 100_000_000_000        # $100k, 6dp
 DAY = 86_400
@@ -23,7 +30,7 @@ def test_above_target_mints_nothing_rather_than_clawing_back():
 
 def test_the_result_never_exceeds_the_target():
     for balance in (0, 1, TARGET // 2, TARGET - 1, TARGET, TARGET * 3):
-        assert balance + topup_amount_raw(balance, TARGET) <= max(balance, TARGET)
+        assert balance + topup_amount_raw(balance, TARGET) == max(balance, TARGET)
 
 
 def test_first_top_up_is_allowed_immediately():
@@ -43,3 +50,122 @@ def test_last_topup_at_round_trips():
     TableWrite.set_last_topup_at(conn, user_id, 1_700_000_000)
     assert TableRead.get_last_topup_at(conn, user_id) == 1_700_000_000
     conn.close()
+
+
+# ----- claim_topup: the atomic claim, not a read-then-write pair -----------
+
+
+def test_claim_topup_is_atomic():
+    """A naive read-then-write can't fail this: the second call must lose
+    because the row itself, not a value read earlier, decides eligibility."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="claim@example.com", password_hash="x", handle=None
+    )
+    now = 1_700_000_000
+    not_before = now - DAY
+
+    assert TableWrite.claim_topup(conn, user_id, now, not_before) is True
+    assert TableWrite.claim_topup(conn, user_id, now, not_before) is False
+
+    later = now + DAY
+    assert TableWrite.claim_topup(conn, user_id, later, later - DAY) is True
+    conn.close()
+
+
+# ----- BalanceService: the claim must actually stop a race -----------------
+
+
+class _FakeOnchain:
+    """usd_balance reflects mints already recorded, like a real faucet would."""
+
+    def __init__(self, balance_raw: int):
+        self.balance_raw = balance_raw
+        self.mints: list[tuple[str, int]] = []
+        self.fail_next_mint = False
+
+    def usd_balance(self, address: str) -> int:
+        return self.balance_raw
+
+    def mint_to(self, recipient: str, amount_raw: int, *, timeout: int = 30):
+        if self.fail_next_mint:
+            self.fail_next_mint = False
+            raise RuntimeError("mint failed")
+        self.mints.append((recipient, amount_raw))
+        self.balance_raw += amount_raw
+
+
+class _User:
+    def __init__(self, user_id: str, eth_address: str):
+        self.user_id = user_id
+        self.eth_address = eth_address
+
+
+def test_second_topup_in_the_window_mints_nothing():
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="race@example.com", password_hash="x", handle=None
+    )
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000)
+    service = BalanceService(db, onchain, Settings())
+    user = _User(user_id, acct.address)
+    now = 1_700_000_000
+
+    first = service.top_up(user, now)
+    second = service.top_up(user, now)
+
+    assert len(onchain.mints) == 1
+    assert first.minted_raw == 70_000_000_000
+    assert second.minted_raw == 0
+    assert second.balance_raw == onchain.balance_raw
+    db.close()
+
+
+def test_failed_mint_releases_the_claim():
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="rollback@example.com", password_hash="x", handle=None
+    )
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000)
+    onchain.fail_next_mint = True
+    service = BalanceService(db, onchain, Settings())
+    user = _User(user_id, acct.address)
+    now = 1_700_000_000
+
+    with pytest.raises(RuntimeError):
+        service.top_up(user, now)
+    assert onchain.mints == []
+
+    retry = service.top_up(user, now)
+    assert retry.minted_raw == 70_000_000_000
+    assert len(onchain.mints) == 1
+    db.close()
+
+
+def test_topup_when_already_ahead_does_not_touch_last_topup_at():
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="ahead@example.com", password_hash="x", handle=None
+    )
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=TARGET + 1)
+    service = BalanceService(db, onchain, Settings())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == 0
+    assert onchain.mints == []
+    db.close()
+
+    check = fresh_test_conn()
+    assert TableRead.get_last_topup_at(check, user_id) is None
+    check.close()

@@ -81,10 +81,29 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
-    def set_last_topup_at(db: psycopg.Connection, user_id: str, at: int) -> None:
+    def set_last_topup_at(db: psycopg.Connection, user_id: str, at: int | None) -> None:
+        """Unconditional write. Used to release a claim after a failed mint —
+        `at` may be the prior (possibly None) value being restored."""
         db.execute(
             "UPDATE users SET LAST_TOPUP_AT = %s WHERE USER_ID = %s", (at, user_id)
         )
+
+    @staticmethod
+    def claim_topup(
+        db: psycopg.Connection, user_id: str, at: int, not_before: int
+    ) -> bool:
+        """Take the day's top-up allowance, atomically.
+
+        Returns False when another request already holds it. The predicate and
+        the write are one statement so two concurrent callers cannot both pass
+        a check-then-write gap and mint twice.
+        """
+        cur = db.execute(
+            "UPDATE users SET LAST_TOPUP_AT = %s "
+            "WHERE USER_ID = %s AND (LAST_TOPUP_AT IS NULL OR LAST_TOPUP_AT <= %s)",
+            (at, user_id, not_before),
+        )
+        return cur.rowcount == 1
 
     @staticmethod
     def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:
