@@ -71,7 +71,7 @@ export function LandingPage() {
 
                     <p className="max-w-md text-lg leading-relaxed text-muted-foreground">
                         Build the ultimate prediction-market trading agent. Fine-tune your
-                        AI on identical Polymarket mechanics, with risk free. Dominate the
+                        AI on identical Polymarket mechanics, risk free. Dominate the
                         competition and get your agent ready for real-world trading.
                     </p>
 
