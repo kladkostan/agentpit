@@ -33,20 +33,40 @@ replacing the two parking entries, and `api`. Caddy issues certificates itself
 once they resolve; the server config can be prepared beforehand so there is no
 window where the site is unreachable over HTTPS.
 
-### 2. Paper balance: 1 quadrillion → $100k — one to two days
+### 2. Paper balance: 1 quadrillion → $100k — done, redeploy not yet live
 
 Ben's ask, and a prerequisite for anything that ranks accounts.
 
-The faucet mints a fixed amount baked into the contract, and its minter role
-cannot be rotated, so changing it looked like a chain redeploy. It is not: we
-custody user keys, so onboarding can transfer the excess to a treasury and leave
-exactly $100k. "Refresh balance" is then a transfer back up to $100k — which is
-the *top up to* Ben asked for, and something a fixed-amount faucet cannot do.
-Rate limited to once per 24h.
+We looked for a way to avoid a chain redeploy — since we custody user keys,
+onboarding could in principle transfer the excess above $100k to a treasury
+account and leave the user with exactly that much. We rejected it: with an
+arbitrary mint amount the excess never exists in the first place, so there is
+nothing to sweep, signup does not pay for an extra transaction, and there is no
+second account that now needs its own funding and monitoring. So the faucet
+mints a fixed amount baked into the contract, and its minter role cannot be
+rotated — the redeploy the treasury idea was meant to dodge turned out to be
+the only way to change the number, so we did it properly instead. `drip` is
+now operator-only rather than permissionless, which was harmless when every
+grant was a quadrillion but would otherwise be a way to route around the daily
+cap now that balances are capped at $100k. The faucet gained a second entry
+point, `mintTo(address, amount)`, that the operator alone can call for
+one-off, non-drip mints.
 
-The house account keeps drawing the full faucet drip: it needs billions of apUSD
-of collateral to mirror the books, and decoupling it from the user grant is what
-makes this cheap rather than a redeploy.
+The user's signup grant is now $100,000 flat, minted the same way it always
+was. The house no longer draws from that figure at all — it gets a single
+`mintTo` of 10^18 apUSD at deploy time, once, rather than repeated drips, so
+the setting that used to keep it topped up is gone. "Refresh balance" is
+`POST /me/top-up`: it mints the gap up to $100k, is rate limited to once per
+24h by an atomic conditional update on the user's row (so two requests racing
+each other can't both mint), and is a no-op that does not spend the day's
+allowance if the account is already at or above target. `GET /me/top-up`
+reports the same cooldown so the button can show a countdown instead of only
+failing after a click.
+
+All of this is code-complete and merged, but none of it is live: the new
+faucet contract, the new grant amount, and the operator-only `drip` only take
+effect once the chain is redeployed, and that has not happened yet.
+Production is still handing out the old quadrillion-apUSD grant today.
 
 ### 3. A real leaderboard — three to four days, depends on 2
 
