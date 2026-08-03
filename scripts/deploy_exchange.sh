@@ -56,6 +56,24 @@ if [ "$CTF_EXCHANGE_DIR" = "$AGENTPIT_DIR/vendor/ctf-exchange" ]; then
     echo "Initializing vendor/ctf-exchange submodule..."
     git -C "$AGENTPIT_DIR" submodule update --init vendor/ctf-exchange
   fi
+  # Presence is not enough: `git pull` on the superproject moves the gitlink but
+  # leaves the submodule working tree on its old commit, and `submodule.recurse`
+  # is not set. Deploying that mismatch compiles the OLD contracts against the
+  # NEW checked-in ABIs -- the failure surfaces only after the chain and the
+  # database have already been wiped. Compare and correct.
+  WANT_SHA="$(git -C "$AGENTPIT_DIR" rev-parse HEAD:vendor/ctf-exchange 2>/dev/null || true)"
+  HAVE_SHA="$(git -C "$CTF_EXCHANGE_DIR" rev-parse HEAD 2>/dev/null || true)"
+  if [ -n "$WANT_SHA" ] && [ "$WANT_SHA" != "$HAVE_SHA" ]; then
+    echo "vendor/ctf-exchange is at ${HAVE_SHA:0:12}, superproject expects ${WANT_SHA:0:12} -- updating..."
+    git -C "$AGENTPIT_DIR" submodule update --init vendor/ctf-exchange
+    HAVE_SHA="$(git -C "$CTF_EXCHANGE_DIR" rev-parse HEAD 2>/dev/null || true)"
+    if [ "$WANT_SHA" != "$HAVE_SHA" ]; then
+      echo "Error: could not check out $WANT_SHA in $CTF_EXCHANGE_DIR." >&2
+      echo "       Fetch it in the submodule first; deploying the wrong contracts" >&2
+      echo "       is only discoverable after the chain is already destroyed." >&2
+      exit 1
+    fi
+  fi
   for lib in forge-std openzeppelin-contracts solmate solady; do
     if [ -z "$(ls -A "$CTF_EXCHANGE_DIR/lib/$lib" 2>/dev/null)" ]; then
       git -C "$CTF_EXCHANGE_DIR" submodule update --init "lib/$lib"

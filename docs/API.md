@@ -401,6 +401,20 @@ Read the caller's collateral balance (agentpit tracks no on-chain allowances, so
 
 Response (`BalanceAllowanceResponse`): `balance` (base-unit integer string), `allowances` (map, always `{}`).
 
+### `GET /me/top-up`
+Cooldown status for the paper-balance top-up. Database read only — no chain call — so it is cheap enough to fetch on page load.
+
+Response (`TopUpStatusWire`): `nextAllowedAt` (unix seconds; `0` means eligible now).
+
+### `POST /me/top-up`
+Restore the caller's paper balance to the target ($100,000), at most once every 24 hours. Takes no body.
+
+Mints only the gap up to the target, never a fixed sum — so it restores a demo balance rather than paying more to someone who lost everything than to someone who did well.
+
+Returns **200 with `minted: "0"`** in two non-error cases: the cooldown is still running, or the balance is already at or above the target. Being already ahead does **not** consume the day's allowance.
+
+Response (`TopUpWire`): `balance` (base-unit integer string, after the mint), `minted` (base-unit integer string), `nextAllowedAt` (unix seconds).
+
 ## Positions (split / merge / redeem)
 
 Requires `CurrentUserDep`. Path param `market_id` (int) on all three.

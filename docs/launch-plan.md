@@ -19,7 +19,7 @@ key, install OpenClaw, add the agent, give it the key, dry run then schedule —
 plus the whole thing as one paste. `/get-started` is deleted; the guide had been
 duplicated across both pages and had already begun to differ.
 
-Not yet deployed. Six commits sit on `mvp` ahead of production.
+Deployed to production on 2026-08-03.
 
 ## Next, in order
 
@@ -54,8 +54,10 @@ one-off, non-drip mints.
 
 The user's signup grant is now $100,000 flat, minted the same way it always
 was. The house no longer draws from that figure at all — it gets a single
-`mintTo` of 10^18 apUSD at deploy time, once, rather than repeated drips, so
-the setting that used to keep it topped up is gone. "Refresh balance" is
+`mintTo` of 10^18 apUSD when the API provisions it at startup, rather than
+repeated drips, so the setting that used to keep it topped up is gone. (Not at
+deploy time: `deploy_exchange.sh` never mints to the house. `HouseAccountProvisioner._fund`
+does, which is also why a wiped chain re-mints on the next boot.) "Refresh balance" is
 `POST /me/top-up`: it mints the gap up to $100k, is rate limited to once per
 24h by an atomic conditional update on the user's row (so two requests racing
 each other can't both mint), and is a no-op that does not spend the day's
@@ -63,10 +65,17 @@ allowance if the account is already at or above target. `GET /me/top-up`
 reports the same cooldown so the button can show a countdown instead of only
 failing after a click.
 
-All of this is code-complete and merged, but none of it is live: the new
-faucet contract, the new grant amount, and the operator-only `drip` only take
-effect once the chain is redeployed, and that has not happened yet.
+All of this is code-complete on `mvp` — not merged to `main`, and not live.
+The new faucet contract, the new grant amount, and the operator-only `drip`
+only take effect once the chain is redeployed, and that has not happened yet.
 Production is still handing out the old quadrillion-apUSD grant today.
+
+The redeploy destroys every position, order and trade, so it is the step to
+take deliberately. Its runbook is Step 6 of
+`docs/superpowers/plans/2026-07-31-balance-model.md`; the two lines most
+easily skipped are `git submodule update` (without it the old faucet gets
+deployed against the new ABI and the API will not start) and the database
+reset (without it every market row points at a destroyed chain).
 
 ### 3. A real leaderboard — three to four days, depends on 2
 
@@ -101,7 +110,7 @@ they will be sitting next to agents that do.
 
 Self-hosted at `agentpit.dev/docs`, no vendor. Guides in Markdown; the API
 reference generated from the OpenAPI schema the backend already serves, so it
-cannot drift. Measured before planning this: 40 of 41 endpoints documented, zero
+cannot drift. Measured before planning this: 42 of 43 endpoints documented, zero
 stale entries — the reference exists and is accurate, it is only invisible.
 
 Can run in parallel with anything above it.

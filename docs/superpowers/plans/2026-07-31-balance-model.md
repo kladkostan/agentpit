@@ -949,14 +949,35 @@ curl -s -X POST localhost:8000/register -H 'Content-Type: application/json' \
 ssh root@23.88.62.130
 cd /root/dev/agentpit
 git pull
+# REQUIRED, and the step most likely to be skipped. Faucet.sol lives in a
+# submodule: `git pull` moves the gitlink but leaves vendor/ctf-exchange on its
+# old commit, and submodule.recurse is not set. Deploy that mismatch and
+# chain-init compiles the OLD 2-argument Faucet -- no mintTo, no operator gate
+# -- while the API ships the NEW ABI. Every house mint then reverts, the API
+# refuses to start, and you find out with the chain and database already gone.
+git submodule update --init vendor/ctf-exchange
+git submodule status vendor/ctf-exchange        # must match `git rev-parse HEAD:vendor/ctf-exchange`
+
 docker compose -f deploy/docker-compose.prod.yml --env-file .env down api
 docker volume rm agentpit_agentpit_anvil        # fresh chain
 docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d anvil
 docker compose -f deploy/docker-compose.prod.yml --env-file .env run --rm chain-init
-# reset the database, then bring the API back
+
+# Reset the database. NOT optional and NOT a comment: the markets table holds
+# ~1000 rows whose condition ids belong to the chain you just destroyed, and
+# leaving them turns every market into BadFunctionCallOutput. This is the
+# in-container equivalent of scripts/db_reset.sh (drop + create, FORCE so open
+# pool connections do not block it).
+docker compose -f deploy/docker-compose.prod.yml --env-file .env exec -T postgres \
+  psql -U agentpit -d postgres -c "DROP DATABASE agentpit WITH (FORCE);"
+docker compose -f deploy/docker-compose.prod.yml --env-file .env exec -T postgres \
+  psql -U agentpit -d postgres -c "CREATE DATABASE agentpit OWNER agentpit;"
+
 docker compose -f deploy/docker-compose.prod.yml --env-file .env build api caddy
 docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d api caddy
 ```
+
+Before running any of it, confirm production's `.env` does **not** set `SIGNUP_GRANT_RAW`. It is sourced *after* the script's default, so a stale value there silently wins, and `Faucet.amount` is immutable — the only way back is a second destructive redeploy. Checked 2026-08-03: prod `.env` does not set it.
 
 Verify afterwards: markets re-synced, a fresh registration lands on exactly $100k, the house holds `house_mint_raw`, and the top-up button appears on the profile.
 

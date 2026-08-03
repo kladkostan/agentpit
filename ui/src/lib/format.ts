@@ -59,7 +59,9 @@ export function parseVolume(raw: string | null | undefined): number | null {
 }
 
 /** Compact dollar formatter — $850, $12.4K, $8.1M, $1.2B, $3.4T, $1.0Q.
- *  Goes up to quadrillions so the demo faucet's huge apUSD grant stays legible. */
+ *  Goes up to quadrillions for upstream Polymarket market volumes. (It used to
+ *  be sized for the old quadrillion-apUSD signup grant; that grant is $100k
+ *  now, but the large branches still earn their keep on volume figures.) */
 export function formatVolume(usd: number): string {
   if (usd >= 1e15) return `$${(usd / 1e15).toFixed(1)}Q`;
   if (usd >= 1e12) return `$${(usd / 1e12).toFixed(1)}T`;

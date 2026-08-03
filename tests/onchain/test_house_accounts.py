@@ -16,13 +16,17 @@ def _provisioner(count=3):
 
 
 def test_provision_creates_and_funds():
-    prov, admin, d = _provisioner(count=3)
+    prov, admin, _d = _provisioner(count=3)
     users = prov.ensure_provisioned()
     assert len(users) == 3
     for u in users:
         assert u.is_bot is True
         assert u.onboarded_at is not None
-        assert admin.usd_balance(u.eth_address) >= d.signup_grant_raw  # >= 1 drip
+        # The house is funded by one mintTo of house_mint_raw, not by drips.
+        # Asserting against signup_grant_raw would be vacuous now: 1e24 clears
+        # a $100k grant whether the house was minted, dripped, or funded by
+        # accident, so the one test proving house funding would prove nothing.
+        assert admin.usd_balance(u.eth_address) >= prov._settings.house_mint_raw
         assert admin.native_balance(u.eth_address) > 0
 
 
