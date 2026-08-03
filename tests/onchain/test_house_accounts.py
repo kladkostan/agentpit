@@ -8,7 +8,7 @@ from tests.db_helpers import fresh_test_db
 
 
 def _provisioner(count=3):
-    s = Settings(liquidity_house_account_count=count, liquidity_funding_drips=1)
+    s = Settings(liquidity_house_account_count=count)
     d = Deployment.load(s.deployment_path)
     w = Web3Client(s, d)
     admin = OnchainAdmin(w, Contracts(w.web3, d))

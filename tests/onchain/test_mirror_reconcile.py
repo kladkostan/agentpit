@@ -18,7 +18,7 @@ from tests.onchain._helpers import create_market, fresh_client, register, unique
 
 
 def _rig():
-    s = Settings(liquidity_house_account_count=1, liquidity_funding_drips=1)
+    s = Settings(liquidity_house_account_count=1)
     d = Deployment.load(s.deployment_path)
     w = Web3Client(s, d)
     admin = OnchainAdmin(w, Contracts(w.web3, d))

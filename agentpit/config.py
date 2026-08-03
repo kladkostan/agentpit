@@ -169,11 +169,17 @@ class Settings(BaseSettings):
     liquidity_house_account_count: int = Field(
         default=1, validation_alias="AGENTPIT_LIQUIDITY_HOUSE_ACCOUNTS"
     )
-    # 1 faucet drip = the deploy's SIGNUP_GRANT_RAW, set to $1 quadrillion apUSD
-    # (scripts/deploy_exchange.sh), so a single drip funds the house far beyond
-    # any market set's notional.
-    liquidity_funding_drips: int = Field(
-        default=1, validation_alias="AGENTPIT_LIQUIDITY_FUNDING_DRIPS"
+    # apUSD is 6-decimal, so every figure here is raw. The house needs ~150bn
+    # to seed every mirrored market; 1e18 is headroom chosen deliberately.
+    house_mint_raw: int = Field(
+        default=10**24, validation_alias="AGENTPIT_HOUSE_MINT_RAW"
+    )
+    # What a user's paper balance is restored to. $100,000.
+    paper_balance_target_raw: int = Field(
+        default=100_000_000_000, validation_alias="AGENTPIT_PAPER_BALANCE_TARGET_RAW"
+    )
+    topup_cooldown_seconds: int = Field(
+        default=86_400, validation_alias="AGENTPIT_TOPUP_COOLDOWN_SECONDS"
     )
     # House gas. The mirror signs its own split transactions, so the account
     # spends gas continuously and its signup grant is not a lifetime supply:

@@ -30,7 +30,7 @@ def test_mirror_enabled_spawns_and_cancels_cleanly(monkeypatch):
     monkeypatch.setattr(feed, "fetch_books_rest", lambda ids, **kw: [])
 
     s = Settings(liquidity_engine_enabled=True, liquidity_house_account_count=1,
-                 liquidity_funding_drips=1, mirror_target_refresh_seconds=0.1)
+                 mirror_target_refresh_seconds=0.1)
     app = create_app(s)
     with TestClient(app) as client:
         r = client.get("/markets")        # API serves while the mirror idles

@@ -26,6 +26,19 @@ class OnchainAdmin:
         fn = self._contracts.faucet.functions.drip(Web3.to_checksum_address(recipient))
         return send_admin_tx(self._client, fn, timeout=timeout)
 
+    def mint_to(
+        self, recipient: str, amount_raw: int, *, timeout: int = 30
+    ) -> TxReceipt:
+        """Mint an arbitrary amount of apUSD — house funding and top-ups.
+
+        `faucet_drip` mints the fixed signup grant; this is the same faucet's
+        unrestricted entry point, and like drip it is operator-only on chain.
+        """
+        fn = self._contracts.faucet.functions.mintTo(
+            Web3.to_checksum_address(recipient), amount_raw
+        )
+        return send_admin_tx(self._client, fn, timeout=timeout)
+
     def fund_gas(
         self, user_address: str, value_wei: int, *, timeout: int = 30
     ) -> TxReceipt:
