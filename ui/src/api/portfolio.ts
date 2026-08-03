@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 
 export interface Position {
@@ -70,5 +70,68 @@ export function useUsdcBalance(enabled = true) {
     queryFn: getUsdcBalance,
     enabled,
     staleTime: 10_000,
+  });
+}
+
+export interface TopUpStatus {
+  nextAllowedAt: number;
+}
+
+/** GET is a cheap database-only read (no chain call), so it's safe to fetch on
+ *  every profile page load — that's how the button knows to render disabled
+ *  for a user who topped up an hour ago, before they've clicked anything. */
+export async function getTopUpStatus(): Promise<TopUpStatus> {
+  return apiFetch<TopUpStatus>("/me/top-up");
+}
+
+export function useTopUpStatus(enabled = true) {
+  return useQuery({
+    queryKey: ["top-up-status"],
+    queryFn: getTopUpStatus,
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
+export interface TopUpResult {
+  balance: string;
+  minted: string;
+  nextAllowedAt: number;
+}
+
+/** What the button says. A part-hour rounds UP: "Available in 0h" reads as a
+ *  bug, and rounding down would invite a click that fails. */
+export function topUpLabel(nextAllowedAt: number, now: number): string {
+  if (now >= nextAllowedAt) return "Top up to $100k";
+  return `Available in ${Math.ceil((nextAllowedAt - now) / 3600)}h`;
+}
+
+/** The button's disabled state and label are derived from the fetched status
+ *  query — never from the mutation's result. `topUp.data` is undefined until
+ *  the user actually clicks, so a version that read `nextAllowedAt` off the
+ *  mutation would always render enabled on page load, even mid-cooldown. This
+ *  function can't make that mistake: it has no access to mutation data at all. */
+export function topUpButtonState(
+  status: TopUpStatus | undefined,
+  isPending: boolean,
+  now: number,
+): { disabled: boolean; label: string } {
+  const nextAllowedAt = status?.nextAllowedAt ?? 0;
+  return {
+    disabled: isPending || now < nextAllowedAt,
+    label: isPending ? "Topping up…" : topUpLabel(nextAllowedAt, now),
+  };
+}
+
+export function useTopUp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<TopUpResult>("/me/top-up", { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["balance-allowance", "COLLATERAL"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["top-up-status"] });
+    },
   });
 }

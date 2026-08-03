@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { AlertCircle, CheckCircle2, Search, XCircle } from "lucide-react";
 import type { Position } from "@/api/portfolio";
@@ -6,6 +6,9 @@ import {
   usePositions,
   useClosedPositions,
   useUsdcBalance,
+  useTopUp,
+  useTopUpStatus,
+  topUpButtonState,
 } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
@@ -18,6 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@mui/material";
@@ -70,7 +74,11 @@ export function ProfilePage() {
   } = usePositions(user?.eth_address);
   const { data: closedData } = useClosedPositions(user?.eth_address);
   const { data: balance } = useUsdcBalance(Boolean(user));
+  const { data: topUpStatus } = useTopUpStatus(Boolean(user));
+  const topUp = useTopUp();
   const avatarStyle = getAvatarStyle(user?.eth_address || user?.email);
+  const now = Math.floor(Date.now() / 1000);
+  const topUpState = topUpButtonState(topUpStatus, topUp.isPending, now);
 
   const isLoading = positionsLoading;
   const error = positionsError;
@@ -176,6 +184,17 @@ export function ProfilePage() {
                 label="Balance"
                 value={balance != null ? formatVolume(balance) : "—"}
                 tooltip={balance != null ? USD.format(balance) : undefined}
+                action={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-xs"
+                    disabled={topUpState.disabled}
+                    onClick={() => topUp.mutate()}
+                  >
+                    {topUpState.label}
+                  </Button>
+                }
               />
               <TopMetric
                 label="Positions Value"
@@ -309,10 +328,12 @@ function TopMetric({
   label,
   value,
   tooltip,
+  action,
 }: {
   label: string;
   value: string;
   tooltip?: string | undefined;
+  action?: ReactNode;
 }) {
   const truncatedValue = value.length > 12 ? `${value.slice(0, 9)}...` : value;
   return (
@@ -332,6 +353,7 @@ function TopMetric({
         </p>
       )}
       <p className="mt-1 text-sm font-medium text-muted-foreground">{label}</p>
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }
