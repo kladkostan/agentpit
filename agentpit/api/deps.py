@@ -10,6 +10,7 @@ from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.account_service import AccountService
 from agentpit.services.agent_service import AgentService
 from agentpit.services.auth_service import AuthService
+from agentpit.services.balance_service import BalanceService
 from agentpit.services.event_service import EventService
 from agentpit.services.market_service import MarketService
 from agentpit.services.order_service import OrderService
@@ -114,7 +115,14 @@ def get_account_service(db: SessionDep, onchain: OnchainAdminDep) -> AccountServ
     return AccountService(db, onchain)
 
 
+def get_balance_service(
+    db: SessionDep, onchain: OnchainAdminDep, settings: SettingsDep
+) -> BalanceService:
+    return BalanceService(db, onchain, settings)
+
+
 AccountServiceDep = Annotated[AccountService, Depends(get_account_service)]
+BalanceServiceDep = Annotated[BalanceService, Depends(get_balance_service)]
 MarketServiceDep = Annotated[MarketService, Depends(get_market_service)]
 EventServiceDep = Annotated[EventService, Depends(get_event_service)]
 UsdcServiceDep = Annotated[UsdcService, Depends(get_usdc_service)]

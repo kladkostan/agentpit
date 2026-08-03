@@ -38,6 +38,17 @@ class BalanceService:
         self._onchain = onchain
         self._settings = settings
 
+    def next_allowed(self, user: User) -> int:
+        """Cooldown status only: no chain call, no mint, no write.
+
+        Backs the GET side of the top-up endpoint, so the button knows when
+        it may be clicked without paying for an RPC round-trip or touching
+        LAST_TOPUP_AT the way a real top-up attempt would.
+        """
+        with self._db.read() as conn:
+            last = TableRead.get_last_topup_at(conn, user.user_id)
+        return next_allowed_at(last, self._settings.topup_cooldown_seconds)
+
     def top_up(self, user: User, now: int) -> TopUpResult:
         # Balance first: every early return below still needs to report it.
         balance = self._onchain.usd_balance(user.eth_address)
