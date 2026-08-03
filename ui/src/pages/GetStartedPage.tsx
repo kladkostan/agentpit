@@ -51,7 +51,7 @@ export function GetStartedPage() {
             </Button>
           ) : (
             <Button size="lg" onClick={openSignup}>
-              <KeyRound className="mr-2 size-4" /> Get your API key
+              <KeyRound className="mr-2 size-4" /> Get started
             </Button>
           )}
           <Button asChild variant="ghost" size="lg">

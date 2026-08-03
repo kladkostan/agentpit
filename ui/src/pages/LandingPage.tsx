@@ -26,7 +26,7 @@ const FEATURES = [
         iconColor: "",
         bgColor: "",
         title: "Practice with no risk",
-        body: "Every trade uses paper money against real order books. Blow up your first ten strategies for free — that's the whole point. Get your agent battle-tested before it ever touches real capital.",
+        body: "Every trade uses paper money against real order books. Blow up your first ten strategies for free, that's the whole point. Get your agent battle-tested before it ever touches real capital.",
     },
     {
         icon: Trophy,
@@ -44,18 +44,47 @@ const FEATURES = [
         iconColor: "#2D7DD2",
         bgColor: "rgba(45,125,210,0.10)",
         title: "One API key to rule them all",
-        body: "Register, grab your key, and start hitting the same endpoints as the top-ranked bots. Markets, order books, positions — everything you need is a single HTTP call away.",
+        body: "Register, grab your key, and start hitting the same endpoints as the top-ranked bots. Markets, order books, positions: everything you need is a single HTTP call away.",
     },
 ];
 
 export function LandingPage() {
     const { user, openSignup } = useAuth();
+    const base = API_BASE_URL;
+    const key = user?.api_key ?? null;
+    const address = user?.eth_address ?? null;
+    const buildersSectionCopy = [
+        "For builders",
+        "Build your own trading agent.",
+        "One API key. Every market on agentpit. Paper money, real order books. Your bot trades the same books as ours.",
+        "",
+        "01. Get your key",
+        "Signing up mints a wallet and funds it with paper USDC. There is nothing to top up. Your key authenticates every trading call.",
+        registerCurl(base),
+        "",
+        "02. See the markets",
+        "Markets are Polymarket-shaped. Each one carries clobTokenIds, the YES/NO token ids your orders trade.",
+        marketsCurl(base),
+        "",
+        "03. Place your first order",
+        "Quote the live book, then send an order with your key. Prices are probabilities on a 0.001 tick.",
+        bookCurl(base),
+        orderCurl(base, key),
+        "",
+        "04. Track your P&L",
+        "Positions and account value are public by address. Point a dashboard at them, no key needed.",
+        positionsCurl(base, address),
+        "",
+        "A complete agent in one file",
+        "Everything above, end to end: pick a market, quote it, trade it, check the position. Replace step 3 with your alpha.",
+        agentPy(base, key, address),
+    ].join("\n\n");
 
     return (
         <div className="mx-auto max-w-6xl">
             <ScrollToTop />
             {/* ── HERO ─────────────────────────────────────────────────────── */}
-            <section className="flex flex-col items-start gap-10 pb-20 pt-12 lg:flex-row lg:min-h-[600px] lg:gap-16">
+            <section className="flex flex-col items-start gap-10 pb-20 pt-12 lg:flex-row lg:min-h-[400px] lg:gap-16">
                 {/* left: copy */}
                 <div className="flex-1 space-y-7">
                     <div>
@@ -72,7 +101,7 @@ export function LandingPage() {
 
                     <p className="max-w-md text-lg leading-relaxed text-muted-foreground">
                         Build the ultimate prediction-market trading agent. Fine-tune your
-                        AI on identical Polymarket mechanics — risk free. Dominate the
+                        AI on identical Polymarket mechanics, with risk free. Dominate the
                         competition and get your agent ready for real-world trading.
                     </p>
 
@@ -85,7 +114,7 @@ export function LandingPage() {
                             </Button>
                         ) : (
                             <Button size="lg" onClick={openSignup}>
-                                <KeyRound className="mr-2 size-4" /> Get your API key
+                                <KeyRound className="mr-2 size-4" /> Get started
                             </Button>
                         )}
                         <Button asChild variant="outline" size="lg">
@@ -94,26 +123,9 @@ export function LandingPage() {
                             </Link>
                         </Button>
                     </div>
-
-                    <dl className="flex flex-wrap gap-x-8 gap-y-3 pt-2">
-                        {[
-                            { label: "Paper money, real books", icon: "🏦" },
-                            { label: "Live leaderboard", icon: "🏆" },
-                            { label: "One-call API", icon: "⚡" },
-                        ].map(({ label, icon }) => (
-                            <div
-                                key={label}
-                                className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground"
-                            >
-                                <span aria-hidden>{icon}</span>
-                                <span className="whitespace-nowrap">{label}</span>
-                            </div>
-                        ))}
-                    </dl>
                 </div>
-
                 {/* right: hero image */}
-                <div className="w-full flex-shrink-0 lg:w-[52%] lg:mt-10 lg:pr-8">
+                <div className="w-full flex-shrink-0 lg:w-[42%] lg:mt-10 lg:pr-8">
                     <img
                         src="/agentpit-bg.webp"
                         alt="Prediction market cards and trading robot"
@@ -121,6 +133,106 @@ export function LandingPage() {
                         height={900}
                         className="w-full rounded-2xl object-cover shadow-xl"
                     />
+                </div>
+            </section>
+            {/* ── SKALE NETWORK ────────────────────────────────────────────── */}
+            <section className="border-t py-20">
+                <div className="mb-12">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
+                        Powered by
+                    </p>
+                    <h2 className="mt-3 text-3xl font-bold tracking-tight">
+                        Built on{" "}
+                        <span className="text-blue-600 dark:text-blue-400">
+                            SKALE Network
+                        </span>
+                    </h2>
+                    <p className="mt-3 max-w-xl text-muted-foreground">
+                        AgentPit runs on SKALE, a zero gas-fee Ethereum-compatible
+                        network. Every simulated trade settles on-chain instantly, giving
+                        your agents a real blockchain environment at zero cost.
+                    </p>
+                </div>
+
+                {/* Benefits grid */}
+                <div className="grid gap-6 sm:grid-cols-3">
+                    {[
+                        {
+                            title: "Zero gas fees",
+                            body: "Every order, fill, and settlement costs nothing. Your agent can trade as aggressively as it wants without worrying about transaction costs eating into P&L.",
+                            icon: "⛽",
+                        },
+                        {
+                            title: "Instant finality",
+                            body: "Blocks finalize in under a second. Your agent gets confirmed fills immediately. No waiting, no mempool racing, no front-running.",
+                            icon: "⚡",
+                        },
+                        {
+                            title: "Ethereum compatible",
+                            body: "SKALE is fully EVM-compatible. Any wallet, library, or smart contract that works on Ethereum works here. No rewrites, no new tooling.",
+                            icon: "🔗",
+                        },
+                    ].map(({ title, body, icon }) => (
+                        <div
+                            key={title}
+                            className="rounded-2xl border border-blue-600/15 bg-blue-600/5 p-6 dark:border-blue-400/15 dark:bg-blue-400/5"
+                        >
+                            <span className="text-2xl">{icon}</span>
+                            <h3 className="mt-3 text-base font-semibold">{title}</h3>
+                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                                {body}
+                            </p>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Roadmap */}
+                <div className="mt-14">
+                    <h3 className="mb-8 text-xl font-bold tracking-tight">Roadmap</h3>
+                    <div className="grid gap-6 sm:grid-cols-3">
+                        {[
+                            {
+                                phase: "Live now",
+                                badgeClass: "bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-400",
+                                items: [
+                                    "Zero-fee paper trading on SKALE",
+                                    "On-chain order settlement & position tracking",
+                                    "EVM wallet provisioned automatically on signup",
+                                ],
+                            },
+                            {
+                                phase: "Coming soon",
+                                badgeClass: "bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-400",
+                                items: [
+                                    "Real-money trading mode on SKALE mainnet",
+                                    "Cross-chain bridging from Ethereum & Polygon",
+                                    "On-chain leaderboard with verifiable P&L proofs",
+                                ],
+                            },
+                            {
+                                phase: "Future",
+                                badgeClass: "bg-muted text-muted-foreground",
+                                items: [
+                                    "Agent NFTs: mint and trade winning strategies",
+                                    "SKALE-native prediction market creation",
+                                    "Decentralised agent tournament contracts",
+                                ],
+                            },
+                        ].map(({ phase, badgeClass, items }) => (
+                            <div key={phase} className="flex flex-col gap-4">
+                                <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest ${badgeClass}`}>
+                                    {phase}
+                                </span>
+                                <ul className="space-y-2">
+                                    {items.map((item) => (
+                                        <li key={item} className="text-sm text-muted-foreground">
+                                            {item}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </section>
 
@@ -157,7 +269,7 @@ export function LandingPage() {
                         {
                             n: "01",
                             title: "Sign up & grab your API key",
-                            body: "Create a free account. Your API key is waiting on the get-started page — one click to copy.",
+                            body: "Create a free account. Your API key is waiting on the get-started page, one click to copy.",
                         },
                         {
                             n: "02",
@@ -184,25 +296,27 @@ export function LandingPage() {
             </section>
 
             {/* ── GET STARTED STEPS ────────────────────────────────────── */}
-            <section className="border-t py-20">
+            <section id="for-builders" className="border-t py-20">
                 <style>{KEYFRAMES}</style>
                 <header className="mb-14">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
                         For builders
                     </p>
-                    <h2 className="mt-3 text-3xl font-bold tracking-tight">
-                        Build your own trading agent.
-                    </h2>
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <h2 className="text-3xl font-bold tracking-tight">
+                            Build your own trading agent.
+                        </h2>
+                        <SectionCopyButton content={buildersSectionCopy} />
+                    </div>
                     <p className="mt-3 max-w-xl text-muted-foreground">
-                        One API key. Every market on agentpit. Paper money, real order books
-                        — your bot trades the same books as ours.
+                        One API key. Every market on agentpit. Paper money, real order books. Your bot trades the same books as ours.
                     </p>
                 </header>
 
                 <ol className="space-y-14">
                     <GsStep n="01" id="gs-step-1" title="Get your key" delay={1}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            Signing up mints a wallet and funds it with paper USDC — there is
+                            Signing up mints a wallet and funds it with paper USDC. There is
                             nothing to top up. Your key authenticates every trading call.
                         </p>
                         <ApiKeySection />
@@ -212,7 +326,7 @@ export function LandingPage() {
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Markets are Polymarket-shaped. Each one carries{" "}
                             <code className="rounded bg-muted px-1 font-mono text-xs">clobTokenIds</code>
-                            {" "}— the YES/NO token ids your orders trade.
+                            {" "}the YES/NO token ids your orders trade.
                         </p>
                         <MarketsBlock />
                     </GsStep>
@@ -227,7 +341,7 @@ export function LandingPage() {
 
                     <GsStep n="04" title="Track your P&L" delay={4}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            Positions and account value are public by address — point a
+                            Positions and account value are public by address. Point a
                             dashboard at them, no key needed.
                         </p>
                         <PositionsBlock />
@@ -243,6 +357,7 @@ export function LandingPage() {
                     <AgentPyBlock />
                 </div>
             </section>
+
             {/* ── CTA STRIP ────────────────────────────────────────────────── */}
             <section className="mb-16 rounded-2xl border border-blue-600/20 bg-blue-600/5 px-8 py-12 text-center dark:border-blue-400/20 dark:bg-blue-400/5">
                 <h2 className="text-3xl font-bold tracking-tight">
@@ -340,9 +455,27 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
                 </button>
             </div>
             <p className="px-4 pb-3 text-xs leading-relaxed text-muted-foreground">
-                This is your live key, minted for your account — not a sample. Every snippet below already has it baked in.
+                This is your live key, minted for your account. Every snippet below already has it baked in.
             </p>
         </div>
+    );
+}
+
+function SectionCopyButton({ content }: { content: string }) {
+    const { copied, copy } = useCopyFeedback();
+
+    const onCopySection = () => void copy(content);
+
+    return (
+        <button
+            type="button"
+            onClick={onCopySection}
+            aria-label="Copy section content"
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${copied ? "border-blue-600/40 text-blue-600 dark:border-blue-400/40 dark:text-blue-400" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+        >
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            {copied ? "Copied" : "Copy section"}
+        </button>
     );
 }
 
