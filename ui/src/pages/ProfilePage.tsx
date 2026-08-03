@@ -179,26 +179,15 @@ export function ProfilePage() {
                 </p>
               </div>
             </div>
-            <div className="mt-6 grid grid-cols-2 divide-x rounded-lg border bg-muted/20 sm:grid-cols-4">
+            <div className="mt-6 grid grid-cols-2 divide-x divide-y rounded-lg border bg-muted/20 sm:grid-cols-4 sm:divide-y-0">
               <TopMetric
                 label="Balance"
                 value={balance != null ? formatVolume(balance) : "—"}
                 tooltip={balance != null ? USD.format(balance) : undefined}
-                action={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    disabled={topUpState.disabled}
-                    onClick={() => topUp.mutate()}
-                  >
-                    {topUpState.label}
-                  </Button>
-                }
               />
               <TopMetric
-                label="Positions Value"
-                value={USD.format(positionsValue)}
+                label="Positions"
+                value={formatVolume(positionsValue)}
                 tooltip={USD.format(positionsValue)}
               />
               <TopMetric
@@ -209,6 +198,24 @@ export function ProfilePage() {
                 label="Predictions"
                 value={predictionCount.toString()}
               />
+            </div>
+            {/* Outside the stat grid on purpose: a quarter-width cell cannot
+                hold "Available in 24h" without the button spilling past the
+                divider, and shrinking the label to fit would hide the one
+                thing it has to say. */}
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="min-w-0 text-xs text-muted-foreground">
+                Paper balance, restored to $100k once a day.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={topUpState.disabled}
+                onClick={() => topUp.mutate()}
+              >
+                {topUpState.label}
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -335,25 +342,30 @@ function TopMetric({
   tooltip?: string | undefined;
   action?: ReactNode;
 }) {
-  const truncatedValue = value.length > 12 ? `${value.slice(0, 9)}...` : value;
+  // Truncate in CSS, not by counting characters: "$30,000.00" is only 10
+  // characters and still overflows a quarter-width cell, which used to spill
+  // the value across the divider into the next stat. `min-w-0` is what lets a
+  // grid child shrink below its content at all.
   return (
-    <div className="p-3">
+    <div className="flex min-w-0 flex-col p-3">
       {tooltip ? (
         <Tooltip title={tooltip} arrow>
-          <p className="cursor-help text-2xl font-bold leading-none tracking-tight">
-            {truncatedValue}
+          <p className="cursor-help truncate text-xl font-bold leading-none tracking-tight">
+            {value}
           </p>
         </Tooltip>
       ) : (
         <p
-          className="text-2xl font-bold leading-none tracking-tight"
+          className="truncate text-xl font-bold leading-none tracking-tight"
           title={value}
         >
-          {truncatedValue}
+          {value}
         </p>
       )}
-      <p className="mt-1 text-sm font-medium text-muted-foreground">{label}</p>
-      {action ? <div className="mt-2">{action}</div> : null}
+      <p className="mt-1 truncate text-sm font-medium text-muted-foreground">
+        {label}
+      </p>
+      {action ? <div className="mt-auto pt-2">{action}</div> : null}
     </div>
   );
 }
