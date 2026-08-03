@@ -50,10 +50,14 @@ export function MarketCard({
         )
       : null;
 
+  // `isolate` keeps every z-index inside the card inside the card. Without it
+  // the probability's `z-10` competed with the sticky header's `z-10`, and
+  // since the cards come later in the DOM the number won the tie: it painted
+  // over the header and intercepted clicks meant for the search box.
   return (
     <Link
       to={href}
-      className="group relative block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="group relative isolate block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <article className="flex h-full flex-col gap-5 rounded-2xl border bg-card p-5 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-foreground/25 group-hover:shadow-[0_18px_36px_-22px_rgba(0,0,0,0.25)]">
         <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">

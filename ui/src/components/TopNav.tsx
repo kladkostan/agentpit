@@ -81,8 +81,12 @@ export function TopNav() {
     },
   };
 
+  // z-40, not z-10: an app header sits above page content unconditionally. At
+  // z-10 it merely tied with anything in the page using the same value, and a
+  // tie is settled by DOM order -- which page content always wins. Stays below
+  // ScrollToTop's z-50, which is meant to float over everything.
   return (
-    <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
       <div className="container flex h-14 items-center gap-6">
         <NavLink to="/" className="flex shrink-0 items-center gap-2">
           <AgentLogo />
