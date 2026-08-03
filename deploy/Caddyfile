@@ -1,11 +1,14 @@
-# No domain yet — plain http on the instance IP. When a domain appears,
-# replace ":80"/":8000" with the hostnames and Caddy handles TLS itself.
-{
-	auto_https off
-}
+# agentpit.dev over TLS. Caddy obtains and renews the certificates itself; the
+# only requirements are that the hostnames resolve here and that :80 stays
+# published, because that is where the ACME HTTP challenge lands.
+#
+# TLS is not optional for this domain. `.dev` is on the HSTS preload list baked
+# into Chrome, Firefox, Safari and Edge, so every browser rewrites
+# http://agentpit.dev to https:// before it sends a single packet. Without a
+# certificate the site does not merely lose the padlock -- it does not load.
 
-# UI — static SPA + arena JSONs (delivered out-of-band into /arena).
-:80 {
+# --- UI: static SPA + the arena JSONs delivered out-of-band into /arena -------
+agentpit.dev {
 	encode gzip
 
 	@arena path /leaderboard.json /bot-status*.json
@@ -22,7 +25,38 @@
 	}
 }
 
-# API — same-machine reverse proxy; uvicorn itself is not published.
+www.agentpit.dev {
+	redir https://agentpit.dev{uri} permanent
+}
+
+# --- API: same-machine reverse proxy; uvicorn itself is never published -------
+api.agentpit.dev {
+	reverse_proxy api:8000
+}
+
+# --- Transitional: the bare IP keeps working over plain http ------------------
+# An explicit `http://` host rather than a bare `:80`, so it cannot collide with
+# the automatic http->https redirects Caddy installs for the named sites above.
+# Anything still pointing at the IP -- a cached bundle, an old bookmark, a bot
+# configured before the domain existed -- keeps working. Remove both of these
+# once nothing does.
+http://23.88.62.130 {
+	encode gzip
+
+	@arena path /leaderboard.json /bot-status*.json
+	handle @arena {
+		root * /arena
+		header Cache-Control "no-store"
+		file_server
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
+
 :8000 {
 	reverse_proxy api:8000
 }

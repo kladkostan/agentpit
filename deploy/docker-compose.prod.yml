@@ -113,12 +113,25 @@ services:
     logging: *default-logging
     ports:
       - "80:80"
+      # :80 must stay published even though everything redirects to https --
+      # it is where the ACME HTTP challenge lands, so closing it breaks renewal.
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
       - "8000:8000"
     volumes:
       - ./arena-data:/arena:ro
+      # Certificates and the ACME account key. Without these the container's
+      # writable layer holds them, every `build` throws them away, and Caddy
+      # re-requests certificates on each deploy -- Let's Encrypt allows five
+      # duplicate certificates per week, so the sixth UI deploy in a week would
+      # take the site down with a TLS error rather than a 500.
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       - api
 
 volumes:
   agentpit_pg:
   agentpit_anvil:
+  caddy_data:
+  caddy_config:
