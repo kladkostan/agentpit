@@ -251,6 +251,13 @@ class TableRead:
         return row["PASSWORD_HASH"] if row else None
 
     @staticmethod
+    def get_last_topup_at(db: psycopg.Connection, user_id: str) -> int | None:
+        row = db.execute(
+            "SELECT LAST_TOPUP_AT FROM users WHERE USER_ID = %s", (user_id,)
+        ).fetchone()
+        return row["LAST_TOPUP_AT"] if row else None
+
+    @staticmethod
     def read_market(db: psycopg.Connection, market_id: int) -> "Market | None":
         row = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = %s",

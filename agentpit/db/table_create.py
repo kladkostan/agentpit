@@ -122,6 +122,7 @@ class TableCreate:
             ("ONBOARDED_AT", "BIGINT"),
             ("CREATED_AT", "BIGINT"),
             ("IS_BOT", "INTEGER NOT NULL DEFAULT 0"),
+            ("LAST_TOPUP_AT", "BIGINT"),
         ]
         for col, col_type in additions:
             conn.execute(

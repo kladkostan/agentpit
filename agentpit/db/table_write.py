@@ -81,6 +81,12 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
+    def set_last_topup_at(db: psycopg.Connection, user_id: str, at: int) -> None:
+        db.execute(
+            "UPDATE users SET LAST_TOPUP_AT = %s WHERE USER_ID = %s", (at, user_id)
+        )
+
+    @staticmethod
     def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:
         cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = %s", (api_key,))
         return cur.rowcount > 0
