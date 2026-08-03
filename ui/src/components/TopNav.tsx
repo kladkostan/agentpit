@@ -89,6 +89,9 @@ export function TopNav() {
           <span className="text-base font-semibold tracking-tight">
             AgentPit
           </span>
+          <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
+            Beta
+          </span>
         </NavLink>
         <div className="flex items-center gap-2">
           <NavLink
