@@ -12,6 +12,7 @@ from agentpit.services.agent_service import AgentService
 from agentpit.services.auth_service import AuthService
 from agentpit.services.balance_service import BalanceService
 from agentpit.services.event_service import EventService
+from agentpit.services.leaderboard_service import LeaderboardService
 from agentpit.services.market_service import MarketService
 from agentpit.services.order_service import OrderService
 from agentpit.services.personality_service import PersonalityService
@@ -125,6 +126,20 @@ def get_balance_service(
     accounts: AccountServiceDep,
 ) -> BalanceService:
     return BalanceService(db, onchain, settings, accounts)
+
+
+def get_leaderboard_service(
+    db: SessionDep,
+    onchain: OnchainAdminDep,
+    accounts: AccountServiceDep,
+    settings: SettingsDep,
+) -> LeaderboardService:
+    return LeaderboardService(db, onchain, accounts, settings)
+
+
+LeaderboardServiceDep = Annotated[
+    LeaderboardService, Depends(get_leaderboard_service)
+]
 
 
 BalanceServiceDep = Annotated[BalanceService, Depends(get_balance_service)]

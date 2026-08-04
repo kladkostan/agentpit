@@ -221,3 +221,55 @@ def test_one_account_write_failure_does_not_cost_the_rest(monkeypatch):
     assert good_id in latest
     assert bad_id not in latest
     db.close()
+
+
+from agentpit.services.leaderboard_service import (
+    LeaderboardRow,
+    display_name,
+    rank_rows,
+)
+
+
+def _row(name, capital, deposited, trades=1, is_house_agent=False):
+    return LeaderboardRow(
+        name=name,
+        address="0x" + "11" * 20,
+        capital_raw=capital,
+        deposited_raw=deposited,
+        trades=trades,
+        is_house_agent=is_house_agent,
+    )
+
+
+def test_earned_and_return_come_off_capital_and_deposits():
+    row = _row("a", capital=120_000_000_000, deposited=100_000_000_000)
+    assert row.earned_raw == 20_000_000_000
+    assert row.return_pct == 20.0
+
+
+def test_return_is_zero_rather_than_dividing_by_zero():
+    """Cannot happen once the signup grant counts as the first deposit, which
+    is exactly why it does. Pinned so that stays true."""
+    assert _row("a", capital=5, deposited=0).return_pct == 0.0
+
+
+def test_default_sort_is_return_not_capital():
+    """The default sort is what 'the leaderboard' means to a visitor, and
+    capital alone ranks whoever pressed the top-up button most."""
+    big_pile = _row("whale", capital=900_000_000_000, deposited=900_000_000_000)
+    good_trader = _row("sharp", capital=150_000_000_000, deposited=100_000_000_000)
+    assert [r.name for r in rank_rows([big_pile, good_trader], "return")] == [
+        "sharp",
+        "whale",
+    ]
+    assert [r.name for r in rank_rows([big_pile, good_trader], "capital")] == [
+        "whale",
+        "sharp",
+    ]
+
+
+def test_the_name_is_the_handle_or_the_truncated_address():
+    assert display_name("degen_trader", "0x" + "ab" * 20) == "degen_trader"
+    assert display_name(None, "0x1234567890abcdef1234567890abcdef12345678") == (
+        "0x1234…5678"
+    )

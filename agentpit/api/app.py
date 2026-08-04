@@ -21,6 +21,7 @@ from agentpit.api.routes import (
     auth,
     data_api,
     events,
+    leaderboard,
     market_data,
     markets,
     orders,
@@ -53,7 +54,9 @@ from agentpit.polymarket.polymarket_sync import (
     fetch_and_sync_polymarket_markets,
     mirror_polymarket_resolutions,
 )
+from agentpit.services.account_service import AccountService
 from agentpit.services.event_service import EventService
+from agentpit.services.leaderboard_service import LeaderboardService
 from agentpit.services.snapshot_service import SnapshotService
 
 log = logging.getLogger(__name__)
@@ -320,6 +323,22 @@ async def _snapshot_loop(
         await asyncio.sleep(interval_seconds)
 
 
+async def _leaderboard_loop(
+    service: LeaderboardService, interval_seconds: int
+) -> None:
+    while True:
+        try:
+            written = await asyncio.to_thread(
+                service.take_snapshot, int(time.time())
+            )
+            log.info("Leaderboard tick: %d accounts valued", written)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Leaderboard tick failed")
+        await asyncio.sleep(interval_seconds)
+
+
 def _build_onchain_admin(settings: Settings) -> OnchainAdmin:
     if not settings.deployment_path.exists():
         raise RuntimeError(
@@ -396,6 +415,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             log.info(
                 "Snapshot loop disabled (set SNAPSHOT_ENABLED=true to enable)"
+            )
+
+        leaderboard_task: asyncio.Task | None = None
+        if settings.leaderboard_enabled:
+            log.info(
+                "Leaderboard loop enabled (interval=%ds)",
+                settings.leaderboard_interval_seconds,
+            )
+            leaderboard_service = LeaderboardService(
+                db_session,
+                onchain_admin,
+                AccountService(db_session, onchain_admin),
+                settings,
+            )
+            leaderboard_task = asyncio.create_task(
+                _leaderboard_loop(
+                    leaderboard_service, settings.leaderboard_interval_seconds
+                )
+            )
+        else:
+            log.info(
+                "Leaderboard loop disabled "
+                "(set AGENTPIT_LEADERBOARD_ENABLED=true to enable)"
             )
 
         mirror_tasks: list[asyncio.Task] = []
@@ -499,6 +541,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for task in (
                 sync_task,
                 snapshot_task,
+                leaderboard_task,
                 resolution_task,
                 pin_task,
                 requote_task,
@@ -541,6 +584,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(users.router)
     app.include_router(markets.router)
     app.include_router(events.router)
+    app.include_router(leaderboard.router)
     app.include_router(orders.router)
     app.include_router(market_data.router)
     app.include_router(positions.router)

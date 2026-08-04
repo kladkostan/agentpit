@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     snapshot_retention_days: int = Field(
         default=30, validation_alias="AGENTPIT_SNAPSHOT_RETENTION_DAYS"
     )
+    leaderboard_enabled: bool = Field(
+        default=True, validation_alias="AGENTPIT_LEADERBOARD_ENABLED"
+    )
+    leaderboard_interval_seconds: int = Field(
+        default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"
+    )
     cors_origins: list[str] = Field(
         default=["http://localhost:5173"], validation_alias="AGENTPIT_CORS_ORIGINS"
     )
@@ -180,6 +186,13 @@ class Settings(BaseSettings):
     )
     topup_cooldown_seconds: int = Field(
         default=86_400, validation_alias="AGENTPIT_TOPUP_COOLDOWN_SECONDS"
+    )
+    # The five Arena personalities are ours: they fork one shared analysis
+    # rather than reasoning independently, and they sit next to agents that
+    # do. Labelled on the board rather than hidden from it.
+    house_agent_handles: list[str] = Field(
+        default=["bold", "cautious", "contrarian", "hybrid", "longshot"],
+        validation_alias="AGENTPIT_HOUSE_AGENT_HANDLES",
     )
     # House gas. The mirror signs its own split transactions, so the account
     # spends gas continuously and its signup grant is not a lifetime supply:

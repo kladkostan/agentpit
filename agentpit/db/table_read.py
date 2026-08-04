@@ -323,6 +323,19 @@ class TableRead:
         ]
 
     @staticmethod
+    def count_trades_by_user(db: psycopg.Connection) -> "dict[str, int]":
+        rows = db.execute(
+            """
+            SELECT u.USER_ID AS UID, COUNT(*) AS N
+            FROM users u
+            JOIN trades t
+              ON t.TAKER_API_KEY = u.API_KEY OR t.MAKER_API_KEY = u.API_KEY
+            GROUP BY u.USER_ID
+            """
+        ).fetchall()
+        return {r["UID"]: int(r["N"]) for r in rows}
+
+    @staticmethod
     def latest_account_snapshots(
         db: psycopg.Connection,
     ) -> "dict[str, tuple[int, int]]":

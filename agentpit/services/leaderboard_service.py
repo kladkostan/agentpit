@@ -1,6 +1,8 @@
 """Valuing every trading account on a timer, so ranking never reads the chain."""
 import logging
 
+from pydantic import BaseModel
+
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -9,6 +11,58 @@ from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.account_service import AccountService
 
 log = logging.getLogger(__name__)
+
+SORTS = ("return", "earned", "capital", "trades")
+
+
+class LeaderboardRow(BaseModel):
+    name: str
+    address: str
+    capital_raw: int
+    deposited_raw: int
+    trades: int
+    is_house_agent: bool
+
+    @property
+    def earned_raw(self) -> int:
+        return self.capital_raw - self.deposited_raw
+
+    @property
+    def return_pct(self) -> float:
+        """Percent return on what the account was handed.
+
+        Zero deposits cannot happen once the signup grant counts as the first
+        one -- which is why it does -- but a board that divides by zero on an
+        edge case is worse than one that shows 0%.
+        """
+        if self.deposited_raw <= 0:
+            return 0.0
+        return 100.0 * self.earned_raw / self.deposited_raw
+
+
+def display_name(handle: str | None, eth_address: str) -> str:
+    """The handle when set, otherwise a truncated address.
+
+    Never the email: nobody is put on a public board under the address they
+    signed up with. Nobody drops off the board for leaving the handle blank
+    either -- that would hide exactly the accounts that have not yet noticed
+    the field exists.
+    """
+    if handle and handle.strip():
+        return handle
+    return f"{eth_address[:6]}…{eth_address[-4:]}"
+
+
+def rank_rows(rows: "list[LeaderboardRow]", sort: str) -> "list[LeaderboardRow]":
+    """Order the board. Unknown sorts fall back to return, the default."""
+    keys = {
+        "return": lambda r: (r.return_pct, r.earned_raw),
+        "earned": lambda r: (r.earned_raw, r.return_pct),
+        "capital": lambda r: (r.capital_raw, r.earned_raw),
+        "trades": lambda r: (r.trades, r.return_pct),
+    }
+    key = keys.get(sort, keys["return"])
+    return sorted(rows, key=key, reverse=True)
 
 
 class LeaderboardService:
@@ -65,3 +119,33 @@ class LeaderboardService:
                 continue
             written += 1
         return written
+
+    def build_board(self) -> "list[LeaderboardRow]":
+        """Assemble the board from the latest snapshot of each account.
+
+        Reads only the database -- the chain work happened in `take_snapshot`.
+        """
+        with self._db.read() as conn:
+            accounts = TableRead.list_traded_accounts(conn)
+            latest = TableRead.latest_account_snapshots(conn)
+            counts = TableRead.count_trades_by_user(conn)
+
+        rows = []
+        for account in accounts:
+            snapshot = latest.get(account.user_id)
+            if snapshot is None:
+                # Traded, but the valuation pass has not reached it yet.
+                continue
+            capital, deposited = snapshot
+            rows.append(
+                LeaderboardRow(
+                    name=display_name(account.handle, account.eth_address),
+                    address=account.eth_address,
+                    capital_raw=capital,
+                    deposited_raw=deposited,
+                    trades=counts.get(account.user_id, 0),
+                    is_house_agent=account.handle
+                    in self._settings.house_agent_handles,
+                )
+            )
+        return rows
