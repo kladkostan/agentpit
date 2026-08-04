@@ -84,17 +84,22 @@ class _FakeOnchain:
 
     native_balance_wei defaults to a healthy, nonzero balance -- a real
     chain-that-hasn't-been-wiped -- so every pre-existing test using this
-    fake is unaffected by the wipe-detection path in top_up. deployment_id is
-    a fixed string: these accounts never saw a prior deployment recorded, so
-    top_up's first call always takes the "predates the column" branch, not
-    the reset branch.
+    fake is unaffected by the wipe-detection path in top_up. deployment_id
+    defaults to a fixed string: existing callers of this fake never recorded
+    a prior deployment, so top_up's first call always takes the "predates the
+    column" branch, not the reset branch. Tests that need to exercise the
+    other two branches pass their own value in.
     """
 
-    deployment_id = "0xFAKE"
-
-    def __init__(self, balance_raw: int, native_balance_wei: int = 10**18):
+    def __init__(
+        self,
+        balance_raw: int,
+        native_balance_wei: int = 10**18,
+        deployment_id: str = "0xFAKE",
+    ):
         self.balance_raw = balance_raw
         self.native_balance_wei = native_balance_wei
+        self.deployment_id = deployment_id
         self.mints: list[tuple[str, int]] = []
         self.fail_next_mint = False
 
@@ -503,3 +508,153 @@ def test_reset_is_idempotent_so_two_racing_callers_agree():
 
     assert TableRead.get_total_deposited(conn, user_id, 0) == 0
     conn.close()
+
+
+def test_a_late_reset_cannot_erase_a_deposit_that_was_already_claimed():
+    """Two callers notice the same wipe. The first resets, claims and mints;
+    the second's reset arrives afterwards. It must find the identity already
+    swapped and change nothing -- an unconditional SET here erased a real,
+    already-minted deposit with no path to repair."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="late-reset@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    TableWrite.set_deployment_id(conn, user_id, "0xOLD")
+
+    assert TableWrite.reset_deposits(conn, user_id, "0xNEW") is True
+    assert TableWrite.claim_topup(
+        conn, user_id, 1_700_000_000, 0, 70_000_000_000, 100_000_000_000
+    )
+    assert TableRead.get_total_deposited(conn, user_id, 0) == 70_000_000_000
+
+    # The straggler.
+    assert TableWrite.reset_deposits(conn, user_id, "0xNEW") is False
+    assert TableRead.get_total_deposited(conn, user_id, 0) == 70_000_000_000
+    conn.close()
+
+
+# ----- BalanceService.top_up: the three deployment-identity branches -------
+#
+# The unit tests above call TableWrite.reset_deposits directly; none of them
+# go through top_up's own `seen is None` / `seen != current` / `seen ==
+# current` decision, so an inverted comparison or a swapped branch there
+# would still pass the whole suite. These three drive the service itself.
+
+
+def test_topup_records_identity_when_none_was_stored_and_deposits_still_accumulate():
+    """A row that predates the DEPLOYMENT_ID column carries no evidence of a
+    wipe. top_up must record the current identity without resetting -- if
+    this branch instead reset, a real pre-existing deposit total would be
+    zeroed the moment the column is first touched."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="identity-absent@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    assert TableRead.get_deployment_id(conn, user_id) is None
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000, deployment_id="0xCURRENT")
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == 70_000_000_000
+    check = fresh_test_conn()
+    assert TableRead.get_deployment_id(check, user_id) == "0xCURRENT"
+    assert TableRead.get_total_deposited(check, user_id, 0) == 570_000_000_000
+    check.close()
+    db.close()
+
+
+def test_topup_resets_deposits_when_the_stored_identity_differs():
+    """A stale identity means a wipe happened since it was last recorded.
+    top_up must reset the ledger before claiming, so the mint it is about to
+    record lands on zero, not stacked on a figure the wipe invalidated."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="identity-differs@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    TableWrite.set_deployment_id(conn, user_id, "0xOLD")
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000, deployment_id="0xNEW")
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == 70_000_000_000
+    check = fresh_test_conn()
+    assert TableRead.get_deployment_id(check, user_id) == "0xNEW"
+    assert TableRead.get_total_deposited(check, user_id, 0) == 70_000_000_000
+    check.close()
+    db.close()
+
+
+def test_topup_leaves_deposits_alone_when_the_stored_identity_matches():
+    """The ordinary case, and most of the suite already covers it implicitly
+    through _FakeOnchain's fixed deployment_id -- this pins it explicitly
+    against a stored identity that is set (not NULL) and equal, so the
+    `seen is None` branch cannot be the one making it pass."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="identity-matches@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    TableWrite.set_deployment_id(conn, user_id, "0xSAME")
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000, deployment_id="0xSAME")
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == 70_000_000_000
+    check = fresh_test_conn()
+    assert TableRead.get_deployment_id(check, user_id) == "0xSAME"
+    assert TableRead.get_total_deposited(check, user_id, 0) == 570_000_000_000
+    check.close()
+    db.close()
+
+
+def test_topup_treats_a_reonboard_written_row_as_ordinary_not_as_a_wipe():
+    """`_maybe_reonboard` writes TOTAL_DEPOSITED and DEPLOYMENT_ID together in
+    one transaction, the same shape register() uses. This is the smallest
+    honest unit of that wiring: once both are written, a later top_up whose
+    current identity matches what was just recorded must accumulate normally
+    -- not treat the row as an undetected wipe and reset the grant reonboard
+    just restored. `_maybe_reonboard` itself needs a live chain and isn't
+    reachable from this suite; driving top_up against a row shaped exactly
+    like its output is what pins the property it depends on."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="reonboard-style@example.com", password_hash="x", handle=None
+    )
+    # Mirrors what _maybe_reonboard writes after a successful re-onboard: the
+    # balance just read off chain, and the identity that produced it.
+    TableWrite.set_total_deposited(conn, user_id, 170_000_000_000)
+    TableWrite.set_deployment_id(conn, user_id, "0xNEW")
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000, deployment_id="0xNEW")
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == 70_000_000_000
+    check = fresh_test_conn()
+    assert TableRead.get_deployment_id(check, user_id) == "0xNEW"
+    # 170bn from reonboard, plus this top-up's mint -- not reset to 0 first.
+    assert TableRead.get_total_deposited(check, user_id, 0) == 240_000_000_000
+    check.close()
+    db.close()

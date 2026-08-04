@@ -157,18 +157,24 @@ class TableWrite:
     @staticmethod
     def reset_deposits(
         db: psycopg.Connection, user_id: str, deployment_id: str
-    ) -> None:
+    ) -> bool:
         """Start the deposit ledger over against a new deployment.
 
-        Sets to zero rather than adjusting by a delta, so two callers who both
-        noticed the same wipe leave the row in the same state. Writing the new
-        identity in the same statement is what stops it firing twice.
+        Conditional on the row still carrying an older identity, so this is a
+        compare-and-swap rather than a blind SET. Two callers who both noticed
+        the same wipe are safe: the first swaps the identity, and the second
+        matches nothing and changes no row -- which matters because by then the
+        first may already have claimed and minted, and an unconditional SET
+        would erase that deposit with no way to repair it.
+
+        Returns whether this call was the one that performed the reset.
         """
-        db.execute(
+        cur = db.execute(
             "UPDATE users SET TOTAL_DEPOSITED = 0, DEPLOYMENT_ID = %s "
-            "WHERE USER_ID = %s",
-            (deployment_id, user_id),
+            "WHERE USER_ID = %s AND DEPLOYMENT_ID IS DISTINCT FROM %s",
+            (deployment_id, user_id, deployment_id),
         )
+        return cur.rowcount == 1
 
     @staticmethod
     def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:

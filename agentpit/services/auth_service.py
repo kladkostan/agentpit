@@ -193,10 +193,18 @@ class AuthService:
         # write in register() and for the same reason: this path must keep
         # never blocking login, and a failure here just leaves
         # TOTAL_DEPOSITED at its prior value rather than corrupting it.
+        #
+        # Record the identity in the same write, exactly as register() does.
+        # Without it the row keeps the stale identity even though the deposit
+        # was just corrected, so the next top_up finds seen != current and
+        # resets the ledger it was just handed back.
         try:
             with self._db.write() as conn:
                 TableWrite.set_total_deposited(
                     conn, user.user_id, self._onchain.usd_balance(user.eth_address)
+                )
+                TableWrite.set_deployment_id(
+                    conn, user.user_id, self._onchain.deployment_id
                 )
         except Exception:
             log.exception(
