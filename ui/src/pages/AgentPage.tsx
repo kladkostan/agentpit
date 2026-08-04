@@ -6,7 +6,7 @@ import { usePositions } from "@/api/portfolio";
 import { useBotStatus, type BotFeedItem, type BotStatus } from "@/api/botStatus";
 import {
   resolveAgentIdentity,
-  useLeaderboard,
+  useArenaAgentsFeed,
   type AgentIdentity,
 } from "@/api/leaderboard";
 import { useNowSeconds } from "@/lib/useNowSeconds";
@@ -45,7 +45,7 @@ const pnlText = (n: number) =>
 export function AgentPage() {
   const now = useNowSeconds();
   const { agentId } = useParams();
-  const { data: leaderboard } = useLeaderboard();
+  const { data: leaderboard } = useArenaAgentsFeed();
   const { identity, status: idStatus } = resolveAgentIdentity(
     leaderboard,
     agentId,

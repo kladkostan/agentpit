@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "@/api/client";
 import { BOT_ADDRESS, type BotFeedItem, type PnlPoint } from "@/api/botStatus";
 import type { SparklineSample } from "@/lib/chartGeometry";
 
@@ -137,11 +138,15 @@ export function lastHold(feed: BotFeedItem[]): BotFeedItem | null {
   return newestFeedItem(feed, (item) => !item.traded);
 }
 
-/** Fetch the arena leaderboard off the UI origin's static `public/`. Cache-busted
- *  + polled every 4s so ranks visibly move during the demo. */
-export function useLeaderboard() {
+/** Fetch the five house personalities' feed off the UI origin's static
+ *  `public/leaderboard.json` — id/emoji/style/equity detail the real
+ *  `/leaderboard` API doesn't carry. Powers the per-agent detail page
+ *  (`AgentPage`) only; the ranked board itself now reads `useLeaderboard`
+ *  below. Cache-busted + polled every 4s so the detail page's numbers visibly
+ *  move during the demo. */
+export function useArenaAgentsFeed() {
   return useQuery({
-    queryKey: ["leaderboard"],
+    queryKey: ["arena-agents-feed"],
     queryFn: async (): Promise<LeaderboardData> => {
       const res = await fetch(`/leaderboard.json?t=${Date.now()}`, {
         cache: "no-store",
@@ -201,4 +206,54 @@ export function windowAgent(
       ...inWindow.map((pt) => ({ t: pt.t, p: pt.p - realizedAtStart })),
     ],
   };
+}
+
+/* --------------------------------------------------------- real board --- */
+
+/** One row of `GET /leaderboard` — every account that has traded, not just
+ *  the house personalities above. */
+export interface BoardEntry {
+  rank: number;
+  name: string;
+  address: string;
+  capital: string;
+  earned: string;
+  returnPct: number;
+  trades: number;
+  isHouseAgent: boolean;
+}
+
+export interface BoardResponse {
+  sort: string;
+  entries: BoardEntry[];
+}
+
+export const LEADERBOARD_SORTS = [
+  { key: "return", label: "Return" },
+  { key: "earned", label: "Earned" },
+  { key: "capital", label: "Capital" },
+  { key: "trades", label: "Trades" },
+] as const;
+
+export type LeaderboardSortKey = (typeof LEADERBOARD_SORTS)[number]["key"];
+
+const BOARD_USD = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** Base-unit integer string (6 decimals) to dollars. */
+export function formatBoardAmount(raw: string): string {
+  return BOARD_USD.format(Number(raw) / 1e6);
+}
+
+export function useLeaderboard(sort: string) {
+  return useQuery({
+    queryKey: ["leaderboard", sort],
+    queryFn: () =>
+      apiFetch<BoardResponse>(`/leaderboard?sort=${encodeURIComponent(sort)}`),
+    refetchInterval: 30_000,
+  });
 }

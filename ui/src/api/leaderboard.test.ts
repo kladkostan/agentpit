@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_IDENTITY,
   equityPoints,
+  formatBoardAmount,
+  LEADERBOARD_SORTS,
   lastHold,
   lastTrade,
   rankAgents,
@@ -301,5 +303,21 @@ describe("lastHold", () => {
     const a = feedItem({ ts: 100, decision_id: "d-1", traded: false });
     const b = feedItem({ ts: 100, decision_id: "d-9", traded: false });
     expect(lastHold([a, b])).toEqual(b);
+  });
+});
+
+describe("leaderboard board data", () => {
+  it("offers the four sorts, return first", () => {
+    expect(LEADERBOARD_SORTS.map((s) => s.key)).toEqual([
+      "return",
+      "earned",
+      "capital",
+      "trades",
+    ]);
+  });
+
+  it("renders base-unit strings as dollars", () => {
+    expect(formatBoardAmount("100000000000")).toBe("$100,000.00");
+    expect(formatBoardAmount("-2500000")).toBe("-$2.50");
   });
 });

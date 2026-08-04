@@ -1,21 +1,14 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { Sparkline } from "@/components/Sparkline";
 import {
-  equityPoints,
-  lastHold,
-  lastTrade,
-  rankAgents,
-  TIME_WINDOWS,
+  formatBoardAmount,
+  LEADERBOARD_SORTS,
   useLeaderboard,
-  windowAgent,
-  type RankedAgent,
-  type TimeWindowKey,
+  type BoardEntry,
+  type LeaderboardSortKey,
 } from "@/api/leaderboard";
-import { useBotStatus } from "@/api/botStatus";
-import { useNowSeconds } from "@/lib/useNowSeconds";
-import { formatCountdown, formatSignedUsd, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+const MEDALS = ["🥇", "🥈", "🥉"];
 
 const pnlText = (n: number) =>
   n > 0
@@ -24,27 +17,22 @@ const pnlText = (n: number) =>
       ? "text-rose-600 dark:text-rose-400"
       : "text-muted-foreground";
 
-const pnlTone = (n: number): "up" | "down" | "neutral" =>
-  n > 0 ? "up" : n < 0 ? "down" : "neutral";
+/** "+12.3%" / "-4.0%" / "0.0%" — same explicit-sign convention as the
+ *  dollar figures, so a gain reads unambiguously at a glance. */
+function formatReturnPct(pct: number): string {
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+/** "0x7aD8…e9a2" for a raw address; short strings pass through unchanged. */
+function shortAddr(a: string): string {
+  return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
 
 export function AgentArenaPage() {
-  const now = useNowSeconds();
-  const { data, error } = useLeaderboard();
-  const [windowKey, setWindowKey] = useState<TimeWindowKey>("all");
-  const win =
-    TIME_WINDOWS.find((w) => w.key === windowKey) ??
-    TIME_WINDOWS[TIME_WINDOWS.length - 1]!;
-  const startTs = win.seconds === null ? null : now - win.seconds;
-  const agents = data
-    ? rankAgents(data.agents.map((a) => windowAgent(a, startTs)))
-    : [];
-
-  const interval = (data?.cycle_interval_minutes ?? 15) * 60;
-  const sinceUpdate = data ? now - data.updated_at : Infinity;
-  const secsToNext = data ? data.updated_at + interval - now : null;
-  // "Live" while the last cycle is within two intervals; otherwise the cron is
-  // paused/stalled and we show an honest idle state.
-  const isLive = sinceUpdate < interval * 2 + 60;
+  const [sort, setSort] = useState<LeaderboardSortKey>("return");
+  const { data, error, isLoading } = useLeaderboard(sort);
+  const entries = data?.entries ?? [];
 
   return (
     <section className="mx-auto max-w-5xl space-y-6">
@@ -54,200 +42,120 @@ export function AgentArenaPage() {
             <span aria-hidden>🏆</span> Agent Arena
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Five personalities trading the same news signals — ranked by live
-            Total P&amp;L.
+            Every account that has traded on agentpit, ranked live. Our five
+            house personalities are marked "ours" — everyone else is running
+            their own.
           </p>
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-muted-foreground">
-            {data ? `${data.agents.length} agents` : "—"}
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <span className="tabular-nums text-muted-foreground">
-            {isLive && secsToNext !== null
-              ? secsToNext > 0
-                ? `next cycle in ${formatCountdown(secsToNext)}`
-                : "running…"
-              : "idle"}
-          </span>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-semibold",
-              isLive
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-            )}
-          >
-            <span
-              className={cn(
-                "inline-flex size-1.5 rounded-full",
-                isLive ? "animate-pulse bg-emerald-500" : "bg-amber-500",
-              )}
-            />
-            {isLive ? "live" : "paused"}
-          </span>
-        </div>
+        <span className="text-sm text-muted-foreground">
+          {data ? `${entries.length} ${entries.length === 1 ? "trader" : "traders"}` : "—"}
+        </span>
       </header>
 
       <div
         className="flex w-fit items-center gap-1 rounded-full bg-muted p-1"
-        aria-label="Leaderboard time window"
+        aria-label="Leaderboard sort"
       >
-        {TIME_WINDOWS.map((w) => (
+        {LEADERBOARD_SORTS.map((s) => (
           <button
-            key={w.key}
+            key={s.key}
             type="button"
-            aria-pressed={w.key === windowKey}
-            onClick={() => setWindowKey(w.key)}
+            aria-pressed={s.key === sort}
+            onClick={() => setSort(s.key)}
             className={cn(
               "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
-              w.key === windowKey
+              s.key === sort
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {w.label}
+            {s.label}
           </button>
         ))}
       </div>
 
-      {error && !data ? (
-        <div className="rounded-2xl border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
-          The leaderboard isn't available yet — it appears after the first cycle.
+      <div className="overflow-hidden rounded-2xl border bg-card">
+        <div className="hidden grid-cols-[3rem_minmax(0,1fr)_7rem_7rem_6rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
+          <span>#</span>
+          <span>Agent</span>
+          <span className="text-right">Capital</span>
+          <span className="text-right">Earned</span>
+          <span className="text-right">Return</span>
+          <span className="text-right">Trades</span>
         </div>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border bg-card">
-          <div className="hidden grid-cols-[3rem_minmax(0,1fr)_8rem_7rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,16rem)_8rem_7rem_4rem]">
-            <span>#</span>
-            <span>Agent</span>
-            <span className="hidden lg:block">Last Action</span>
-            <span className="text-right">Total P&amp;L</span>
-            <span className="text-center">Equity</span>
-            <span className="text-right">Trades</span>
-          </div>
-          <ul className="divide-y">
-            {agents.length === 0 ? (
-              <li className="grid place-items-center px-4 py-12 text-center text-sm text-muted-foreground">
-                Loading agents…
-              </li>
-            ) : (
-              agents.map((a) => <AgentRow key={a.id} agent={a} now={now} />)
-            )}
-          </ul>
-        </div>
-      )}
+        <ul className="divide-y">
+          {isLoading ? (
+            <li className="grid place-items-center px-4 py-12 text-center text-sm text-muted-foreground">
+              Loading leaderboard…
+            </li>
+          ) : error ? (
+            <li className="grid place-items-center px-4 py-12 text-center text-sm text-muted-foreground">
+              Couldn't load the leaderboard. Try again shortly.
+            </li>
+          ) : entries.length === 0 ? (
+            <li className="grid place-items-center gap-1 px-4 py-12 text-center">
+              <span className="text-sm font-medium">Nobody has traded yet</span>
+              <span className="text-sm text-muted-foreground">
+                Be the first — trade a market and your account shows up here.
+              </span>
+            </li>
+          ) : (
+            entries.map((e) => <BoardRow key={e.address} entry={e} />)
+          )}
+        </ul>
+      </div>
     </section>
   );
 }
 
-function AgentRow({ agent, now }: { agent: RankedAgent; now: number }) {
-  return (
-    <li>
-      <Link
-        to={`/agents/${agent.id}`}
-        className="grid grid-cols-[3rem_minmax(0,1fr)_8rem] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_7rem_4rem] lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,16rem)_8rem_7rem_4rem]"
-      >
-        <span className="text-lg tabular-nums">
-          {agent.medal ?? (
-            <span className="text-muted-foreground">{agent.rank}</span>
-          )}
-        </span>
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-background text-xl">
-            {agent.emoji}
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate font-semibold">{agent.name}</span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {agent.style}
-            </span>
-          </span>
-        </span>
-        <LastActionCell agentId={agent.id} now={now} />
-        <span
-          className={cn(
-            "text-right text-base font-semibold tabular-nums",
-            pnlText(agent.total_pnl),
-          )}
-        >
-          {formatSignedUsd(agent.total_pnl)}
-        </span>
-        <span className="hidden justify-center sm:flex">
-          <Sparkline
-            points={equityPoints(agent.equity)}
-            width={96}
-            height={28}
-            tone={pnlTone(agent.total_pnl)}
-          />
-        </span>
-        <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
-          {agent.trades}
-        </span>
-      </Link>
-    </li>
-  );
-}
+function BoardRow({ entry }: { entry: BoardEntry }) {
+  const addr = shortAddr(entry.address);
+  const nameIsAddress = entry.name.toLowerCase().startsWith("0x");
 
-/** Latest trade for one agent, off its bot-status feed. Fail-soft by design:
- *  a missing/stale status file or a trade-less feed renders a quiet dash —
- *  one agent's file must never break the whole row. */
-function LastActionCell({ agentId, now }: { agentId: string; now: number }) {
-  const { data } = useBotStatus(agentId);
-  // No status file (still loading, or the bot never wrote one) — we know nothing.
-  if (!data) {
-    return (
-      <span className="hidden text-sm text-muted-foreground lg:block">—</span>
-    );
-  }
-  const trade = lastTrade(data.feed);
-  // Status is live but nothing traded: deliberate restraint, not missing data.
-  // If the bot ledgered WHAT it passed on, show the market + its reason.
-  if (!trade) {
-    const hold = lastHold(data.feed);
-    if (!hold) {
-      return (
-        <span className="hidden min-w-0 lg:block">
-          <span className="block text-sm text-muted-foreground">Held back</span>
-          <span className="block text-xs text-muted-foreground/70">
-            nothing met its bar yet
-          </span>
-        </span>
-      );
-    }
-    return (
-      <span className="hidden min-w-0 lg:block">
-        <span className="line-clamp-2 break-words text-sm leading-snug">
-          {hold.title}
-        </span>
-        <span className="block text-xs text-muted-foreground">
-          <span className="font-semibold text-amber-600 dark:text-amber-400">
-            Held
-          </span>
-          {hold.hold_reason ? ` · ${hold.hold_reason}` : ""}
-          <span className="tabular-nums"> · {relativeTime(now - hold.ts)} ago</span>
-        </span>
-      </span>
-    );
-  }
-  const side =
-    trade.direction === "UP" ? "YES" : trade.direction === "DOWN" ? "NO" : null;
-  const sideClass =
-    trade.direction === "UP"
-      ? "text-emerald-600 dark:text-emerald-400"
-      : "text-rose-600 dark:text-rose-400";
   return (
-    <span className="hidden min-w-0 lg:block">
-      {/* The market title is the payload — give it two full lines instead of
-          truncating to one (long questions were unreadable). */}
-      <span className="line-clamp-2 break-words text-sm leading-snug">
-        {trade.title}
+    <li className="grid grid-cols-[3rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_7rem_7rem_6rem_4rem]">
+      <span className="text-lg tabular-nums">
+        {MEDALS[entry.rank - 1] ?? (
+          <span className="text-muted-foreground">{entry.rank}</span>
+        )}
       </span>
-      <span className="block text-xs text-muted-foreground">
-        <span className={cn("font-semibold", side && sideClass)}>
-          {side ? `Trade "${side}"` : "Trade"}
+      <span className="min-w-0">
+        <span className="flex items-center gap-2">
+          <span className="truncate font-semibold">{entry.name}</span>
+          {entry.isHouseAgent ? (
+            <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              ours
+            </span>
+          ) : null}
         </span>
-        <span className="tabular-nums"> · {relativeTime(now - trade.ts)} ago</span>
+        {!nameIsAddress ? (
+          <span className="block truncate font-mono text-xs text-muted-foreground">
+            {addr}
+          </span>
+        ) : null}
       </span>
-    </span>
+      <span className="hidden text-right text-sm tabular-nums sm:block">
+        {formatBoardAmount(entry.capital)}
+      </span>
+      <span
+        className={cn(
+          "hidden text-right text-sm tabular-nums sm:block",
+          pnlText(Number(entry.earned)),
+        )}
+      >
+        {formatBoardAmount(entry.earned)}
+      </span>
+      <span
+        className={cn(
+          "text-right text-sm font-semibold tabular-nums",
+          pnlText(entry.returnPct),
+        )}
+      >
+        {formatReturnPct(entry.returnPct)}
+      </span>
+      <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
+        {entry.trades}
+      </span>
+    </li>
   );
 }
