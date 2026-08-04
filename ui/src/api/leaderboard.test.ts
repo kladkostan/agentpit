@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  boardViewState,
   DEFAULT_IDENTITY,
   equityPoints,
   formatBoardAmount,
+  houseAgentHref,
   LEADERBOARD_SORTS,
   lastHold,
   lastTrade,
@@ -10,6 +12,8 @@ import {
   resolveAgentIdentity,
   TIME_WINDOWS,
   windowAgent,
+  type BoardEntry,
+  type BoardResponse,
   type LeaderboardAgent,
   type LeaderboardData,
 } from "./leaderboard";
@@ -319,5 +323,83 @@ describe("leaderboard board data", () => {
   it("renders base-unit strings as dollars", () => {
     expect(formatBoardAmount("100000000000")).toBe("$100,000.00");
     expect(formatBoardAmount("-2500000")).toBe("-$2.50");
+  });
+});
+
+function boardEntry(over: Partial<BoardEntry>): BoardEntry {
+  return {
+    rank: 1,
+    name: "degen_trader",
+    address: "0x7aD82E9a000000000000000000000000000000",
+    capital: "150000000000",
+    earned: "50000000000",
+    returnPct: 50,
+    trades: 12,
+    isHouseAgent: false,
+    ...over,
+  };
+}
+
+function boardResponse(entries: BoardEntry[]): BoardResponse {
+  return { sort: "return", entries };
+}
+
+describe("boardViewState", () => {
+  it("is loading before the first response and before any error", () => {
+    expect(boardViewState(undefined, null, [])).toBe("loading");
+  });
+
+  it("is error only when the first load has failed with nothing to show", () => {
+    expect(boardViewState(undefined, new Error("network"), [])).toBe("error");
+  });
+
+  it("is rows once data has arrived", () => {
+    const entries = [boardEntry({})];
+    expect(boardViewState(boardResponse(entries), null, entries)).toBe("rows");
+  });
+
+  it("is empty once data has arrived with no entries", () => {
+    expect(boardViewState(boardResponse([]), null, [])).toBe("empty");
+  });
+
+  it("keeps showing rows when a background refetch fails but data survives — the case that matters", () => {
+    const entries = [boardEntry({})];
+    expect(
+      boardViewState(boardResponse(entries), new Error("transient"), entries),
+    ).toBe("rows");
+  });
+
+  it("keeps showing empty (not error) when a background refetch fails after a real empty board", () => {
+    expect(boardViewState(boardResponse([]), new Error("transient"), [])).toBe(
+      "empty",
+    );
+  });
+});
+
+describe("houseAgentHref", () => {
+  it("links each of the five house agents by name", () => {
+    for (const name of [
+      "bold",
+      "cautious",
+      "contrarian",
+      "hybrid",
+      "longshot",
+    ]) {
+      expect(
+        houseAgentHref(boardEntry({ name, isHouseAgent: true })),
+      ).toBe(`/agents/${name}`);
+    }
+  });
+
+  it("does not link an ordinary trader even if their handle collides with a house id", () => {
+    expect(
+      houseAgentHref(boardEntry({ name: "bold", isHouseAgent: false })),
+    ).toBeNull();
+  });
+
+  it("does not link a house-flagged row whose name isn't one of the five known ids", () => {
+    expect(
+      houseAgentHref(boardEntry({ name: "mystery_bot", isHouseAgent: true })),
+    ).toBeNull();
   });
 });
