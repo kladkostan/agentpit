@@ -1,6 +1,4 @@
 """Restoring a user's paper balance to the target, at most once a day."""
-import logging
-
 from pydantic import BaseModel
 
 from agentpit.config import Settings
@@ -10,8 +8,6 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.account_service import AccountService
-
-log = logging.getLogger(__name__)
 
 
 class TopUpResult(BaseModel):
@@ -95,32 +91,28 @@ class BalanceService:
                 balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
             )
 
-        # A wiped chain is the one event that can make TOTAL_DEPOSITED lie:
-        # everything granted before the wipe no longer exists, yet the column
-        # would still carry it forward. Detected the same way
-        # `AuthService._maybe_reonboard` and `HouseAccountProvisioner`
-        # detect a wipe -- zero native balance, gated on `simulated_chain` --
-        # because on a durable chain a zero balance means the account spent
-        # its gas, an ordinary state, not a sign the chain forgot it. This is
-        # the path that reaches the reset for the Agent Arena bots: they
-        # authenticate by API key only and never call login(), so
-        # `_maybe_reonboard` never runs for them, while `top_up` is exactly
-        # what their cron calls every cycle. The reset is its own write,
-        # before the claim's write, and never folded into `claim_topup`
-        # itself -- that statement's job is the atomic claim, and a
-        # conditional reset inside it would make the predicate mean two
-        # things.
-        if self._settings.simulated_chain:
-            try:
-                wiped = self._onchain.native_balance(user.eth_address) == 0
-            except Exception as exc:
-                log.warning(
-                    "native balance check failed for %s: %s", user.user_id, exc
-                )
-                wiped = False
-            if wiped:
-                with self._db.write() as conn:
-                    TableWrite.set_total_deposited(conn, user.user_id, 0)
+        # KNOWN LIMITATION -- TOTAL_DEPOSITED does not survive a chain wipe.
+        #
+        # When a disposable anvil is reset the database survives, so an account
+        # comes back with nothing on chain while this column still carries
+        # every historical grant. `earned = capital - deposited` then reads
+        # deeply negative, and it never self-corrects: `_maybe_reonboard` is
+        # reachable only from `login()`, and the Agent Arena bots authenticate
+        # by API key alone -- their passwords were generated randomly and
+        # discarded -- so they never call it.
+        #
+        # A reset was attempted here and removed. Detecting the wipe by zero
+        # native balance is level-triggered, not edge-triggered: nothing on
+        # this path refunds the account's gas, so the condition stays true and
+        # the reset re-fires on every later top-up, discarding the deposits it
+        # had just recorded. Getting it right needs an edge signal -- the
+        # deployment's identity stored per account, so a redeploy is detected
+        # exactly once -- and that belongs with the leaderboard, which is the
+        # only consumer and the only thing that can say what "correct" means.
+        #
+        # This is bounded: it requires `simulated_chain`, which the SKALE
+        # migration sets false. **The leaderboard must not ship while that
+        # flag is true.** See docs/launch-plan.md.
 
         # Claim the day atomically before minting, so the claim can never be
         # outrun by a concurrent request. The predicate reads the row's own

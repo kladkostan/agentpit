@@ -126,6 +126,20 @@ questions want different orders:
 **Default to return, not capital.** The default sort is what "the leaderboard"
 means, and capital alone rewards whoever pressed the top-up button most.
 
+**Precondition: do not ship this while `AGENTPIT_SIMULATED_CHAIN` is true.**
+`TOTAL_DEPOSITED` does not survive a chain wipe. The database outlives a
+disposable anvil, so an account returns with nothing on chain while the column
+still carries every historical grant, and `earned` reads deeply negative — for
+the five Arena bots above all, since they authenticate by API key and never
+call `login()`, the one path that repairs a wiped account. A reset was tried in
+`top_up` and removed: zero native balance is a level, not an edge, and nothing
+on that path refunds gas, so it re-fired on every later top-up and discarded
+the deposits it had just recorded. Doing it properly means storing the
+deployment's identity per account so a redeploy is detected exactly once — a
+decision that belongs with this work, not before it. The SKALE migration
+(item 5) sets the flag false and removes the problem, which is the other reason
+that item comes first.
+
 **Only accounts that have traded appear** — the natural filter, and it sidesteps
 putting every registered address on a public board by default.
 
