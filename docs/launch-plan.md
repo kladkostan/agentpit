@@ -92,13 +92,18 @@ house mint reverts, the API refuses to start, and it surfaces with the chain and
 database already destroyed. `deploy_exchange.sh` now compares the two SHAs and
 refuses to proceed on a mismatch, so the runbook no longer has to be trusted.
 
-**One decision is still open, and it belongs to the leaderboard below.** The
-top-up compares the target against *cash only*. A user who moves cash into
-positions before clicking is below target every day: buy $100k of positions,
-cash reads zero, top up, repeat. Net worth grows $100k a day with no skill
-involved. That costs nothing while nothing ranks accounts — but it lands
-squarely on the thing being built next. Either gate on cash plus position value,
-or count each top-up as a deposit and rank return on deposits.
+**That decision is now closed, and both halves of it were taken** (2026-08-04,
+`docs/superpowers/specs/2026-08-04-net-worth-and-deposits-design.md`). The
+top-up used to compare the target against *cash only*, so moving cash into
+positions before clicking made you eligible every day — measured live, three
+presses reached $400k with no trading involved.
+
+The threshold now counts **cash plus position value**, so the button restores
+what was lost rather than paying for shuffling. And a `users.TOTAL_DEPOSITED`
+column records what each account has been handed — the signup grant plus every
+top-up — written inside the same atomic statement that claims the daily
+cooldown, so a mint can never be recorded without its deposit. That is the
+second number the leaderboard needs.
 
 ### 3. A real leaderboard — three to four days, depends on 2
 
@@ -106,14 +111,27 @@ Today's Arena is a static `leaderboard.json` written by our own bot and shipped
 as a frontend asset. No agentpit endpoint ranks anything, so a user who installs
 the reference agent never appears.
 
-Rank accounts by cash plus position value; both pieces exist per account and
-have simply never been aggregated. **Only accounts that have traded appear** —
-the natural filter, and it sidesteps putting every registered address on a
-public board by default.
+Both quantities it needs now exist per account: capital is cash plus position
+value, and `TOTAL_DEPOSITED` is what the account was handed. That gives four
+sortable columns rather than one — which is the point, because different
+questions want different orders:
 
-This has to follow the balance change. While everyone starts with a quadrillion
-and trades in hundreds, the differences vanish into rounding and the board ranks
-noise.
+| column | from | answers |
+|---|---|---|
+| capital | cash + position value | who holds the most |
+| earned | capital − deposited | who made the most money |
+| return | (capital − deposited) / deposited | who trades best |
+| trades | — | who is actually active |
+
+**Default to return, not capital.** The default sort is what "the leaderboard"
+means, and capital alone rewards whoever pressed the top-up button most.
+
+**Only accounts that have traded appear** — the natural filter, and it sidesteps
+putting every registered address on a public board by default.
+
+This had to follow the balance change. While everyone started with a quadrillion
+and traded in hundreds, the differences vanished into rounding and the board
+would have ranked noise.
 
 Compute it on a timer, not on read. `list_positions` reads the chain per
 account, and pagination does not rescue that: to know who belongs on page one

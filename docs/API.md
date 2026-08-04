@@ -411,9 +411,17 @@ Restore the caller's paper balance to the target ($100,000), at most once every 
 
 Mints only the gap up to the target, never a fixed sum — so it restores a demo balance rather than paying more to someone who lost everything than to someone who did well.
 
-Returns **200 with `minted: "0"`** in two non-error cases: the cooldown is still running, or the balance is already at or above the target. Being already ahead does **not** consume the day's allowance.
+**The target is measured against net worth — collateral plus the current value of open positions — not against collateral alone.** Moving collateral into positions therefore does not make you eligible: you are invested, not broke. Selling frees collateral.
 
-Response (`TopUpWire`): `balance` (base-unit integer string, after the mint), `minted` (base-unit integer string), `nextAllowedAt` (unix seconds).
+Returns **200 with `minted: "0"`** in two non-error cases: the cooldown is still running, or net worth is already at or above the target. Being already ahead does **not** consume the day's allowance.
+
+Response (`TopUpWire`):
+
+| field | meaning |
+|---|---|
+| `balance` | **net worth** after the mint — collateral plus position value, base-unit integer string. **Not spendable collateral**: read `GET /balance-allowance` for that. Sizing an order off this figure will over-size it by the value of your open positions, and the order will fail the balance check at match time. |
+| `minted` | how much collateral was actually minted, base-unit integer string |
+| `nextAllowedAt` | unix seconds; `0` means eligible now |
 
 ## Positions (split / merge / redeem)
 
