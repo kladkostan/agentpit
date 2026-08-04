@@ -177,6 +177,27 @@ class TableWrite:
         return cur.rowcount == 1
 
     @staticmethod
+    def insert_account_snapshot(
+        db: psycopg.Connection,
+        user_id: str,
+        t: int,
+        capital_raw: int,
+        deposited_raw: int,
+    ) -> None:
+        db.execute(
+            "INSERT INTO account_snapshots "
+            "(USER_ID, T, CAPITAL_RAW, DEPOSITED_RAW) VALUES (%s, %s, %s, %s)",
+            (user_id, t, capital_raw, deposited_raw),
+        )
+
+    @staticmethod
+    def prune_account_snapshots(db: psycopg.Connection, older_than: int) -> int:
+        cur = db.execute(
+            "DELETE FROM account_snapshots WHERE T < %s", (older_than,)
+        )
+        return cur.rowcount
+
+    @staticmethod
     def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:
         cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = %s", (api_key,))
         return cur.rowcount > 0

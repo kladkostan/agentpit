@@ -1,5 +1,6 @@
 import json
 import uuid
+from dataclasses import dataclass
 import psycopg
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
@@ -11,6 +12,13 @@ from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.user import User
 from ..datastructures.condition_id import ConditionId
+
+
+@dataclass(frozen=True)
+class TradedAccount:
+    user_id: str
+    eth_address: str
+    handle: str | None
 
 
 _MARKET_COLS = (
@@ -286,6 +294,50 @@ class TableRead:
             "SELECT DEPLOYMENT_ID FROM users WHERE USER_ID = %s", (user_id,)
         ).fetchone()
         return row["DEPLOYMENT_ID"] if row else None
+
+    @staticmethod
+    def list_traded_accounts(db: psycopg.Connection) -> "list[TradedAccount]":
+        """Every non-house account with at least one trade, taker or maker.
+
+        Having traded is the membership rule: it keeps every registered
+        address off a public board by default, and an account that never
+        traded has nothing to rank. The house is excluded because it is the
+        counterparty to nearly every trade rather than a competitor.
+        """
+        rows = db.execute(
+            """
+            SELECT DISTINCT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
+            FROM users u
+            JOIN trades t
+              ON t.TAKER_API_KEY = u.API_KEY OR t.MAKER_API_KEY = u.API_KEY
+            WHERE u.IS_BOT = 0
+            """
+        ).fetchall()
+        return [
+            TradedAccount(
+                user_id=r["USER_ID"],
+                eth_address=r["ETH_ADDRESS"],
+                handle=r["HANDLE"],
+            )
+            for r in rows
+        ]
+
+    @staticmethod
+    def latest_account_snapshots(
+        db: psycopg.Connection,
+    ) -> "dict[str, tuple[int, int]]":
+        """user_id -> (capital_raw, deposited_raw) from each account's newest row."""
+        rows = db.execute(
+            """
+            SELECT DISTINCT ON (USER_ID) USER_ID, CAPITAL_RAW, DEPOSITED_RAW
+            FROM account_snapshots
+            ORDER BY USER_ID, T DESC
+            """
+        ).fetchall()
+        return {
+            r["USER_ID"]: (int(r["CAPITAL_RAW"]), int(r["DEPOSITED_RAW"]))
+            for r in rows
+        }
 
     @staticmethod
     def read_market(db: psycopg.Connection, market_id: int) -> "Market | None":
