@@ -80,15 +80,24 @@ def test_claim_topup_is_atomic():
 
 
 class _FakeOnchain:
-    """usd_balance reflects mints already recorded, like a real faucet would."""
+    """usd_balance reflects mints already recorded, like a real faucet would.
 
-    def __init__(self, balance_raw: int):
+    native_balance_wei defaults to a healthy, nonzero balance -- a real
+    chain-that-hasn't-been-wiped -- so every pre-existing test using this
+    fake is unaffected by the wipe-detection path in top_up.
+    """
+
+    def __init__(self, balance_raw: int, native_balance_wei: int = 10**18):
         self.balance_raw = balance_raw
+        self.native_balance_wei = native_balance_wei
         self.mints: list[tuple[str, int]] = []
         self.fail_next_mint = False
 
     def usd_balance(self, address: str) -> int:
         return self.balance_raw
+
+    def native_balance(self, address: str) -> int:
+        return self.native_balance_wei
 
     def mint_to(self, recipient: str, amount_raw: int, *, timeout: int = 30):
         if self.fail_next_mint:
@@ -157,6 +166,94 @@ def test_failed_mint_releases_the_claim():
     assert retry.minted_raw == 70_000_000_000
     assert len(onchain.mints) == 1
     db.close()
+
+
+# ----- chain wipe: TOTAL_DEPOSITED must reset, not accumulate --------------
+
+
+def test_chain_wipe_resets_deposited_instead_of_accumulating():
+    """A wiped chain means the account is starting fresh: everything granted
+    before the wipe no longer exists on chain, so the just-minted amount is
+    the whole truth about what this account has been handed, not something
+    to add on top of a stale pre-wipe figure."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="wiped@example.com", password_hash="x", handle=None
+    )
+    STALE = 500_000_000_000
+    TableWrite.set_total_deposited(conn, user_id, STALE)
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=0, native_balance_wei=0)  # chain wipe
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == TARGET
+    db.close()
+
+    check = fresh_test_conn()
+    assert TableRead.get_total_deposited(check, user_id, 0) == TARGET
+    check.close()
+
+
+def test_durable_chain_does_not_reset_on_zero_native_balance():
+    """The same zero native balance means something different on a durable
+    chain: the account simply spent its gas, an ordinary state, not a wipe.
+    Resetting here would erase real deposit history every time an account
+    happened to run dry -- this is the assertion that stops the wipe-reset
+    from turning into a deposit-eraser off of the simulated chain."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="durable@example.com", password_hash="x", handle=None
+    )
+    STALE = 500_000_000_000
+    TableWrite.set_total_deposited(conn, user_id, STALE)
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=0, native_balance_wei=0)
+    settings = Settings(simulated_chain=False)
+    service = BalanceService(db, onchain, settings, _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == TARGET
+    db.close()
+
+    check = fresh_test_conn()
+    assert TableRead.get_total_deposited(check, user_id, 0) == STALE + TARGET
+    check.close()
+
+
+def test_healthy_native_balance_leaves_deposited_accumulating_normally():
+    """A normal top-up, on an account whose gas never dropped to zero, must
+    accumulate exactly as before -- the wipe check must not fire on a
+    healthy balance."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="healthy@example.com", password_hash="x", handle=None
+    )
+    STALE = 500_000_000_000
+    TableWrite.set_total_deposited(conn, user_id, STALE)
+    conn.close()
+
+    db = fresh_test_db()
+    onchain = _FakeOnchain(balance_raw=30_000_000_000)  # native balance healthy
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
+    user = _User(user_id, acct.address)
+
+    result = service.top_up(user, 1_700_000_000)
+
+    assert result.minted_raw == 70_000_000_000
+    db.close()
+
+    check = fresh_test_conn()
+    assert TableRead.get_total_deposited(check, user_id, 0) == STALE + 70_000_000_000
+    check.close()
 
 
 def test_topup_when_already_ahead_does_not_touch_last_topup_at():

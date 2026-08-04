@@ -69,16 +69,18 @@ class AuthService:
         # _maybe_reonboard), and TOTAL_DEPOSITED staying NULL is fine: it
         # reads back as the grant via get_total_deposited's default.
         try:
+            # Read the granted amount off the chain rather than from config:
+            # the grant is baked into an immutable contract by
+            # scripts/deploy_exchange.sh, while paper_balance_target_raw is a
+            # separate Settings field. They are documented to agree and today
+            # they do, but they are two sources and either can move.
+            #
+            # Read before opening the transaction, for the same reason the
+            # onboarding above sits outside one: no DB write lock should be
+            # held across a network round-trip.
+            granted = self._onchain.usd_balance(acct.address)
             with self._db.write() as conn:
-                # Read the granted amount off the chain rather than from
-                # config: the grant is baked into an immutable contract by
-                # scripts/deploy_exchange.sh, while paper_balance_target_raw
-                # is a separate Settings field. They are documented to agree
-                # and today they do, but they are two sources and either can
-                # move.
-                TableWrite.set_total_deposited(
-                    conn, user_id, self._onchain.usd_balance(acct.address)
-                )
+                TableWrite.set_total_deposited(conn, user_id, granted)
         except Exception:
             log.exception("reading granted balance failed for user %s", user_id)
 
