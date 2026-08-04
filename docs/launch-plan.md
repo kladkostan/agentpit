@@ -19,21 +19,32 @@ key, install OpenClaw, add the agent, give it the key, dry run then schedule —
 plus the whole thing as one paste. `/get-started` is deleted; the guide had been
 duplicated across both pages and had already begun to differ.
 
-Deployed to production on 2026-08-03.
+**The domain, TLS and the $100k balance model** — all live on
+https://agentpit.dev since 2026-08-03. Detail in items 1 and 2 below.
 
 ## Next, in order
 
-### 1. Domain and TLS — half a day, blocked on DNS
+### 1. Domain and TLS — DONE 2026-08-03
 
-Production is `http://23.88.62.130` with no certificate. Nothing public can
-happen first: not the docs URLs, not the demo video, not the announcement.
+`https://agentpit.dev` and `https://api.agentpit.dev`, certificates from Let's
+Encrypt, `www` and plain http both redirecting to the apex. Jack added the two A
+records; Caddy issued the certificates itself.
 
-Jack owns `agentpit.dev` (GoDaddy). Two A records to `23.88.62.130` — `@`
-replacing the two parking entries, and `api`. Caddy issues certificates itself
-once they resolve; the server config can be prepared beforehand so there is no
-window where the site is unreachable over HTTPS.
+Two things worth keeping, because neither was obvious beforehand.
 
-### 2. Paper balance: 1 quadrillion → $100k — done, redeploy not yet live
+**`.dev` is on the HSTS preload list baked into every major browser**, so
+`http://agentpit.dev` is rewritten to `https://` before a packet leaves the
+machine. With 443 unpublished this was not a missing padlock but a site that did
+not load at all — while `curl`, which ignores the preload list, returned a
+cheerful 200 and made it look like DNS had not propagated. TLS is not optional
+on this domain; it is the condition for the domain existing.
+
+**Caddy's certificates now live in a named volume.** They were in the
+container's writable layer, which every `build` discards — and a UI deploy
+rebuilds that image. Let's Encrypt allows five duplicate certificates a week, so
+the sixth UI deploy in a week would have taken the site down with a TLS error.
+
+### 2. Paper balance: 1 quadrillion → $100k — DONE, live since 2026-08-03
 
 Ben's ask, and a prerequisite for anything that ranks accounts.
 
@@ -65,17 +76,29 @@ allowance if the account is already at or above target. `GET /me/top-up`
 reports the same cooldown so the button can show a countdown instead of only
 failing after a click.
 
-All of this is code-complete on `mvp` — not merged to `main`, and not live.
-The new faucet contract, the new grant amount, and the operator-only `drip`
-only take effect once the chain is redeployed, and that has not happened yet.
-Production is still handing out the old quadrillion-apUSD grant today.
+The chain was redeployed on 2026-08-03 and verified end to end on production: a
+fresh signup lands on exactly $100,000, a top-up from $70k mints exactly $30k,
+the cooldown then engages, and a stranger's own key gets `only operator` from
+both `drip` and `mintTo`. It cost four test accounts and exactly one
+human-taker trade — 402,112 of the 402,113 trades in the database were the
+liquidity mirror trading with itself.
 
-The redeploy destroys every position, order and trade, so it is the step to
-take deliberately. Its runbook is Step 6 of
-`docs/superpowers/plans/2026-07-31-balance-model.md`; the two lines most
-easily skipped are `git submodule update` (without it the old faucet gets
-deployed against the new ABI and the API will not start) and the database
-reset (without it every market row points at a destroyed chain).
+**The `git submodule update` in that runbook earned itself on first use.** After
+`git pull` on production, `git submodule status` showed `+45c190fa` — the `+`
+meaning the checked-out commit did not match the gitlink, because a pull moves
+the gitlink but leaves the submodule where it was. Without that line `chain-init`
+would have compiled the *old* two-argument faucet against the *new* ABI: every
+house mint reverts, the API refuses to start, and it surfaces with the chain and
+database already destroyed. `deploy_exchange.sh` now compares the two SHAs and
+refuses to proceed on a mismatch, so the runbook no longer has to be trusted.
+
+**One decision is still open, and it belongs to the leaderboard below.** The
+top-up compares the target against *cash only*. A user who moves cash into
+positions before clicking is below target every day: buy $100k of positions,
+cash reads zero, top up, repeat. Net worth grows $100k a day with no skill
+involved. That costs nothing while nothing ranks accounts — but it lands
+squarely on the thing being built next. Either gate on cash plus position value,
+or count each top-up as a deposit and rank return on deposits.
 
 ### 3. A real leaderboard — three to four days, depends on 2
 
@@ -117,13 +140,18 @@ Can run in parallel with anything above it.
 
 ## Blocked on other people
 
-- **Jack** — the two DNS records.
+- ~~**Jack** — the two DNS records.~~ Done 2026-08-03; both resolve.
 - **Ben** — whether the launch targets developers or a mass audience. The
   written positioning says "the development platform… engineers use it"; the
   rundown said DGEN traders who will not read documentation. The two lead to
   different products, and the question worth putting to him is what a
   non-technical visitor gets out of paper money that brings them back tomorrow.
-- **Ines** — landing copy, beta label, the SKALE section, demo video, logo.
+- **Ines** — landing copy, beta label and the SKALE section are merged and live
+  (branch `changes-landing-page`, 2026-08-03). Still outstanding: demo video and
+  logo. Her "Copy section" button was dropped in the merge — it assembled the
+  four curl steps and the single-file agent, all of which went when the guide
+  became the five OpenClaw steps, and `setup.sh` already gives that section a
+  copy-everything affordance that is also runnable.
 
 ## Deliberately not doing
 
@@ -134,10 +162,38 @@ machine; we do not hold anyone's model key and we are not a compute provider.
 
 **MCP.** It serves conversational trading, which is the thing above.
 
-## Before a real chain
+### 5. Move onto SKALE — a launch blocker now, not a footnote
 
-Not launch work, but it must not be discovered late. `AGENTPIT_SIMULATED_CHAIN`
-must be set false first. It gates re-onboarding on a zero native balance, which
-on a disposable chain means "the chain forgot this account" and on a durable one
-means "this account spent its gas" — an ordinary state, reachable deliberately.
-Left true, login mints a fresh gas grant on demand, repeatedly.
+This used to sit at the bottom as "before a real chain, someday". It moved up on
+2026-08-03: the landing page now carries a SKALE section whose roadmap lists
+"Zero-fee paper trading on SKALE" under **Live now**. We are on a local anvil,
+chain id 31337, in Docker. The claim becomes true only after this migration, so
+it has to happen before anyone sees the page.
+
+**The operator key is a public one.** `ADMIN` is
+`0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` — account #0 from every Foundry
+install, its private key printed in the docs and sitting in `env.prod.example` in
+plain text. That is correct for a paper chain and catastrophic on a durable one:
+it is the faucet operator and the exchange admin. Generate a fresh key before the
+first SKALE deploy. Nothing will warn you — tests pass, deploys succeed, and the
+gate simply admits the whole internet.
+
+**`AGENTPIT_SIMULATED_CHAIN` must be set false.** Production does not set it
+today, so it defaults true. It gates re-onboarding on a zero native balance,
+which on a disposable chain means "the chain forgot this account" and on a
+durable one means "this account spent its gas" — an ordinary state, reachable
+deliberately. Left true, login mints a fresh gas grant on demand, repeatedly.
+
+**The gas grant is sized for anvil.** `signup_gas_grant_wei` is 10^18 — one
+whole native token per user. SKALE's native token is sFUEL, distributed in tiny
+amounts. A thousand whole tokens is not a budget the operator will have.
+
+**It is another destructive redeploy.** New chain, new CTF, new ERC-1155 token
+ids, another database reset. Today that costs a handful of test accounts. After
+launch it costs users their track record — so the move happens *before* anyone is
+invited, not after.
+
+The one thing this migration makes *better*: on a normal chain the operator pays
+gas to settle every fill, which grows linearly with activity and would be a real
+cost. SKALE has none, so of all the durable chains it is the one where the
+settlement model stays free.
