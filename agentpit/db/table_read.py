@@ -276,6 +276,18 @@ class TableRead:
         return int(row["TOTAL_DEPOSITED"])
 
     @staticmethod
+    def get_deployment_id(db: psycopg.Connection, user_id: str) -> str | None:
+        """Which chain deployment this account's figures were recorded against.
+
+        NULL means the row predates the column; the caller records the current
+        identity without resetting, because it has no evidence a wipe happened.
+        """
+        row = db.execute(
+            "SELECT DEPLOYMENT_ID FROM users WHERE USER_ID = %s", (user_id,)
+        ).fetchone()
+        return row["DEPLOYMENT_ID"] if row else None
+
+    @staticmethod
     def read_market(db: psycopg.Connection, market_id: int) -> "Market | None":
         row = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = %s",

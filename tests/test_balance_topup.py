@@ -84,8 +84,13 @@ class _FakeOnchain:
 
     native_balance_wei defaults to a healthy, nonzero balance -- a real
     chain-that-hasn't-been-wiped -- so every pre-existing test using this
-    fake is unaffected by the wipe-detection path in top_up.
+    fake is unaffected by the wipe-detection path in top_up. deployment_id is
+    a fixed string: these accounts never saw a prior deployment recorded, so
+    top_up's first call always takes the "predates the column" branch, not
+    the reset branch.
     """
+
+    deployment_id = "0xFAKE"
 
     def __init__(self, balance_raw: int, native_balance_wei: int = 10**18):
         self.balance_raw = balance_raw
@@ -259,6 +264,8 @@ def test_concurrent_topups_only_mint_once():
     barrier = threading.Barrier(2)
 
     class _SlowFakeOnchain:
+        deployment_id = "0xFAKE"
+
         def usd_balance(self, address: str) -> int:
             return 30_000_000_000  # below target, same value for both threads
 
@@ -349,6 +356,8 @@ def test_positions_below_target_mint_only_the_shortfall():
             return [{"user": address, "value": 60_000.0}]
 
     class _Onchain:
+        deployment_id = "0xFAKE"
+
         def __init__(self):
             self.mints = []
 
@@ -456,4 +465,41 @@ def test_set_total_deposited_overwrites_rather_than_accumulates():
 
     TableWrite.set_total_deposited(conn, user_id, 100_000_000_000)
     assert TableRead.get_total_deposited(conn, user_id, 0) == 100_000_000_000
+    conn.close()
+
+
+def test_deposits_reset_when_the_deployment_changes():
+    """A redeploy means new contracts, so everything granted before it no
+    longer exists on chain. The stored identity is what makes this an edge:
+    the reset writes the new one, so it cannot fire twice for one wipe."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="redeploy@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    TableWrite.set_deployment_id(conn, user_id, "0xOLD")
+    assert TableRead.get_deployment_id(conn, user_id) == "0xOLD"
+
+    TableWrite.reset_deposits(conn, user_id, "0xNEW")
+
+    assert TableRead.get_total_deposited(conn, user_id, 0) == 0
+    assert TableRead.get_deployment_id(conn, user_id) == "0xNEW"
+    conn.close()
+
+
+def test_reset_is_idempotent_so_two_racing_callers_agree():
+    """Both callers of a concurrent top-up may see the changed identity. The
+    reset sets to zero rather than subtracting, so whichever order they land
+    in, the row ends up the same and the claim that wins adds its mint once."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="race-reset@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    TableWrite.set_deployment_id(conn, user_id, "0xOLD")
+
+    TableWrite.reset_deposits(conn, user_id, "0xNEW")
+    TableWrite.reset_deposits(conn, user_id, "0xNEW")
+
+    assert TableRead.get_total_deposited(conn, user_id, 0) == 0
     conn.close()

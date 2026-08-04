@@ -134,6 +134,17 @@ class OnchainAdmin:
 
     # --- read-only --------------------------------------------------
 
+    @property
+    def deployment_id(self) -> str:
+        """Identity of the chain deployment these contracts belong to.
+
+        The CTF address: a redeploy always produces a new one, because the
+        contracts themselves are new. Callers compare it against what they
+        recorded to tell "the chain was replaced" from "nothing happened",
+        without an RPC round-trip.
+        """
+        return self._client.deployment.ctf
+
     def usd_balance(self, address: str) -> int:
         return self._contracts.usd.functions.balanceOf(
             Web3.to_checksum_address(address)

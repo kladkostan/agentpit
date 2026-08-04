@@ -81,6 +81,9 @@ class AuthService:
             granted = self._onchain.usd_balance(acct.address)
             with self._db.write() as conn:
                 TableWrite.set_total_deposited(conn, user_id, granted)
+                TableWrite.set_deployment_id(
+                    conn, user_id, self._onchain.deployment_id
+                )
         except Exception:
             log.exception("reading granted balance failed for user %s", user_id)
 

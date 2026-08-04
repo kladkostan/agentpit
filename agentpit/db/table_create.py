@@ -124,6 +124,7 @@ class TableCreate:
             ("IS_BOT", "INTEGER NOT NULL DEFAULT 0"),
             ("LAST_TOPUP_AT", "BIGINT"),
             ("TOTAL_DEPOSITED", "BIGINT"),
+            ("DEPLOYMENT_ID", "TEXT"),
         ]
         for col, col_type in additions:
             conn.execute(

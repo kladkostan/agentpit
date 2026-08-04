@@ -146,6 +146,31 @@ class TableWrite:
         )
 
     @staticmethod
+    def set_deployment_id(
+        db: psycopg.Connection, user_id: str, deployment_id: str
+    ) -> None:
+        db.execute(
+            "UPDATE users SET DEPLOYMENT_ID = %s WHERE USER_ID = %s",
+            (deployment_id, user_id),
+        )
+
+    @staticmethod
+    def reset_deposits(
+        db: psycopg.Connection, user_id: str, deployment_id: str
+    ) -> None:
+        """Start the deposit ledger over against a new deployment.
+
+        Sets to zero rather than adjusting by a delta, so two callers who both
+        noticed the same wipe leave the row in the same state. Writing the new
+        identity in the same statement is what stops it firing twice.
+        """
+        db.execute(
+            "UPDATE users SET TOTAL_DEPOSITED = 0, DEPLOYMENT_ID = %s "
+            "WHERE USER_ID = %s",
+            (deployment_id, user_id),
+        )
+
+    @staticmethod
     def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:
         cur = db.execute("UPDATE users SET IS_BOT = 1 WHERE API_KEY = %s", (api_key,))
         return cur.rowcount > 0

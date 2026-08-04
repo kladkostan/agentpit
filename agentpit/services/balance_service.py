@@ -91,28 +91,27 @@ class BalanceService:
                 balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
             )
 
-        # KNOWN LIMITATION -- TOTAL_DEPOSITED does not survive a chain wipe.
-        #
-        # When a disposable anvil is reset the database survives, so an account
-        # comes back with nothing on chain while this column still carries
-        # every historical grant. `earned = capital - deposited` then reads
-        # deeply negative, and it never self-corrects: `_maybe_reonboard` is
-        # reachable only from `login()`, and the Agent Arena bots authenticate
-        # by API key alone -- their passwords were generated randomly and
-        # discarded -- so they never call it.
-        #
-        # A reset was attempted here and removed. Detecting the wipe by zero
-        # native balance is level-triggered, not edge-triggered: nothing on
-        # this path refunds the account's gas, so the condition stays true and
-        # the reset re-fires on every later top-up, discarding the deposits it
-        # had just recorded. Getting it right needs an edge signal -- the
-        # deployment's identity stored per account, so a redeploy is detected
-        # exactly once -- and that belongs with the leaderboard, which is the
-        # only consumer and the only thing that can say what "correct" means.
-        #
-        # This is bounded: it requires `simulated_chain`, which the SKALE
-        # migration sets false. **The leaderboard must not ship while that
-        # flag is true.** See docs/launch-plan.md.
+        # A redeploy replaces the contracts, so everything granted against the
+        # old ones is gone -- but the database survives and would carry the
+        # figure forward, making `earned` read deeply negative. The stored
+        # identity makes this an edge: the reset writes the new one, so it
+        # fires exactly once per redeploy per account. (An earlier attempt used
+        # a zero native balance, which is a level -- nothing here refunds gas,
+        # so it stayed true and re-fired on every later top-up.)
+        current_deployment = self._onchain.deployment_id
+        with self._db.read() as conn:
+            seen_deployment = TableRead.get_deployment_id(conn, user.user_id)
+        if seen_deployment is None:
+            # Predates the column: record it, but claim no knowledge of a wipe.
+            with self._db.write() as conn:
+                TableWrite.set_deployment_id(
+                    conn, user.user_id, current_deployment
+                )
+        elif seen_deployment != current_deployment:
+            with self._db.write() as conn:
+                TableWrite.reset_deposits(
+                    conn, user.user_id, current_deployment
+                )
 
         # Claim the day atomically before minting, so the claim can never be
         # outrun by a concurrent request. The predicate reads the row's own
