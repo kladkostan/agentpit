@@ -58,23 +58,29 @@ class AuthService:
             raise OnboardingError(str(exc)) from exc
         with self._db.write() as conn:
             TableWrite.mark_user_onboarded(conn, user_id)
-            # Read the granted amount off the chain rather than from config:
-            # the grant is baked into an immutable contract by
-            # scripts/deploy_exchange.sh, while paper_balance_target_raw is a
-            # separate Settings field. They are documented to agree and today
-            # they do, but they are two sources and either can move.
-            try:
+
+        # Recording the deposit is a separate transaction from marking the
+        # user onboarded above. If it fails -- whether the chain read or the
+        # UPDATE itself raises -- psycopg would otherwise issue COMMIT on an
+        # already-aborted transaction and Postgres turns that into a
+        # ROLLBACK, taking mark_user_onboarded down with it. A failure here
+        # must not turn a successful signup into a failed one (same treatment
+        # on-chain reads get elsewhere in this service -- see
+        # _maybe_reonboard), and TOTAL_DEPOSITED staying NULL is fine: it
+        # reads back as the grant via get_total_deposited's default.
+        try:
+            with self._db.write() as conn:
+                # Read the granted amount off the chain rather than from
+                # config: the grant is baked into an immutable contract by
+                # scripts/deploy_exchange.sh, while paper_balance_target_raw
+                # is a separate Settings field. They are documented to agree
+                # and today they do, but they are two sources and either can
+                # move.
                 TableWrite.set_total_deposited(
                     conn, user_id, self._onchain.usd_balance(acct.address)
                 )
-            except Exception:
-                # A read failure here must not turn a successful signup into
-                # a failed one -- same treatment on-chain reads get elsewhere
-                # in this service (see _maybe_reonboard). TOTAL_DEPOSITED
-                # stays NULL and get_total_deposited reads that as the grant.
-                log.exception(
-                    "reading granted balance failed for user %s", user_id
-                )
+        except Exception:
+            log.exception("reading granted balance failed for user %s", user_id)
 
         with self._db.read() as conn:
             user = TableRead.get_user_by_userid(conn, user_id)
@@ -170,6 +176,27 @@ class AuthService:
             self._run_onboarding(user.eth_key)
         except Exception:
             log.exception("re-onboarding failed for %s", user.user_id)
+            return
+
+        # A wipe means the account is starting over: overwrite (not add to)
+        # TOTAL_DEPOSITED, or every historical top-up before the wipe would
+        # still count as deposited against grant-level post-wipe capital and
+        # `earned = capital - deposited` would read deeply negative. Read the
+        # balance only after `_run_onboarding` succeeded, so a failed
+        # reonboard never resets the figure for an account still on its old
+        # grant. Own transaction and swallowed failure, same as the deposit
+        # write in register() and for the same reason: this path must keep
+        # never blocking login, and a failure here just leaves
+        # TOTAL_DEPOSITED at its prior value rather than corrupting it.
+        try:
+            with self._db.write() as conn:
+                TableWrite.set_total_deposited(
+                    conn, user.user_id, self._onchain.usd_balance(user.eth_address)
+                )
+        except Exception:
+            log.exception(
+                "resetting deposited balance failed for %s", user.user_id
+            )
 
     def _issue(self, user: User) -> AuthResponse:
         token = self._coder.encode(user_id=user.user_id, email=user.email)

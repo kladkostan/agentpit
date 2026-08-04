@@ -68,11 +68,11 @@ def test_claim_topup_is_atomic():
     now = 1_700_000_000
     not_before = now - DAY
 
-    assert TableWrite.claim_topup(conn, user_id, now, not_before, 0) is True
-    assert TableWrite.claim_topup(conn, user_id, now, not_before, 0) is False
+    assert TableWrite.claim_topup(conn, user_id, now, not_before, 0, 0) is True
+    assert TableWrite.claim_topup(conn, user_id, now, not_before, 0, 0) is False
 
     later = now + DAY
-    assert TableWrite.claim_topup(conn, user_id, later, later - DAY, 0) is True
+    assert TableWrite.claim_topup(conn, user_id, later, later - DAY, 0, 0) is True
     conn.close()
 
 
@@ -385,9 +385,9 @@ def test_deposits_accumulate_across_top_ups():
     assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT
 
     # Two top-ups of $40k and $25k.
-    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000)
+    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000, GRANT)
     assert TableWrite.claim_topup(
-        conn, user_id, 1_700_100_000, 1_700_000_000, 25_000_000_000
+        conn, user_id, 1_700_100_000, 1_700_000_000, 25_000_000_000, GRANT
     )
     assert TableRead.get_total_deposited(conn, user_id, GRANT) == (
         GRANT + 40_000_000_000 + 25_000_000_000
@@ -405,9 +405,46 @@ def test_releasing_a_claim_also_takes_the_deposit_back():
     GRANT = 100_000_000_000
     TableWrite.set_total_deposited(conn, user_id, GRANT)
 
-    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000)
+    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000, GRANT)
     TableWrite.release_topup(conn, user_id, None, 40_000_000_000)
 
     assert TableRead.get_last_topup_at(conn, user_id) is None
     assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT
+    conn.close()
+
+
+def test_a_never_recorded_account_keeps_its_grant_on_the_first_top_up():
+    """NULL means "predates this column", and it means the same thing to the
+    writer as to the reader. Treating it as zero here silently deleted the
+    signup grant from the two accounts the default existed to protect."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="nulldeposit@example.com", password_hash="x", handle=None
+    )
+    GRANT = 100_000_000_000
+    assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT  # NULL
+
+    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000, GRANT)
+    assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT + 40_000_000_000
+    conn.close()
+
+
+def test_set_total_deposited_overwrites_rather_than_accumulates():
+    """`_maybe_reonboard` calls this after a chain wipe to reset the figure to
+    the balance now on chain. A wipe means the account is starting over, so
+    this must overwrite -- if it only added, every top-up from before the
+    wipe would go on counting as deposited against grant-level post-wipe
+    capital, and `earned = capital - deposited` would read deeply negative.
+
+    `_maybe_reonboard` itself needs a live chain and isn't reachable from this
+    suite; this pins the one property its fix depends on."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="reset@example.com", password_hash="x", handle=None
+    )
+    TableWrite.set_total_deposited(conn, user_id, 500_000_000_000)
+    assert TableRead.get_total_deposited(conn, user_id, 0) == 500_000_000_000
+
+    TableWrite.set_total_deposited(conn, user_id, 100_000_000_000)
+    assert TableRead.get_total_deposited(conn, user_id, 0) == 100_000_000_000
     conn.close()

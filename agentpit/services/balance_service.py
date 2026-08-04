@@ -98,7 +98,12 @@ class BalanceService:
         not_before = now - self._settings.topup_cooldown_seconds
         with self._db.write() as conn:
             claimed = TableWrite.claim_topup(
-                conn, user.user_id, now, not_before, minted
+                conn,
+                user.user_id,
+                now,
+                not_before,
+                minted,
+                self._settings.paper_balance_target_raw,
             )
         if not claimed:
             # We lost the claim, which only happens once someone else's

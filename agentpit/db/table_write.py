@@ -95,6 +95,7 @@ class TableWrite:
         at: int,
         not_before: int,
         deposit_raw: int,
+        default_raw: int,
     ) -> bool:
         """Take the day's top-up allowance and record the deposit, atomically.
 
@@ -102,13 +103,19 @@ class TableWrite:
         cooldown stamp and the deposit are one statement so two concurrent
         callers cannot both pass a check-then-write gap, and so a claim can
         never be recorded without its deposit.
+
+        `default_raw` seeds a NULL column the same way `get_total_deposited`
+        reads one: NULL means "predates this column", and the writer and the
+        reader must agree on what that means, or the first claim on a
+        never-recorded account silently overwrites the signup grant with just
+        that claim's deposit.
         """
         cur = db.execute(
             "UPDATE users SET LAST_TOPUP_AT = %s, "
-            "TOTAL_DEPOSITED = COALESCE(TOTAL_DEPOSITED, 0) + %s "
+            "TOTAL_DEPOSITED = COALESCE(TOTAL_DEPOSITED, %s) + %s "
             "WHERE USER_ID = %s "
             "AND (LAST_TOPUP_AT IS NULL OR LAST_TOPUP_AT <= %s)",
-            (at, deposit_raw, user_id, not_before),
+            (at, default_raw, deposit_raw, user_id, not_before),
         )
         return cur.rowcount == 1
 
@@ -116,7 +123,12 @@ class TableWrite:
     def release_topup(
         db: psycopg.Connection, user_id: str, last: int | None, deposit_raw: int
     ) -> None:
-        """Undo a claim whose mint never landed — both halves of it."""
+        """Undo a claim whose mint never landed — both halves of it.
+
+        `COALESCE(..., 0)` here (not a `default_raw`) is safe: this only ever
+        runs after `claim_topup` has already committed a claim for the same
+        user, so TOTAL_DEPOSITED cannot still be NULL by the time this runs.
+        """
         db.execute(
             "UPDATE users SET LAST_TOPUP_AT = %s, "
             "TOTAL_DEPOSITED = COALESCE(TOTAL_DEPOSITED, 0) - %s "
