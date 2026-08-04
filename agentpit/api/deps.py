@@ -115,13 +115,18 @@ def get_account_service(db: SessionDep, onchain: OnchainAdminDep) -> AccountServ
     return AccountService(db, onchain)
 
 
-def get_balance_service(
-    db: SessionDep, onchain: OnchainAdminDep, settings: SettingsDep
-) -> BalanceService:
-    return BalanceService(db, onchain, settings)
-
-
 AccountServiceDep = Annotated[AccountService, Depends(get_account_service)]
+
+
+def get_balance_service(
+    db: SessionDep,
+    onchain: OnchainAdminDep,
+    settings: SettingsDep,
+    accounts: AccountServiceDep,
+) -> BalanceService:
+    return BalanceService(db, onchain, settings, accounts)
+
+
 BalanceServiceDep = Annotated[BalanceService, Depends(get_balance_service)]
 MarketServiceDep = Annotated[MarketService, Depends(get_market_service)]
 EventServiceDep = Annotated[EventService, Depends(get_event_service)]

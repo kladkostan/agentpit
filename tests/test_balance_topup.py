@@ -98,6 +98,14 @@ class _FakeOnchain:
         self.balance_raw += amount_raw
 
 
+class _NoPositions:
+    """No open positions: net worth reduces to cash, matching these tests'
+    pre-existing cash-only fixtures."""
+
+    def total_value(self, address: str) -> list[dict]:
+        return []
+
+
 class _User:
     def __init__(self, user_id: str, eth_address: str):
         self.user_id = user_id
@@ -113,7 +121,7 @@ def test_second_topup_in_the_window_mints_nothing():
 
     db = fresh_test_db()
     onchain = _FakeOnchain(balance_raw=30_000_000_000)
-    service = BalanceService(db, onchain, Settings())
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
     user = _User(user_id, acct.address)
     now = 1_700_000_000
 
@@ -137,7 +145,7 @@ def test_failed_mint_releases_the_claim():
     db = fresh_test_db()
     onchain = _FakeOnchain(balance_raw=30_000_000_000)
     onchain.fail_next_mint = True
-    service = BalanceService(db, onchain, Settings())
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
     user = _User(user_id, acct.address)
     now = 1_700_000_000
 
@@ -160,7 +168,7 @@ def test_topup_when_already_ahead_does_not_touch_last_topup_at():
 
     db = fresh_test_db()
     onchain = _FakeOnchain(balance_raw=TARGET + 1)
-    service = BalanceService(db, onchain, Settings())
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
     user = _User(user_id, acct.address)
 
     result = service.top_up(user, 1_700_000_000)
@@ -194,7 +202,7 @@ def test_cooldown_path_reports_the_real_next_allowed_at():
 
     db = fresh_test_db()
     onchain = _FakeOnchain(balance_raw=30_000_000_000)  # below target
-    service = BalanceService(db, onchain, Settings())
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
     user = _User(user_id, acct.address)
     now = last_topup_at + 1  # inside the cooldown window
 
@@ -252,7 +260,7 @@ def test_concurrent_topups_only_mint_once():
 
     db = fresh_test_db()
     onchain = _SlowFakeOnchain()
-    service = BalanceService(db, onchain, Settings())
+    service = BalanceService(db, onchain, Settings(), _NoPositions())
     user = _User(user_id, acct.address)
     now = 1_700_000_000
 
@@ -275,3 +283,83 @@ def test_concurrent_topups_only_mint_once():
     assert len(losers) == 1
     assert losers[0].next_allowed_at == now + DAY
     db.close()
+
+
+def test_positions_count_toward_the_target():
+    """The bug this closes: cash alone made the top-up farmable.
+
+    Move the whole balance into positions and cash reads zero, so the
+    shortfall reads as the entire grant -- every day, for ever. Measured on a
+    live instance before this fix: three presses reached $400k.
+    """
+    from agentpit.services.balance_service import BalanceService
+
+    TARGET = 100_000_000_000
+
+    class _Accounts:
+        def __init__(self, value_whole):
+            self.value_whole = value_whole
+
+        def total_value(self, address):
+            return [{"user": address, "value": self.value_whole}]
+
+    class _Onchain:
+        def __init__(self, cash):
+            self.cash = cash
+            self.mints = []
+
+        def usd_balance(self, address):
+            return self.cash
+
+        def mint_to(self, address, amount_raw, *, timeout=30):
+            self.mints.append(amount_raw)
+
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="networth@example.com", password_hash="x", handle=None
+    )
+    user = TableRead.get_user_by_userid(conn, user_id)
+    conn.close()
+
+    settings = Settings()
+    # Everything is in positions: cash 0, positions worth the full target.
+    onchain = _Onchain(cash=0)
+    svc = BalanceService(fresh_test_db(), onchain, settings, _Accounts(100_000.0))
+    result = svc.top_up(user, now=1_700_000_000)
+
+    assert result.minted_raw == 0, "net worth is at target -- nothing was lost"
+    assert onchain.mints == []
+    assert acct is not None
+
+
+def test_positions_below_target_mint_only_the_shortfall():
+    from agentpit.services.balance_service import BalanceService
+
+    class _Accounts:
+        def total_value(self, address):
+            return [{"user": address, "value": 60_000.0}]
+
+    class _Onchain:
+        def __init__(self):
+            self.mints = []
+
+        def usd_balance(self, address):
+            return 0
+
+        def mint_to(self, address, amount_raw, *, timeout=30):
+            self.mints.append(amount_raw)
+
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="shortfall@example.com", password_hash="x", handle=None
+    )
+    user = TableRead.get_user_by_userid(conn, user_id)
+    conn.close()
+
+    onchain = _Onchain()
+    svc = BalanceService(fresh_test_db(), onchain, Settings(), _Accounts())
+    result = svc.top_up(user, now=1_700_000_000)
+
+    # Worth $60k, target $100k -> mint exactly the $40k gap.
+    assert result.minted_raw == 40_000_000_000
+    assert onchain.mints == [40_000_000_000]

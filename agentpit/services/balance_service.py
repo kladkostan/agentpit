@@ -7,6 +7,7 @@ from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.onchain.admin import OnchainAdmin
+from agentpit.services.account_service import AccountService
 
 
 class TopUpResult(BaseModel):
@@ -33,10 +34,17 @@ def next_allowed_at(last_topup_at: int | None, cooldown_seconds: int) -> int:
 
 
 class BalanceService:
-    def __init__(self, db: DbSession, onchain: OnchainAdmin, settings: Settings):
+    def __init__(
+        self,
+        db: DbSession,
+        onchain: OnchainAdmin,
+        settings: Settings,
+        accounts: AccountService,
+    ):
         self._db = db
         self._onchain = onchain
         self._settings = settings
+        self._accounts = accounts
 
     def next_allowed(self, user: User) -> int:
         """Cooldown status only: no chain call, no mint, no write.
@@ -49,9 +57,27 @@ class BalanceService:
             last = TableRead.get_last_topup_at(conn, user.user_id)
         return next_allowed_at(last, self._settings.topup_cooldown_seconds)
 
+    def _net_worth_raw(self, address: str) -> int:
+        """Cash plus what the open positions are currently worth, raw.
+
+        Cash alone is what made the top-up farmable: move it into positions and
+        the shortfall reads as the whole grant, so pressing the button daily
+        grew net worth without limit. What a demo balance restores is what the
+        account is worth, and positions are part of that.
+
+        `total_value` walks positions on chain, which is why this is reached
+        only from `top_up` -- a human-initiated call at most once a day -- and
+        never from `next_allowed`, which the profile page issues on load.
+        """
+        cash = self._onchain.usd_balance(address)
+        rows = self._accounts.total_value(address)
+        value_whole = rows[0]["value"] if rows else 0.0
+        return cash + int(round(value_whole * 10**6))
+
     def top_up(self, user: User, now: int) -> TopUpResult:
-        # Balance first: every early return below still needs to report it.
-        balance = self._onchain.usd_balance(user.eth_address)
+        # Net worth first: every early return below still needs to report it.
+        # This is cash PLUS positions -- see _net_worth_raw for why.
+        balance = self._net_worth_raw(user.eth_address)
 
         with self._db.read() as conn:
             last = TableRead.get_last_topup_at(conn, user.user_id)
