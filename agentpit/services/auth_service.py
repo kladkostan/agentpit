@@ -58,6 +58,23 @@ class AuthService:
             raise OnboardingError(str(exc)) from exc
         with self._db.write() as conn:
             TableWrite.mark_user_onboarded(conn, user_id)
+            # Read the granted amount off the chain rather than from config:
+            # the grant is baked into an immutable contract by
+            # scripts/deploy_exchange.sh, while paper_balance_target_raw is a
+            # separate Settings field. They are documented to agree and today
+            # they do, but they are two sources and either can move.
+            try:
+                TableWrite.set_total_deposited(
+                    conn, user_id, self._onchain.usd_balance(acct.address)
+                )
+            except Exception:
+                # A read failure here must not turn a successful signup into
+                # a failed one -- same treatment on-chain reads get elsewhere
+                # in this service (see _maybe_reonboard). TOTAL_DEPOSITED
+                # stays NULL and get_total_deposited reads that as the grant.
+                log.exception(
+                    "reading granted balance failed for user %s", user_id
+                )
 
         with self._db.read() as conn:
             user = TableRead.get_user_by_userid(conn, user_id)

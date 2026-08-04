@@ -97,7 +97,9 @@ class BalanceService:
         # stale by the time we get here.
         not_before = now - self._settings.topup_cooldown_seconds
         with self._db.write() as conn:
-            claimed = TableWrite.claim_topup(conn, user.user_id, now, not_before)
+            claimed = TableWrite.claim_topup(
+                conn, user.user_id, now, not_before, minted
+            )
         if not claimed:
             # We lost the claim, which only happens once someone else's
             # winning write has already committed (an UPDATE re-checks its
@@ -126,7 +128,7 @@ class BalanceService:
             # must never be left unrecorded — which is why the claim is
             # taken before, not after, the mint.
             with self._db.write() as conn:
-                TableWrite.set_last_topup_at(conn, user.user_id, last)
+                TableWrite.release_topup(conn, user.user_id, last, minted)
             raise
 
         return TopUpResult(

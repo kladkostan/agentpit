@@ -90,20 +90,48 @@ class TableWrite:
 
     @staticmethod
     def claim_topup(
-        db: psycopg.Connection, user_id: str, at: int, not_before: int
+        db: psycopg.Connection,
+        user_id: str,
+        at: int,
+        not_before: int,
+        deposit_raw: int,
     ) -> bool:
-        """Take the day's top-up allowance, atomically.
+        """Take the day's top-up allowance and record the deposit, atomically.
 
-        Returns False when another request already holds it. The predicate and
-        the write are one statement so two concurrent callers cannot both pass
-        a check-then-write gap and mint twice.
+        Returns False when another request already holds it. The predicate, the
+        cooldown stamp and the deposit are one statement so two concurrent
+        callers cannot both pass a check-then-write gap, and so a claim can
+        never be recorded without its deposit.
         """
         cur = db.execute(
-            "UPDATE users SET LAST_TOPUP_AT = %s "
-            "WHERE USER_ID = %s AND (LAST_TOPUP_AT IS NULL OR LAST_TOPUP_AT <= %s)",
-            (at, user_id, not_before),
+            "UPDATE users SET LAST_TOPUP_AT = %s, "
+            "TOTAL_DEPOSITED = COALESCE(TOTAL_DEPOSITED, 0) + %s "
+            "WHERE USER_ID = %s "
+            "AND (LAST_TOPUP_AT IS NULL OR LAST_TOPUP_AT <= %s)",
+            (at, deposit_raw, user_id, not_before),
         )
         return cur.rowcount == 1
+
+    @staticmethod
+    def release_topup(
+        db: psycopg.Connection, user_id: str, last: int | None, deposit_raw: int
+    ) -> None:
+        """Undo a claim whose mint never landed — both halves of it."""
+        db.execute(
+            "UPDATE users SET LAST_TOPUP_AT = %s, "
+            "TOTAL_DEPOSITED = COALESCE(TOTAL_DEPOSITED, 0) - %s "
+            "WHERE USER_ID = %s",
+            (last, deposit_raw, user_id),
+        )
+
+    @staticmethod
+    def set_total_deposited(
+        db: psycopg.Connection, user_id: str, raw: int
+    ) -> None:
+        db.execute(
+            "UPDATE users SET TOTAL_DEPOSITED = %s WHERE USER_ID = %s",
+            (raw, user_id),
+        )
 
     @staticmethod
     def mark_user_as_bot(db: psycopg.Connection, api_key: str) -> bool:

@@ -258,6 +258,24 @@ class TableRead:
         return row["LAST_TOPUP_AT"] if row else None
 
     @staticmethod
+    def get_total_deposited(
+        db: psycopg.Connection, user_id: str, default_raw: int
+    ) -> int:
+        """Raw apUSD this account has been handed, grant included.
+
+        NULL means the row predates the column. It reads as `default_raw` --
+        the signup grant -- because a backfill migration could only have
+        written the same number, and doing it at the read keeps the two
+        production accounts and the house correct without one.
+        """
+        row = db.execute(
+            "SELECT TOTAL_DEPOSITED FROM users WHERE USER_ID = %s", (user_id,)
+        ).fetchone()
+        if row is None or row["TOTAL_DEPOSITED"] is None:
+            return default_raw
+        return int(row["TOTAL_DEPOSITED"])
+
+    @staticmethod
     def read_market(db: psycopg.Connection, market_id: int) -> "Market | None":
         row = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = %s",

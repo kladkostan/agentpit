@@ -68,11 +68,11 @@ def test_claim_topup_is_atomic():
     now = 1_700_000_000
     not_before = now - DAY
 
-    assert TableWrite.claim_topup(conn, user_id, now, not_before) is True
-    assert TableWrite.claim_topup(conn, user_id, now, not_before) is False
+    assert TableWrite.claim_topup(conn, user_id, now, not_before, 0) is True
+    assert TableWrite.claim_topup(conn, user_id, now, not_before, 0) is False
 
     later = now + DAY
-    assert TableWrite.claim_topup(conn, user_id, later, later - DAY) is True
+    assert TableWrite.claim_topup(conn, user_id, later, later - DAY, 0) is True
     conn.close()
 
 
@@ -363,3 +363,51 @@ def test_positions_below_target_mint_only_the_shortfall():
     # Worth $60k, target $100k -> mint exactly the $40k gap.
     assert result.minted_raw == 40_000_000_000
     assert onchain.mints == [40_000_000_000]
+
+
+def test_deposits_accumulate_across_top_ups():
+    """The leaderboard ranks capital minus what the account was handed.
+
+    Without this column 'earned' cannot be computed at all, and relative
+    return divides by zero for anyone who never pressed the button -- which is
+    why the signup grant counts as the first deposit rather than as profit.
+    """
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="deposits@example.com", password_hash="x", handle=None
+    )
+
+    GRANT = 100_000_000_000
+    # Nothing recorded yet: reads as the grant rather than as zero.
+    assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT
+
+    TableWrite.set_total_deposited(conn, user_id, GRANT)
+    assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT
+
+    # Two top-ups of $40k and $25k.
+    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000)
+    assert TableWrite.claim_topup(
+        conn, user_id, 1_700_100_000, 1_700_000_000, 25_000_000_000
+    )
+    assert TableRead.get_total_deposited(conn, user_id, GRANT) == (
+        GRANT + 40_000_000_000 + 25_000_000_000
+    )
+    conn.close()
+
+
+def test_releasing_a_claim_also_takes_the_deposit_back():
+    """A mint that never landed must leave no trace: not the day, not the
+    deposit. Otherwise a failed top-up quietly worsens the user's ranking."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="release@example.com", password_hash="x", handle=None
+    )
+    GRANT = 100_000_000_000
+    TableWrite.set_total_deposited(conn, user_id, GRANT)
+
+    assert TableWrite.claim_topup(conn, user_id, 1_700_000_000, 0, 40_000_000_000)
+    TableWrite.release_topup(conn, user_id, None, 40_000_000_000)
+
+    assert TableRead.get_last_topup_at(conn, user_id) is None
+    assert TableRead.get_total_deposited(conn, user_id, GRANT) == GRANT
+    conn.close()
