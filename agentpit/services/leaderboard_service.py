@@ -50,15 +50,18 @@ class LeaderboardService:
         for account in accounts:
             try:
                 capital = self._capital_raw(account.eth_address)
+                with self._db.write() as conn:
+                    deposited = TableRead.get_total_deposited(
+                        conn, account.user_id, self._settings.paper_balance_target_raw
+                    )
+                    TableWrite.insert_account_snapshot(
+                        conn, account.user_id, now, capital, deposited
+                    )
             except Exception:
-                log.exception("valuing %s failed", account.user_id)
+                # One account must not cost every other account its data
+                # point for this tick -- a database hiccup is at least as
+                # likely here as an unreadable position.
+                log.exception("snapshotting %s failed", account.user_id)
                 continue
-            with self._db.write() as conn:
-                deposited = TableRead.get_total_deposited(
-                    conn, account.user_id, self._settings.paper_balance_target_raw
-                )
-                TableWrite.insert_account_snapshot(
-                    conn, account.user_id, now, capital, deposited
-                )
             written += 1
         return written

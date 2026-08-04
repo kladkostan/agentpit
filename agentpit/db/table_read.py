@@ -331,7 +331,7 @@ class TableRead:
             """
             SELECT DISTINCT ON (USER_ID) USER_ID, CAPITAL_RAW, DEPOSITED_RAW
             FROM account_snapshots
-            ORDER BY USER_ID, T DESC
+            ORDER BY USER_ID, T DESC, SNAPSHOT_ID DESC
             """
         ).fetchall()
         return {
