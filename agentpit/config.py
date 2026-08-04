@@ -114,7 +114,7 @@ class Settings(BaseSettings):
         default=30, validation_alias="AGENTPIT_SNAPSHOT_RETENTION_DAYS"
     )
     leaderboard_enabled: bool = Field(
-        default=True, validation_alias="AGENTPIT_LEADERBOARD_ENABLED"
+        default=False, validation_alias="AGENTPIT_LEADERBOARD_ENABLED"
     )
     leaderboard_interval_seconds: int = Field(
         default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"

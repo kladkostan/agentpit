@@ -54,12 +54,19 @@ def display_name(handle: str | None, eth_address: str) -> str:
 
 
 def rank_rows(rows: "list[LeaderboardRow]", sort: str) -> "list[LeaderboardRow]":
-    """Order the board. Unknown sorts fall back to return, the default."""
+    """Order the board. Unknown sorts fall back to return, the default.
+
+    Every key ends in `r.address`: Python's sort is stable, but
+    `list_traded_accounts` has no guaranteed row order of its own, so two
+    accounts tied on every ranking figure could otherwise flip position
+    between two cache refreshes with no change in the underlying data. The
+    address is arbitrary but fixed, so the tiebreak is deterministic.
+    """
     keys = {
-        "return": lambda r: (r.return_pct, r.earned_raw),
-        "earned": lambda r: (r.earned_raw, r.return_pct),
-        "capital": lambda r: (r.capital_raw, r.earned_raw),
-        "trades": lambda r: (r.trades, r.return_pct),
+        "return": lambda r: (r.return_pct, r.earned_raw, r.address),
+        "earned": lambda r: (r.earned_raw, r.return_pct, r.address),
+        "capital": lambda r: (r.capital_raw, r.earned_raw, r.address),
+        "trades": lambda r: (r.trades, r.return_pct, r.address),
     }
     key = keys.get(sort, keys["return"])
     return sorted(rows, key=key, reverse=True)

@@ -311,6 +311,7 @@ class TableRead:
             JOIN trades t
               ON t.TAKER_API_KEY = u.API_KEY OR t.MAKER_API_KEY = u.API_KEY
             WHERE u.IS_BOT = 0
+            ORDER BY u.USER_ID
             """
         ).fetchall()
         return [

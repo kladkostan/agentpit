@@ -10,6 +10,10 @@ os.environ.setdefault("SYNC", "false")
 # The liquidity engine provisions the single mirror house account at startup; never
 # let a developer's .env (LIQUIDITY_ENGINE=true) leak in and do that per test.
 os.environ.setdefault("LIQUIDITY_ENGINE", "false")
+# The leaderboard timer walks every traded account's chain balance; keep it
+# off the same way the other timers above are, so a developer's .env can't
+# make every TestClient(app) lifespan start ticking it.
+os.environ.setdefault("AGENTPIT_LEADERBOARD_ENABLED", "false")
 os.environ.setdefault("JWT_SECRET", "test-only-secret")
 
 import psycopg
@@ -52,6 +56,12 @@ def _isolated_db_session():
     from agentpit.api.routes import events as _events_route
 
     _events_route._events_cache.clear()
+    # Same reason as the events cache above: a cached board from a previous
+    # test would be served to the next one, and a test that asserts the
+    # endpoint makes no chain call proves nothing if it never recomputes.
+    from agentpit.api.routes import leaderboard as _leaderboard_route
+
+    _leaderboard_route._board_cache.clear()
     before = {id(s) for s in DbSession._open}
     fresh = fresh_test_db()
     previous = app.dependency_overrides.get(get_db_session)
