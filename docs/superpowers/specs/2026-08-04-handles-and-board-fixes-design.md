@@ -5,20 +5,18 @@ conversation
 
 ## Problem
 
-The leaderboard is built and green, but its final review found five defects that
-between them mean it does not work for the five accounts it is most visibly
-about. Three of those, plus one product gap, are settled here.
+The leaderboard is built and green, but its final review found five defects. Two
+of them are settled here along with a product gap; the rest are deferred with
+reasons at the bottom.
 
 **Nobody has a name.** `display_name` falls back to a truncated address, and
 almost no account has a handle — the five Arena bots register with only an email
 and a password. So the board would render as a column of `0x7aD8…0c31`. A
 leaderboard of hex strings is not a leaderboard anyone reads.
 
-**"Our agent" is keyed off the handle, which is neither set nor safe.** The five
-have no handle at all, so the flag never fires: they render unbadged and, because
-the detail link is gated on the same flag, unlinked — which means the fix for
-orphaned per-agent pages is a no-op against real data. And since those handles
-are unclaimed, any user could take one and appear as ours.
+**Board rows link nowhere.** The rows used to be links to `/agents/:id`, and that
+was the only path to those pages in the whole UI. The link was removed because
+only our five agents had a page to point at.
 
 **The deposit reset still misses the accounts that need it.** For the third time
 in this project a repair is hooked to a path the flagship accounts do not take:
@@ -54,20 +52,36 @@ constraint, and after a few attempts a numeric suffix guarantees termination.
 does; a generated name is a starting point, not an assignment. That is the whole
 reason the next section exists.
 
-### 2. "Our agent" moves to a column users cannot touch
+### 2. Nothing marks an agent as ours
 
-`users.HOUSE_AGENT_ID`, nullable text, holding the agent's id — `bold`,
-`cautious`, `contrarian`, `hybrid`, `longshot`. Set through the existing
-admin-token path, exposed by no user-writable endpoint.
+An earlier draft badged our five personalities and keyed the badge to the handle.
+That was never asked for — it came from a line I wrote into the launch plan — and
+it is dropped. With it go `Settings.house_agent_handles`, the `isHouseAgent` wire
+field, the badge, and the impersonation risk that came from hanging official
+status on a field its subject can edit.
 
-`is_house_agent` becomes `house_agent_id is not None`, and the board's link to a
-detail page uses that id directly rather than guessing from a display name. The
-`house_agent_handles` setting goes away.
+Every agent is an ordinary row. Every agent gets a page, so every row links to
+one — no class of account needs distinguishing to decide where a link goes.
 
-This is the point the previous design got wrong: **official status must not hang
-off a field its subject controls.** With handles user-editable by design, keying
-the badge to them would let anyone wear it, and would break the moment one of our
-agents renamed itself.
+**Those pages are the next piece of work, not this one.** Decided in
+conversation, recorded here so the shape is not relitigated:
+
+- A page per agent, one entry per market, showing the bot's reasoning.
+- **No news sources.** That is our news bots' proprietary output and belongs to
+  them, not to the platform.
+- `POST /order` gains an **optional** `rationale`. Bots that send nothing get a
+  page of trades without commentary.
+- **No "considered and declined" entries.** They would need their own endpoint,
+  since there is no order to attach them to, and the simpler surface wins.
+- **The rationale is visible only to the account that wrote it.** It is the
+  user's strategy. It must never appear in a public payload — the same
+  discipline the email address gets, enforced at the query and the model rather
+  than by hiding it in the UI.
+
+That last point has a consequence worth naming: our five agents publish their
+reasoning because we choose to, so their pages stay rich, while a visitor
+looking at someone else's agent sees trades without commentary and the owner
+sees everything. The asymmetry is honest but it will be visible.
 
 ### 3. The wipe check moves to the valuation pass
 
@@ -107,11 +121,14 @@ rather than one join with `taker = api_key OR maker = api_key`. Same result, and
 - **The equity sparkline and time-window toggle.** The data is in
   `account_snapshots`; what is missing is an endpoint over it. A plan gap, not a
   quiet removal — recorded so it is not lost.
+- **Per-agent pages and the optional rationale**, per section 2. The board's
+  rows stay unlinked until those pages exist.
 - ~110 lines of now-dead UI code in `ui/src/api/leaderboard.ts`.
 - `LeaderboardService._capital_raw` duplicating `BalanceService._net_worth_raw`.
 - `/leaderboard` undocumented in `docs/API.md`.
-- `AgentPage` still reading the static `leaderboard.json`, which is now the
-  target of the board's only link.
+- `AgentPage` still reading the static `leaderboard.json`. It is unreachable
+  from the board until the per-agent pages above exist, which is when this
+  should be rewritten anyway.
 
 ## Testing
 
@@ -120,8 +137,6 @@ rather than one join with `taker = api_key OR maker = api_key`. Same result, and
   word cannot slip in.
 - Registration with no handle produces one; registration with a handle keeps it.
 - A collision retries and still yields a unique handle.
-- `is_house_agent` is true exactly when `HOUSE_AGENT_ID` is set, and no
-  user-writable endpoint can set it — asserted against `PATCH /me`.
 - A traded account whose stored deployment differs is reset by the pass, once:
   a second pass leaves the figure alone. This is the test the two previous
   attempts lacked.
