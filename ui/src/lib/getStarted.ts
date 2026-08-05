@@ -23,10 +23,10 @@ export function openclawInstall(): string {
 curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
 
 # the wizard, once, with the answers a trading agent needs already given: the
-# background service on, and chat channels, search and hooks left out — this
-# agent talks to agentpit over its API, not to Telegram. You still pick the
-# model it thinks with; that part is yours.
-openclaw onboard --install-daemon --skip-channels --skip-search --skip-hooks --skip-ui`;
+# background service on, and the rest left out — chat channels, search, hooks,
+# and the screen offering to install dependencies for every skill on the
+# machine. You still pick the model it thinks with; that part is yours.
+openclaw onboard --install-daemon --skip-channels --skip-search --skip-skills --skip-hooks --skip-ui`;
 }
 
 /** Step 2 — add the agent. One repository is one skill. */
@@ -77,7 +77,7 @@ KEY="${key ?? KEY_PLACEHOLDER}"
 #    onboarding, which is where you pick the model your agent thinks with.
 if ! command -v openclaw >/dev/null 2>&1; then
   curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
-  openclaw onboard --install-daemon --skip-channels --skip-search --skip-hooks --skip-ui
+  openclaw onboard --install-daemon --skip-channels --skip-search --skip-skills --skip-hooks --skip-ui
 fi
 
 # 2. the agent itself

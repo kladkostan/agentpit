@@ -46,12 +46,15 @@ describe("snippet builders", () => {
     const s = openclawInstall();
     expect(s).toContain("bash -s -- --no-onboard");
     expect(s.match(/openclaw onboard/g)).toHaveLength(1);
-    for (const flag of ["--install-daemon", "--skip-channels", "--skip-search"]) {
+    for (const flag of ["--install-daemon", "--skip-channels", "--skip-search", "--skip-skills"]) {
       expect(s).toContain(flag);
     }
-    // Skills and the workspace bootstrap must NOT be skipped: step 2 installs
-    // a skill into the workspace this creates.
-    expect(s).not.toContain("--skip-skills");
+    // --skip-skills skips onboarding's skills SETUP — the screen that offers to
+    // install dependencies for every skill on the machine (1Password, Sonos,
+    // Philips Hue, Apple Notes...). It does not disable the skills subsystem:
+    // `openclaw skills install` in the next step is its own command, and the
+    // reference skill declares no package dependencies, only `bins: [python3]`.
+    // The workspace bootstrap must still run — the skill is installed into it.
     expect(s).not.toContain("--skip-bootstrap");
   });
 
