@@ -93,10 +93,15 @@ export function MultiMarketEventCard({
     >
       <article className="flex h-full flex-col gap-4 rounded-2xl border bg-card p-5 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-foreground/25 group-hover:shadow-[0_18px_36px_-22px_rgba(0,0,0,0.25)]">
         <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-            <span className={cn("truncate", tone.label)}>{state}</span>
-          </span>
+          {/* See MarketCard: ACTIVE is the default and marks nothing. */}
+          {state === "ACTIVE" ? (
+            <span />
+          ) : (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+              <span className={cn("truncate", tone.label)}>{state}</span>
+            </span>
+          )}
           <span className="shrink-0 whitespace-nowrap">
             {closes ? (
               <>

@@ -61,10 +61,17 @@ export function MarketCard({
     >
       <article className="flex h-full flex-col gap-5 rounded-2xl border bg-card p-5 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-foreground/25 group-hover:shadow-[0_18px_36px_-22px_rgba(0,0,0,0.25)]">
         <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-            <span className={cn("truncate", tone.label)}>{market.market_state}</span>
-          </span>
+          {/* Only a state worth remarking on. Every card on a list filtered to
+              live markets said ACTIVE, so the badge marked nothing — while
+              RESOLVED or CANCELLED changes what the card means. */}
+          {market.market_state === "ACTIVE" ? (
+            <span />
+          ) : (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
+              <span className={cn("truncate", tone.label)}>{market.market_state}</span>
+            </span>
+          )}
           <span className="shrink-0 whitespace-nowrap">
             {closes ? (
               <>
