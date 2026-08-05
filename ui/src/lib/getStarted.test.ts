@@ -36,6 +36,25 @@ describe("snippet builders", () => {
     expect(s).toContain("daemon restart");
   });
 
+  it("the wizard runs once, and only asks what this guide needs", () => {
+    // The installer onboards by default (install.sh: `exec "$claw" onboard`),
+    // so a second `openclaw onboard` walked the whole wizard twice. Install
+    // with --no-onboard and run it once, with the answers already given:
+    // the background service on, and the parts a trading agent never touches
+    // -- chat channels, a search provider, hooks, the control UI -- off.
+    // Model choice stays: without it the agent has nothing to think with.
+    const s = openclawInstall();
+    expect(s).toContain("bash -s -- --no-onboard");
+    expect(s.match(/openclaw onboard/g)).toHaveLength(1);
+    for (const flag of ["--install-daemon", "--skip-channels", "--skip-search"]) {
+      expect(s).toContain(flag);
+    }
+    // Skills and the workspace bootstrap must NOT be skipped: step 2 installs
+    // a skill into the workspace this creates.
+    expect(s).not.toContain("--skip-skills");
+    expect(s).not.toContain("--skip-bootstrap");
+  });
+
   it("openclawSetKey falls back to the placeholder when logged out", () => {
     expect(openclawSetKey(null)).toContain(KEY_PLACEHOLDER);
   });

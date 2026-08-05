@@ -18,10 +18,15 @@ export function registerCurl(base: string): string {
 /** Step 1 — get OpenClaw. Onboarding is where you pick the model it will think
  *  with, so there is no separate "configure a model" step. */
 export function openclawInstall(): string {
-  return `# macOS and Linux alike — it detects the OS, installs Node if needed,
-# then walks you through picking the model your agent will think with
-curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
-openclaw onboard --install-daemon`;
+  return `# macOS and Linux alike — detects the OS and installs Node if needed.
+# --no-onboard stops it before the setup wizard, which we run ourselves below
+curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
+
+# the wizard, once, with the answers a trading agent needs already given: the
+# background service on, and chat channels, search and hooks left out — this
+# agent talks to agentpit over its API, not to Telegram. You still pick the
+# model it thinks with; that part is yours.
+openclaw onboard --install-daemon --skip-channels --skip-search --skip-hooks --skip-ui`;
 }
 
 /** Step 2 — add the agent. One repository is one skill. */
@@ -71,8 +76,8 @@ KEY="${key ?? KEY_PLACEHOLDER}"
 # 1. OpenClaw, only if it is not already here. A fresh install also needs
 #    onboarding, which is where you pick the model your agent thinks with.
 if ! command -v openclaw >/dev/null 2>&1; then
-  curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash
-  openclaw onboard --install-daemon
+  curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
+  openclaw onboard --install-daemon --skip-channels --skip-search --skip-hooks --skip-ui
 fi
 
 # 2. the agent itself

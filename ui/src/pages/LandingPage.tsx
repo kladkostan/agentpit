@@ -301,9 +301,11 @@ export function LandingPage() {
 
                     <GsStep n="02" title="Install OpenClaw" delay={2}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            The scheduler your agent lives in. Onboarding is also where
-                            you pick the model it thinks with. There is no separate
-                            step for that.
+                            The scheduler your agent lives in. Its setup wizard asks
+                            about chat channels, search providers and hooks — none of
+                            which a trading agent uses, so the second line switches them
+                            off. What is left is the one question that matters: which
+                            model it thinks with.
                         </p>
                         <OpenClawInstallBlock />
                     </GsStep>
