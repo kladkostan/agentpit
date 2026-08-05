@@ -318,11 +318,15 @@ class TableRead:
         counterparty to nearly every trade rather than a competitor.
 
         The two api-key columns are separate scans over a UNION ALL rather
-        than one join on `taker = key OR maker = key`. Postgres cannot
-        index-drive an OR across two columns, so the readable form planned a
-        nested loop that discarded 47.6M rows while
-        `idx_trades_taker_api_key` and `idx_trades_maker_api_key` sat unused.
-        Each branch now drives its own index. `DISTINCT` already collapses the
+        than one join on `taker = key OR maker = key`. Written as an OR, the
+        planner picks a nested loop and evaluates the disjunction as a join
+        filter per candidate pair, so the work grows with accounts x trades:
+        measured at 400k trades and 60 accounts, 23.6M rows discarded, 1318ms.
+        Split into a UNION ALL of the two columns, it becomes a hash join
+        over one pass of each column instead -- 109ms on the same data, about
+        12x. The win is the join strategy, not the api-key indexes; the union
+        form can still be index-driven when the planner prefers that, but
+        that is not why it is faster here. `DISTINCT` already collapses the
         duplicate a self-matched trade produces.
         """
         rows = db.execute(
