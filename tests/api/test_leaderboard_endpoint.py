@@ -117,3 +117,55 @@ def test_get_leaderboard_does_not_touch_the_chain():
         assert entry["capital"] == "150000000000"
         assert entry["earned"] == "50000000000"
         assert entry["trades"] == 1
+
+
+def test_history_returns_the_accounts_curve():
+    conn = fresh_test_conn()
+    user_id, acct, key = TableWrite.create_user(
+        conn, email="curve@example.com", password_hash="x", handle="curvy"
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
+        "VALUES (%s, %s, %s)",
+        ("t-curve", key, 1_700_000_000),
+    )
+    TableWrite.insert_account_snapshot(
+        conn, user_id, 1_800_000_000, 100_000_000_000, 100_000_000_000
+    )
+    TableWrite.insert_account_snapshot(
+        conn, user_id, 1_800_000_300, 150_000_000_000, 100_000_000_000
+    )
+    conn.close()
+
+    with TestClient(app) as client:
+        resp = client.get(f"/leaderboard/{acct.address}/history")
+
+    assert resp.status_code == 200, resp.text
+    points = resp.json()["points"]
+    assert [p["t"] for p in points] == [1_800_000_000, 1_800_000_300]
+    assert points[-1]["capital"] == "150000000000"
+    assert points[-1]["earned"] == "50000000000"
+    assert points[-1]["returnPct"] == 50.0
+
+
+def test_history_of_an_unknown_address_is_a_404():
+    with TestClient(app) as client:
+        resp = client.get("/leaderboard/0x" + "00" * 20 + "/history")
+    assert resp.status_code == 404
+
+
+def test_history_carries_no_email():
+    """Same guarantee as the board: nobody's signup address on a public
+    endpoint, asserted against the raw body."""
+    conn = fresh_test_conn()
+    user_id, acct, _key = TableWrite.create_user(
+        conn, email="private@example.com", password_hash="x", handle="private1"
+    )
+    TableWrite.insert_account_snapshot(
+        conn, user_id, 1_800_000_000, 1, 1
+    )
+    conn.close()
+
+    with TestClient(app) as client:
+        body = client.get(f"/leaderboard/{acct.address}/history").text
+    assert "@" not in body

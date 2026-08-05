@@ -1,5 +1,6 @@
 """Valuing every trading account on a timer, so ranking never reads the chain."""
 import logging
+import math
 
 from pydantic import BaseModel
 
@@ -16,6 +17,35 @@ log = logging.getLogger(__name__)
 SORTS = ("return", "earned", "capital", "trades")
 
 
+def compute_earned_raw(capital_raw: int, deposited_raw: int) -> int:
+    return capital_raw - deposited_raw
+
+
+def compute_return_pct(capital_raw: int, deposited_raw: int) -> float:
+    """Percent return on what the account was handed.
+
+    Zero deposits cannot happen once the signup grant counts as the first one
+    -- which is why it does -- but a board that divides by zero on an edge
+    case is worse than one that shows 0%.
+    """
+    if deposited_raw <= 0:
+        return 0.0
+    return 100.0 * compute_earned_raw(capital_raw, deposited_raw) / deposited_raw
+
+
+def downsample(points: list, max_points: int) -> list:
+    """At most `max_points` evenly spaced samples, newest always kept.
+
+    Anchored on the end rather than the start: the last point is where the
+    curve meets the Return column beside it, and a stride that dropped it
+    would draw a line disagreeing with the number it sits next to.
+    """
+    if max_points <= 0 or len(points) <= max_points:
+        return list(points)
+    stride = math.ceil(len(points) / max_points)
+    return points[::-1][::stride][::-1]
+
+
 class LeaderboardRow(BaseModel):
     name: str
     address: str
@@ -25,19 +55,11 @@ class LeaderboardRow(BaseModel):
 
     @property
     def earned_raw(self) -> int:
-        return self.capital_raw - self.deposited_raw
+        return compute_earned_raw(self.capital_raw, self.deposited_raw)
 
     @property
     def return_pct(self) -> float:
-        """Percent return on what the account was handed.
-
-        Zero deposits cannot happen once the signup grant counts as the first
-        one -- which is why it does -- but a board that divides by zero on an
-        edge case is worse than one that shows 0%.
-        """
-        if self.deposited_raw <= 0:
-            return 0.0
-        return 100.0 * self.earned_raw / self.deposited_raw
+        return compute_return_pct(self.capital_raw, self.deposited_raw)
 
 
 def display_name(handle: str | None, eth_address: str) -> str:

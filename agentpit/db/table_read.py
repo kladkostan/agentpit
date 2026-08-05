@@ -393,6 +393,33 @@ class TableRead:
         }
 
     @staticmethod
+    def list_account_snapshots(
+        db: psycopg.Connection, user_id: str, limit: int
+    ) -> "list[tuple[int, int, int]]":
+        """The newest `limit` snapshots for one account, oldest first.
+
+        `ORDER BY T DESC LIMIT n` is what `idx_account_snapshots_user_t`
+        drives; the reversal into chronological order happens here so callers
+        get a curve rather than a stack. Bounded on purpose: retention keeps
+        30 days, which at the 5-minute cadence is 8,640 rows nobody wants to
+        serialise.
+        """
+        rows = db.execute(
+            """
+            SELECT T, CAPITAL_RAW, DEPOSITED_RAW
+            FROM account_snapshots
+            WHERE USER_ID = %s
+            ORDER BY T DESC, SNAPSHOT_ID DESC
+            LIMIT %s
+            """,
+            (user_id, limit),
+        ).fetchall()
+        return [
+            (int(r["T"]), int(r["CAPITAL_RAW"]), int(r["DEPOSITED_RAW"]))
+            for r in reversed(rows)
+        ]
+
+    @staticmethod
     def read_market(db: psycopg.Connection, market_id: int) -> "Market | None":
         row = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets WHERE MARKET_ID = %s",

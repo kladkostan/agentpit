@@ -491,3 +491,52 @@ def test_counts_cover_both_sides_of_a_trade():
     assert counts[taker_id] == 2
     assert counts[maker_id] == 1
     conn.close()
+
+
+from agentpit.services.leaderboard_service import (
+    compute_earned_raw,
+    compute_return_pct,
+    downsample,
+)
+
+
+def test_the_shared_arithmetic_matches_the_row_properties():
+    """One formula, two callers: the board row and the history point. The
+    properties delegate rather than restate, so a change cannot land in one
+    and miss the other."""
+    row = _row("a", capital=120_000_000_000, deposited=100_000_000_000)
+    assert compute_earned_raw(120_000_000_000, 100_000_000_000) == row.earned_raw
+    assert compute_return_pct(120_000_000_000, 100_000_000_000) == row.return_pct
+    assert compute_return_pct(5, 0) == 0.0
+
+
+def test_downsample_keeps_the_newest_point_and_respects_the_cap():
+    """A 30-day history at the 5-minute cadence is 8,640 points; a 72-pixel
+    sparkline needs a fraction of that, and sending the rest would be the
+    board's whole payload. The newest point must survive -- it is the one the
+    curve ends on, and dropping it would make the line disagree with the
+    Return column beside it."""
+    points = [(t, t, 0) for t in range(1_000)]
+    thinned = downsample(points, 60)
+    assert len(thinned) <= 60
+    assert thinned[-1] == points[-1]
+    assert thinned == sorted(thinned)
+
+
+def test_downsample_leaves_a_short_history_alone():
+    points = [(1, 10, 10), (2, 20, 10)]
+    assert downsample(points, 60) == points
+    assert downsample([], 60) == []
+
+
+def test_list_account_snapshots_returns_the_newest_rows_oldest_first():
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="history@example.com", password_hash="x", handle=None
+    )
+    for t in (1_000, 2_000, 3_000):
+        TableWrite.insert_account_snapshot(conn, user_id, t, t * 10, 500)
+
+    rows = TableRead.list_account_snapshots(conn, user_id, limit=2)
+    conn.close()
+    assert rows == [(2_000, 20_000, 500), (3_000, 30_000, 500)]
