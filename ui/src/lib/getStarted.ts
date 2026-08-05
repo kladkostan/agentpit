@@ -25,54 +25,46 @@ export function openclawAddBot(): string {
   return `openclaw skills install git:https://github.com/skalenetwork/agentpit-examples`;
 }
 
-/** Step 4 — the two things the skill needs: who you are, and where to send it.
+/** Step 4 — who it trades as, where it sends orders, and the one restart.
  *
- *  No restart here: nothing runs until step 5, which restarts once for all of
- *  the config written so far. */
+ *  The restart is load-bearing and there is exactly one place it can go. A
+ *  running gateway read its config at startup and will not see a later write
+ *  — `config set`'s "No gateway restart needed" describes the CLI's own reload
+ *  plan, not a process already running. The gateway is installed in step 2, so
+ *  it is always older than these writes. */
 export function openclawSetKey(key: string | null, base: string): string {
   return `openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY ${key ?? KEY_PLACEHOLDER}
 
 # where its orders go. Quoted because a bare URL is not valid JSON and the
 # parser reads values as JSON before checking them
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_HOST '"${base}"'`;
-}
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_HOST '"${base}"'
 
-/** Step 5 — a dry run: arm it, watch it think, disarm it.
- *
- *  THE RESTARTS ARE LOAD-BEARING. `config set` prints "No gateway restart
- *  needed", which is about its own reload plan, not about a gateway that is
- *  already running: that one read the config at startup and will not see a
- *  later write. Removing these once cost three unintended orders — the flag
- *  was set after the restart, so the "dry" run traded for real. */
-export function openclawDryRun(): string {
-  return `# while this is set it prints what it WOULD trade and sends nothing.
-# the quotes matter: values are read as JSON, and a bare 1 arrives as a number
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
-
-# the gateway reads config at startup, so it has to pick up everything above
-# before anything runs. Skip this and the first run trades for real
-openclaw daemon restart
-openclaw agent --agent main --message "run the agentpit-reference skill"
-
-# happy with what it picked? clear the flag, and restart so it takes
-openclaw config unset skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN
+# the gateway reads config at startup, so it has to pick both of those up
+# before anything runs
 openclaw daemon restart`;
 }
 
-/** Step 6 — for real, then on a schedule. No config changes, so no restart. */
+/** Step 5 — run it, then hand it to the scheduler.
+ *
+ *  There is no dry-run step. The balance is paper and the top-up restores it
+ *  daily, so a first run that trades badly costs nothing and shows strictly
+ *  more than a rehearsal would. The skill still honours AGENTPIT_DRY_RUN for
+ *  anyone who starts changing the prompt — it is just not a step you must walk
+ *  through to get a bot running. */
 export function openclawGoLive(): string {
-  return `# this one places orders
+  return `# "main" is your agent — openclaw agents list, if yours is named otherwise
 openclaw agent --agent main --message "run the agentpit-reference skill"
 
-# and every 15 minutes from here on
+# happy with what it did? every 15 minutes from here on
 openclaw cron add --every 15m "run the agentpit-reference skill"`;
 }
 
 /** Every step as one paste.
  *
  *  Idempotent on purpose: re-running it is how someone recovers from a half
- *  finished attempt. It ends on a dry run and prints the two lines that make it
- *  live — a script from a web page should not quietly start placing orders. */
+ *  finished attempt. It runs one cycle and stops there, printing the line that
+ *  schedules it — a script off a web page may spend paper money, but it should
+ *  not leave a recurring job on your machine you did not ask for. */
 export function oneShotScript(key: string | null, base: string): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -94,23 +86,18 @@ openclaw skills install git:https://github.com/skalenetwork/agentpit-examples --
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY "$KEY"
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_HOST '"${base}"'
 
-# 4. safety on for the first cycle
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
-
-# 5. the gateway reads config at startup, so it has to pick all of that up
-#    before anything runs. Without this the "dry" run trades for real
+# 4. the gateway reads config at startup, so it has to pick both of those up
+#    before anything runs
 openclaw daemon restart
 
-# 6. show what it WOULD trade — nothing is sent. "main" is the default agent
-#    id; openclaw agents list if yours is named otherwise
+# 5. one cycle now. "main" is the default agent id; openclaw agents list if
+#    yours is named otherwise
 openclaw agent --agent main --message "run the agentpit-reference skill"
 
 cat <<'NEXT'
 
-That was a dry run. Happy with what it picked? Then let it trade every 15 min:
+That was one cycle. Happy with what it did? Then let it trade every 15 min:
 
-  openclaw config unset skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN
-  openclaw daemon restart
   openclaw cron add --every 15m "run the agentpit-reference skill"
 
 NEXT`;

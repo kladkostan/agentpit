@@ -10,7 +10,6 @@ import { API_BASE_URL } from "@/api/client";
 import {
     KEY_PLACEHOLDER,
     openclawAddBot,
-    openclawDryRun,
     openclawGoLive,
     openclawInstall,
     openclawSetKey,
@@ -313,28 +312,17 @@ export function LandingPage() {
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Two settings, scoped to this skill rather than your whole
                             machine: who it trades as, and which agentpit it sends orders
-                            to. The next step restarts the gateway once, for both.
+                            to. The gateway read its config when it started, so it has to
+                            come back up before either takes effect.
                         </p>
                         <OpenClawKeyBlock />
                     </GsStep>
 
-                    <GsStep n="05" title="Dry run" delay={5}>
+                    <GsStep n="05" title="Let it trade" delay={5}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            Look before you leap: it prints what it{" "}
-                            <em>would</em> trade and sends nothing. The restarts are not
-                            optional — a running gateway read its config at startup and
-                            will not see a later write, so the flag has to be in place
-                            before it comes back up. Run this out of order and the dry
-                            run places real orders.
-                        </p>
-                        <OpenClawDryRunBlock />
-                    </GsStep>
-
-                    <GsStep n="06" title="Let it trade" delay={6}>
-                        <p className="text-sm leading-relaxed text-muted-foreground">
-                            The first line places real paper orders. The second hands it
-                            to the scheduler, and it keeps going without you — as long as
-                            the machine stays awake.
+                            The first line runs one cycle now, so you can read what it
+                            decided and why. The second hands it to the scheduler and it
+                            keeps going without you — as long as the machine stays awake.
                         </p>
                         <OpenClawGoLiveBlock />
                     </GsStep>
@@ -420,10 +408,6 @@ function OneShotBlock() {
     const key = user?.api_key ?? null;
     // A file, not a paste: it keeps its comments and its shebang.
     return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} copyMode="verbatim" />;
-}
-
-function OpenClawDryRunBlock() {
-    return <CodeBlock className="mt-4" title="terminal" code={openclawDryRun()} chips={[]} />;
 }
 
 function OpenClawGoLiveBlock() {

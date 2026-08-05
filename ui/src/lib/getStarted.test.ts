@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   commandsOnly,
   openclawAddBot,
-  openclawDryRun,
   openclawGoLive,
   openclawInstall,
   openclawSetKey,
@@ -20,7 +19,7 @@ describe("snippet builders", () => {
     // browser signup does not, so the terminal path is gone.
     for (const snippet of [
       openclawInstall(), openclawAddBot(), openclawSetKey("k", BASE),
-      openclawDryRun(), openclawGoLive(), oneShotScript("k", BASE),
+      openclawGoLive(), oneShotScript("k", BASE),
     ]) {
       expect(snippet.toLowerCase()).not.toContain("password");
     }
@@ -45,7 +44,7 @@ describe("snippet builders", () => {
     // line is run as a command: `zsh: command not found: #`. Worse, a comment
     // containing `;` splits there and zsh tries to run the remainder too.
     // The block still SHOWS its comments; only the clipboard drops them.
-    for (const snippet of [openclawInstall(), openclawSetKey("pk_live_123", BASE), openclawDryRun(), openclawGoLive()]) {
+    for (const snippet of [openclawInstall(), openclawSetKey("pk_live_123", BASE), openclawGoLive(), openclawGoLive()]) {
       const copied = commandsOnly(snippet);
       expect(copied).not.toMatch(/^\s*#/m);
       expect(copied).not.toMatch(/^\s*$/m);          // no blank runs left behind
@@ -102,11 +101,11 @@ describe("snippet builders", () => {
     expect(s).toContain("pk_live_123");
   });
 
-  it("the one-shot script never goes live by itself", () => {
-    // A script pasted off a web page must not start placing orders. It ends on
-    // a dry run and only PRINTS the lines that make it real.
+  it("the one-shot script leaves no cron behind by itself", () => {
+    // Paper money is fine to spend unasked; a recurring job on someone's
+    // machine is not. The script runs one cycle and only PRINTS the line that
+    // schedules it.
     const s = oneShotScript("pk_live_123", BASE);
-    expect(s).toContain("AGENTPIT_DRY_RUN");
     const live = s.indexOf("cron add");
     const printed = s.indexOf("cat <<'NEXT'");
     expect(printed).toBeGreaterThan(-1);
@@ -120,51 +119,43 @@ describe("snippet builders", () => {
     expect(s).toContain(KEY_PLACEHOLDER);
   });
 
-  it("the dry run arms and disarms itself inside one step", () => {
-    // The flag used to be set two steps before it was cleared, so anyone who
-    // stopped reading in between scheduled a muted agent. Now it cannot leak
-    // past its own step: set, run, unset, in that order and nowhere else.
-    const s = openclawDryRun();
-    expect(s.indexOf("config set")).toBeLessThan(s.indexOf("openclaw agent"));
-    expect(s.indexOf("openclaw agent")).toBeLessThan(s.indexOf("config unset"));
-    expect(openclawSetKey("pk_live_123", BASE)).not.toContain("AGENTPIT_DRY_RUN");
-    expect(openclawGoLive()).not.toContain("AGENTPIT_DRY_RUN");
-  });
-
   it("the key step also says where orders go", () => {
     const s = openclawSetKey("pk_live_123", BASE);
     expect(s).toContain(`AGENTPIT_HOST '"${BASE}"'`);
   });
 
-  it("only the last step can place an order", () => {
-    expect(openclawGoLive()).toContain("openclaw cron add --every 15m");
-    expect(openclawDryRun()).not.toContain("cron add");
-  });
-
-  it("a restart sits between the last config write and every run", () => {
-    // Measured, at the cost of three unintended orders: the gateway reads its
-    // config at startup and does not see a later write, whatever
-    // `config set`'s "No gateway restart needed" says — that line is about the
-    // CLI's own reload plan, not about a process already running. So the flag
-    // must be in place BEFORE the restart, and the restart BEFORE the run.
-    const s = openclawDryRun();
-    const set = s.indexOf("AGENTPIT_DRY_RUN '\"1\"'");
-    const restart = s.indexOf("daemon restart");
-    const run = s.indexOf("openclaw agent");
-    expect(set).toBeLessThan(restart);
-    expect(restart).toBeLessThan(run);
-
-    // and clearing the flag is followed by a restart too, or step 6 stays muted
-    const unset = s.indexOf("config unset");
-    expect(unset).toBeLessThan(s.lastIndexOf("daemon restart"));
-    expect(s.match(/daemon restart/g)).toHaveLength(2);
+  it("the config is written, then the gateway restarts, then anything runs", () => {
+    // Measured, at the cost of three unintended orders: a running gateway read
+    // its config at startup and does not see a later write, whatever
+    // `config set`'s "No gateway restart needed" says — that line describes the
+    // CLI's own reload plan, not a process already running. One restart, and
+    // exactly one place it can go: after the last write of step 4, before the
+    // first run of step 5.
+    const s = openclawSetKey("pk_live_123", BASE);
+    expect(s.indexOf("AGENTPIT_API_KEY")).toBeLessThan(s.indexOf("daemon restart"));
+    expect(s.indexOf("AGENTPIT_HOST")).toBeLessThan(s.indexOf("daemon restart"));
+    expect(s.match(/daemon restart/g)).toHaveLength(1);
+    expect(openclawGoLive()).not.toContain("daemon restart");
   });
 
   it("the script restarts before it runs, for the same reason", () => {
     const s = oneShotScript("pk_live_123", BASE);
     const executed = s.slice(0, s.indexOf("cat <<'NEXT'"));
-    expect(executed.indexOf("AGENTPIT_DRY_RUN")).toBeLessThan(executed.indexOf("daemon restart"));
+    expect(executed.indexOf("AGENTPIT_HOST")).toBeLessThan(executed.indexOf("daemon restart"));
     expect(executed.indexOf("daemon restart")).toBeLessThan(executed.indexOf("openclaw agent"));
+  });
+
+  it("no dry-run step: the balance is paper and the top-up restores it", () => {
+    // A rehearsal that protects fake money is not worth the step, and its
+    // ordering rules were the guide's only real hazard. The skill still reads
+    // AGENTPIT_DRY_RUN for anyone who forks it; the guide just stops requiring
+    // a walk through it.
+    const guide = [
+      openclawInstall(), openclawAddBot(),
+      openclawSetKey("pk_live_123", BASE), openclawGoLive(),
+      oneShotScript("pk_live_123", BASE),
+    ].join("\n");
+    expect(guide).not.toContain("AGENTPIT_DRY_RUN");
   });
 
   it("the agent run names its target agent", () => {
@@ -173,7 +164,7 @@ describe("snippet builders", () => {
     //   No target session selected. Use --agent <id>, --session-key <key>, ...
     // `main` is the built-in default agent id (`openclaw agents list --json`
     // reports it with isDefault: true on a stock install).
-    for (const snippet of [openclawDryRun(), oneShotScript("pk_live_123", BASE)]) {
+    for (const snippet of [openclawGoLive(), oneShotScript("pk_live_123", BASE)]) {
       expect(snippet).toContain("openclaw agent --agent main --message");
     }
   });
@@ -186,9 +177,8 @@ describe("snippet builders", () => {
     // which is where the first person to follow this guide got stuck. The
     // reference agent compares `os.environ["AGENTPIT_DRY_RUN"] == "1"`, so no
     // other value works either -- the quotes are the whole fix.
-    for (const snippet of [openclawDryRun(), oneShotScript("pk_live_123", BASE)]) {
-      expect(snippet).toContain(`AGENTPIT_DRY_RUN '"1"'`);
-      expect(snippet).not.toMatch(/AGENTPIT_DRY_RUN 1\b/);
+    for (const snippet of [openclawSetKey("pk_live_123", BASE), oneShotScript("pk_live_123", BASE)]) {
+      expect(snippet).toMatch(/AGENTPIT_HOST '"[^"]+"'/);
     }
   });
 
@@ -227,7 +217,7 @@ describe("tokenizeSnippet", () => {
       openclawInstall(),
       openclawAddBot(),
       openclawSetKey(key, BASE),
-      openclawDryRun(),
+      openclawGoLive(),
       openclawGoLive(),
       oneShotScript(key, BASE),
     ];
