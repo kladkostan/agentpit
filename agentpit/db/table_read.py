@@ -310,35 +310,54 @@ class TableRead:
 
     @staticmethod
     def list_traded_accounts(db: psycopg.Connection) -> "list[TradedAccount]":
-        """Every non-house account with at least one trade, taker or maker.
+        """Every non-house account with at least one non-failed trade, taker
+        or maker.
 
         Having traded is the membership rule: it keeps every registered
         address off a public board by default, and an account that never
         traded has nothing to rank. The house is excluded because it is the
-        counterparty to nearly every trade rather than a competitor.
+        counterparty to nearly every trade rather than a competitor. A
+        `FAILED` trade doesn't count -- it never settled, matching every
+        other trade reader in the codebase (account_service.py,
+        order_service.py).
 
-        The two api-key columns are separate scans over a UNION ALL rather
-        than one join on `taker = key OR maker = key`. Written as an OR, the
-        planner picks a nested loop and evaluates the disjunction as a join
-        filter per candidate pair, so the work grows with accounts x trades:
-        measured at 400k trades and 60 accounts, 23.6M rows discarded, 1318ms.
-        Split into a UNION ALL of the two columns, it becomes a hash join
-        over one pass of each column instead -- 109ms on the same data, about
-        12x. The win is the join strategy, not the api-key indexes; the union
-        form can still be index-driven when the planner prefers that, but
-        that is not why it is faster here. `DISTINCT` already collapses the
-        duplicate a self-matched trade produces.
+        A previous version of this query joined `users` to a `UNION ALL`
+        over the two api-key columns. That fixed a worse nested-loop plan
+        (measured at 1318ms) but still scanned `trades` in full on every
+        call -- and `trades` is dominated by the liquidity mirror's
+        synthetic tape, a row per WSS last-trade event across ~1000 books
+        with no retention, so the scan grows without bound in a quantity
+        that has nothing to do with how many accounts have traded.
+
+        This drives from `users` instead (tens of rows, not millions) and
+        asks per user whether a matching trade exists, so each user resolves
+        to an index probe on `idx_trades_taker_api_key` /
+        `idx_trades_maker_api_key` that stops at the first hit rather than a
+        scan of the whole table. No `DISTINCT` is needed: `users` is the only
+        table in `FROM`, so a self-matched trade (taker == maker) can only
+        make one of the two `EXISTS` clauses true for that user once, not
+        twice. Measured locally with `EXPLAIN (ANALYZE, TIMING OFF)` against
+        300k synthetic tape rows + 2k real trades across 40 accounts: the old
+        form 60.2ms (`Hash Join` over two `Seq Scan`s of `trades`), this form
+        0.06ms (`Index Scan` per user on `idx_trades_taker_api_key` /
+        `idx_trades_maker_api_key`, second `EXISTS` short-circuited by the
+        first on every row in this sample).
         """
         rows = db.execute(
             """
-            SELECT DISTINCT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
+            SELECT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
             FROM users u
-            JOIN (
-                SELECT TAKER_API_KEY AS K FROM trades
-                UNION ALL
-                SELECT MAKER_API_KEY AS K FROM trades
-            ) t ON t.K = u.API_KEY
             WHERE u.IS_BOT = 0
+              AND (
+                EXISTS (
+                    SELECT 1 FROM trades t
+                    WHERE t.TAKER_API_KEY = u.API_KEY AND t.STATUS != 'FAILED'
+                )
+                OR EXISTS (
+                    SELECT 1 FROM trades t
+                    WHERE t.MAKER_API_KEY = u.API_KEY AND t.STATUS != 'FAILED'
+                )
+              )
             ORDER BY u.USER_ID
             """
         ).fetchall()
@@ -353,23 +372,39 @@ class TableRead:
 
     @staticmethod
     def count_trades_by_user(db: psycopg.Connection) -> "dict[str, int]":
-        """user_id -> number of trades it took part in, either side.
+        """user_id -> number of non-failed trades it took part in, either side.
 
-        Same UNION ALL rewrite as `list_traded_accounts`, and the reason
-        `COUNT(DISTINCT t.TRADE_ID)` is not `COUNT(*)`: the union emits one row
-        per api-key column, so an account that was both taker and maker on a
-        trade appears twice. The OR-join this replaces produced a single joined
-        row, and the figure on the board must not change.
+        Drives from `users` for the same reason as `list_traded_accounts`:
+        `trades` is dominated by the liquidity mirror's unbounded synthetic
+        tape, and a query with no predicate on it re-scans that tape in full
+        on every call regardless of how many accounts have actually traded.
+        Pushing `IS_BOT = 0` into a `UNION ALL` join still left the plan
+        linear in tape size (measured 167ms -> 32ms, better but not
+        index-driven).
+
+        This form correlates a `LATERAL` subquery per user instead, so each
+        user resolves to an index probe rather than a share of a full-table
+        scan. `COUNT(DISTINCT x.TRADE_ID)` -- not `COUNT(*)` -- is still
+        required: the `UNION ALL` inside the lateral emits one row per
+        api-key column, so a trade where this user is both taker and maker
+        appears twice within that user's own subquery and must be
+        collapsed back to one. Measured locally the same way as
+        `list_traded_accounts`: the old form 58.6ms (`Hash Join` over two
+        `Seq Scan`s of `trades`), this form 1.4ms (`Nested Loop` driven by
+        `users`, `Index Scan` on both api-key indexes per user).
         """
         rows = db.execute(
             """
-            SELECT u.USER_ID AS UID, COUNT(DISTINCT t.TRADE_ID) AS N
+            SELECT u.USER_ID AS UID, COUNT(DISTINCT x.TRADE_ID) AS N
             FROM users u
-            JOIN (
-                SELECT TRADE_ID, TAKER_API_KEY AS K FROM trades
+            JOIN LATERAL (
+                SELECT TRADE_ID FROM trades
+                WHERE TAKER_API_KEY = u.API_KEY AND STATUS != 'FAILED'
                 UNION ALL
-                SELECT TRADE_ID, MAKER_API_KEY AS K FROM trades
-            ) t ON t.K = u.API_KEY
+                SELECT TRADE_ID FROM trades
+                WHERE MAKER_API_KEY = u.API_KEY AND STATUS != 'FAILED'
+            ) x ON true
+            WHERE u.IS_BOT = 0
             GROUP BY u.USER_ID
             """
         ).fetchall()

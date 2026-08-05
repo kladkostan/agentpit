@@ -18,9 +18,9 @@ def _seed_traded_account(
         conn, email=email, password_hash="x", handle=handle
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        (f"t-{handle}", key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        (f"t-{handle}", key, 1_700_000_000, "PENDING"),
     )
     TableWrite.insert_account_snapshot(
         conn, user_id, 1_800_000_000, capital_raw, deposited_raw

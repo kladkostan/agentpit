@@ -16,9 +16,9 @@ def test_only_accounts_that_traded_are_listed():
         conn, email="idle@example.com", password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t1", traded_key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t1", traded_key, 1_700_000_000, "PENDING"),
     )
 
     rows = TableRead.list_traded_accounts(conn)
@@ -38,9 +38,9 @@ def test_the_house_is_not_a_competitor():
     )
     TableWrite.mark_user_as_bot(conn, house_key)
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t2", house_key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t2", house_key, 1_700_000_000, "PENDING"),
     )
 
     assert house_id not in {r.user_id for r in TableRead.list_traded_accounts(conn)}
@@ -59,9 +59,9 @@ def test_maker_only_trade_still_counts_as_traded():
         conn, email="taker@example.com", password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s, %s)",
-        ("t4", taker_key, maker_key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        ("t4", taker_key, maker_key, 1_700_000_000, "PENDING"),
     )
 
     ids = {r.user_id for r in TableRead.list_traded_accounts(conn)}
@@ -160,9 +160,9 @@ def test_take_snapshot_writes_one_row_per_traded_account_with_deposited():
         conn, email="valued@example.com", password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t5", key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t5", key, 1_700_000_000, "PENDING"),
     )
     TableWrite.set_total_deposited(conn, user_id, 55_000_000_000)
     conn.close()
@@ -195,14 +195,14 @@ def test_one_account_write_failure_does_not_cost_the_rest(monkeypatch):
         conn, email="good@example.com", password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t-bad", bad_key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-bad", bad_key, 1_700_000_000, "PENDING"),
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t-good", good_key, 1_700_000_100),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-good", good_key, 1_700_000_100, "PENDING"),
     )
     conn.close()
 
@@ -314,9 +314,9 @@ def _seed_traded_user(email: str, *, deployed: str | None, deposited: int):
         conn, email=email, password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        (f"t-{email}", key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        (f"t-{email}", key, 1_700_000_000, "PENDING"),
     )
     TableWrite.set_total_deposited(conn, user_id, deposited)
     if deployed is not None:
@@ -449,18 +449,19 @@ def test_prune_old_deletes_past_the_window_and_keeps_the_rest():
 
 
 def test_a_self_matched_trade_counts_once_not_twice():
-    """The UNION ALL rewrite emits one row per api-key column, so a trade whose
-    taker and maker are the same account arrives twice. The OR-join it replaces
-    produced a single joined row, and the count must not change: this is the
-    regression a plain COUNT(*) over the union would introduce silently."""
+    """Both the membership EXISTS-OR and the count LATERAL's UNION ALL emit a
+    hit per api-key column, so a trade whose taker and maker are the same
+    account can look like two. The count must not change: this is the
+    regression a plain COUNT(*) over the union would introduce silently, and
+    membership must not list the same user_id twice either."""
     conn = fresh_test_conn()
     user_id, _acct, key = TableWrite.create_user(
         conn, email="selfmatch@example.com", password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s, %s)",
-        ("t-self", key, key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        ("t-self", key, key, 1_700_000_000, "PENDING"),
     )
 
     assert TableRead.count_trades_by_user(conn)[user_id] == 1
@@ -477,19 +478,58 @@ def test_counts_cover_both_sides_of_a_trade():
         conn, email="counted-taker@example.com", password_hash="x", handle=None
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s, %s)",
-        ("t-both", taker_key, maker_key, 1_700_000_000),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        ("t-both", taker_key, maker_key, 1_700_000_000, "PENDING"),
     )
     conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t-taker-only", taker_key, 1_700_000_100),
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-taker-only", taker_key, 1_700_000_100, "PENDING"),
     )
 
     counts = TableRead.count_trades_by_user(conn)
     assert counts[taker_id] == 2
     assert counts[maker_id] == 1
+    conn.close()
+
+
+def test_a_failed_trade_does_not_put_an_account_on_the_board():
+    """Every other trade reader in the codebase excludes STATUS = 'FAILED'
+    (account_service.py, order_service.py, liquidity/tape.py's convention
+    comment) because it never settled. An account whose only trade failed
+    must not appear on the board, and a FAILED trade must not count toward
+    an otherwise-traded account's total either."""
+    conn = fresh_test_conn()
+    only_failed_id, _acct, only_failed_key = TableWrite.create_user(
+        conn, email="onlyfailed@example.com", password_hash="x", handle=None
+    )
+    mixed_id, _m, mixed_key = TableWrite.create_user(
+        conn, email="mixedstatus@example.com", password_hash="x", handle=None
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-only-failed", only_failed_key, 1_700_000_000, "FAILED"),
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-mixed-good", mixed_key, 1_700_000_000, "PENDING"),
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-mixed-failed", mixed_key, 1_700_000_100, "FAILED"),
+    )
+
+    ids = {r.user_id for r in TableRead.list_traded_accounts(conn)}
+    assert only_failed_id not in ids
+    assert mixed_id in ids
+
+    counts = TableRead.count_trades_by_user(conn)
+    assert only_failed_id not in counts
+    assert counts[mixed_id] == 1
     conn.close()
 
 
