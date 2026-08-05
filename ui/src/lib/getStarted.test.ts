@@ -2,23 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   commandsOnly,
   openclawAddBot,
+  openclawDryRun,
+  openclawGoLive,
   openclawInstall,
-  openclawSchedule,
   openclawSetKey,
   oneShotScript,
   KEY_PLACEHOLDER,
-  registerCurl,
   tokenizeSnippet,
 } from "./getStarted";
 
 const BASE = "http://localhost:8000";
 
 describe("snippet builders", () => {
-  it("registerCurl posts email+password to /register", () => {
-    const s = registerCurl(BASE);
-    expect(s).toContain(`${BASE}/register`);
-    expect(s).toContain('"email"');
-    expect(s).toContain('"password"');
+  it("no snippet ever asks for a password", () => {
+    // Registration used to be a curl with email and password inline, which put
+    // the password in ~/.zsh_history for anyone who later read the file. The
+    // browser signup does not, so the terminal path is gone.
+    for (const snippet of [
+      openclawInstall(), openclawAddBot(), openclawSetKey("k", BASE),
+      openclawDryRun(), openclawGoLive(), oneShotScript("k", BASE),
+    ]) {
+      expect(snippet.toLowerCase()).not.toContain("password");
+    }
   });
 
   it("the setup sequence names every piece a fresh machine needs", () => {
@@ -30,7 +35,7 @@ describe("snippet builders", () => {
   });
 
   it("the key is scoped to the skill, not the whole machine", () => {
-    const s = openclawSetKey("pk_live_123");
+    const s = openclawSetKey("pk_live_123", BASE);
     expect(s).toContain("skills.entries.agentpit-reference.env.AGENTPIT_API_KEY");
     expect(s).toContain("pk_live_123");
   });
@@ -40,14 +45,14 @@ describe("snippet builders", () => {
     // line is run as a command: `zsh: command not found: #`. Worse, a comment
     // containing `;` splits there and zsh tries to run the remainder too.
     // The block still SHOWS its comments; only the clipboard drops them.
-    for (const snippet of [openclawInstall(), openclawSetKey("pk_live_123"), openclawSchedule()]) {
+    for (const snippet of [openclawInstall(), openclawSetKey("pk_live_123", BASE), openclawDryRun(), openclawGoLive()]) {
       const copied = commandsOnly(snippet);
       expect(copied).not.toMatch(/^\s*#/m);
       expect(copied).not.toMatch(/^\s*$/m);          // no blank runs left behind
       expect(copied.startsWith("openclaw") || copied.startsWith("curl")).toBe(true);
     }
     // and the commands themselves survive intact
-    expect(commandsOnly(openclawSchedule())).toContain("openclaw cron add --every 15m");
+    expect(commandsOnly(openclawGoLive())).toContain("openclaw cron add --every 15m");
   });
 
   it("commandsOnly keeps a shebang, so a script is still a script", () => {
@@ -58,7 +63,7 @@ describe("snippet builders", () => {
   it("the setup.sh block is copied verbatim — it is a file, not a paste", () => {
     // Stripping comments out of a script would also strip its shebang's
     // meaning as documentation and could cut lines inside the heredoc.
-    const s = oneShotScript("pk_live_123");
+    const s = oneShotScript("pk_live_123", BASE);
     expect(s).toContain("#!/usr/bin/env bash");
     expect(s).toMatch(/^# \d\./m);
   });
@@ -86,11 +91,11 @@ describe("snippet builders", () => {
   });
 
   it("openclawSetKey falls back to the placeholder when logged out", () => {
-    expect(openclawSetKey(null)).toContain(KEY_PLACEHOLDER);
+    expect(openclawSetKey(null, BASE)).toContain(KEY_PLACEHOLDER);
   });
 
   it("the one-shot script does every step the manual path does", () => {
-    const s = oneShotScript("pk_live_123");
+    const s = oneShotScript("pk_live_123", BASE);
     expect(s).toContain("openclaw.ai/install.sh");
     expect(s).toContain("skalenetwork/agentpit-examples");
     expect(s).toContain("AGENTPIT_API_KEY");
@@ -100,7 +105,7 @@ describe("snippet builders", () => {
   it("the one-shot script never goes live by itself", () => {
     // A script pasted off a web page must not start placing orders. It ends on
     // a dry run and only PRINTS the lines that make it real.
-    const s = oneShotScript("pk_live_123");
+    const s = oneShotScript("pk_live_123", BASE);
     expect(s).toContain("AGENTPIT_DRY_RUN");
     const live = s.indexOf("cron add");
     const printed = s.indexOf("cat <<'NEXT'");
@@ -109,18 +114,31 @@ describe("snippet builders", () => {
   });
 
   it("the one-shot script is safe to re-run", () => {
-    const s = oneShotScript(null);
+    const s = oneShotScript(null, BASE);
     expect(s).toContain("command -v openclaw");   // skips an existing install
     expect(s).toContain("--force");               // re-installing the skill is fine
     expect(s).toContain(KEY_PLACEHOLDER);
   });
 
-  it("the dry run is armed with the key and disarmed before the schedule", () => {
-    const armed = openclawSetKey("pk_live_123");
-    expect(armed).toContain("AGENTPIT_DRY_RUN");
-    const s = openclawSchedule();
-    expect(s.indexOf("config unset")).toBeLessThan(s.indexOf("cron add"));
-    expect(s).toContain("config unset");   // otherwise it schedules a no-op
+  it("the dry run arms and disarms itself inside one step", () => {
+    // The flag used to be set two steps before it was cleared, so anyone who
+    // stopped reading in between scheduled a muted agent. Now it cannot leak
+    // past its own step: set, run, unset, in that order and nowhere else.
+    const s = openclawDryRun();
+    expect(s.indexOf("config set")).toBeLessThan(s.indexOf("openclaw agent"));
+    expect(s.indexOf("openclaw agent")).toBeLessThan(s.indexOf("config unset"));
+    expect(openclawSetKey("pk_live_123", BASE)).not.toContain("AGENTPIT_DRY_RUN");
+    expect(openclawGoLive()).not.toContain("AGENTPIT_DRY_RUN");
+  });
+
+  it("the key step also says where orders go", () => {
+    const s = openclawSetKey("pk_live_123", BASE);
+    expect(s).toContain(`AGENTPIT_HOST '"${BASE}"'`);
+  });
+
+  it("only the last step can place an order", () => {
+    expect(openclawGoLive()).toContain("openclaw cron add --every 15m");
+    expect(openclawDryRun()).not.toContain("cron add");
   });
 
   it("the guide never restarts the daemon — a skill's env is not held by it", () => {
@@ -131,9 +149,9 @@ describe("snippet builders", () => {
     // does not hold the value at all — the skill reads it when it runs.
     // The guide asked for two restarts; both were doing nothing.
     const guide = [
-      openclawSetKey("pk_live_123"),
-      openclawSchedule(),
-      oneShotScript("pk_live_123"),
+      openclawSetKey("pk_live_123", BASE),
+      openclawDryRun(),
+      oneShotScript("pk_live_123", BASE),
     ].join("\n");
     expect(guide).not.toContain("daemon restart");
   });
@@ -144,7 +162,7 @@ describe("snippet builders", () => {
     //   No target session selected. Use --agent <id>, --session-key <key>, ...
     // `main` is the built-in default agent id (`openclaw agents list --json`
     // reports it with isDefault: true on a stock install).
-    for (const snippet of [openclawSchedule(), oneShotScript("pk_live_123")]) {
+    for (const snippet of [openclawDryRun(), oneShotScript("pk_live_123", BASE)]) {
       expect(snippet).toContain("openclaw agent --agent main --message");
     }
   });
@@ -157,7 +175,7 @@ describe("snippet builders", () => {
     // which is where the first person to follow this guide got stuck. The
     // reference agent compares `os.environ["AGENTPIT_DRY_RUN"] == "1"`, so no
     // other value works either -- the quotes are the whole fix.
-    for (const snippet of [openclawSetKey("pk_live_123"), oneShotScript("pk_live_123")]) {
+    for (const snippet of [openclawDryRun(), oneShotScript("pk_live_123", BASE)]) {
       expect(snippet).toContain(`AGENTPIT_DRY_RUN '"1"'`);
       expect(snippet).not.toMatch(/AGENTPIT_DRY_RUN 1\b/);
     }
@@ -195,12 +213,12 @@ describe("tokenizeSnippet", () => {
     const key = "pk_live_123";
     const addr = "0xAbC";
     const snippets = [
-      registerCurl(BASE),
       openclawInstall(),
       openclawAddBot(),
-      openclawSetKey(key),
-      openclawSchedule(),
-      oneShotScript(key),
+      openclawSetKey(key, BASE),
+      openclawDryRun(),
+      openclawGoLive(),
+      oneShotScript(key, BASE),
     ];
     for (const code of snippets) {
       const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER])

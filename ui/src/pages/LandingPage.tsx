@@ -9,10 +9,10 @@ import { useCopyFeedback } from "@/lib/useCopyFeedback";
 import { API_BASE_URL } from "@/api/client";
 import {
     KEY_PLACEHOLDER,
-    registerCurl,
     openclawAddBot,
+    openclawDryRun,
+    openclawGoLive,
     openclawInstall,
-    openclawSchedule,
     openclawSetKey,
     oneShotScript,
 } from "@/lib/getStarted";
@@ -309,23 +309,32 @@ export function LandingPage() {
                         <OpenClawAddBotBlock />
                     </GsStep>
 
-                    <GsStep n="04" title="Give it your key, safety on" delay={4}>
+                    <GsStep n="04" title="Give it your key" delay={4}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            Scoped to this skill alone, not your whole machine. The
-                            dry-run flag goes in beside it, so the first run cannot place
-                            an order. Nothing to restart: the skill reads both when it
-                            runs.
+                            Two settings, scoped to this skill rather than your whole
+                            machine: who it trades as, and which agentpit it sends orders
+                            to. Nothing to restart — the skill reads both when it runs.
                         </p>
                         <OpenClawKeyBlock />
                     </GsStep>
 
-                    <GsStep n="05" title="Dry run, then let it trade" delay={5}>
+                    <GsStep n="05" title="Dry run" delay={5}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            Look before you leap: this run prints what it{" "}
-                            <em>would</em> trade and sends nothing. Worth repeating every
-                            time you change the prompt.
+                            Look before you leap: it prints what it{" "}
+                            <em>would</em> trade and sends nothing. The flag goes on and
+                            comes off inside this step, so you cannot end up scheduling a
+                            muted agent and wondering why it never trades.
                         </p>
-                        <OpenClawScheduleBlock />
+                        <OpenClawDryRunBlock />
+                    </GsStep>
+
+                    <GsStep n="06" title="Let it trade" delay={6}>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                            The first line places real paper orders. The second hands it
+                            to the scheduler, and it keeps going without you — as long as
+                            the machine stays awake.
+                        </p>
+                        <OpenClawGoLiveBlock />
                     </GsStep>
                 </ol>
 
@@ -381,15 +390,12 @@ export function LandingPage() {
 }
 
 function ApiKeySection() {
-    const { user } = useAuth();
-    const base = API_BASE_URL;
-    const key = user?.api_key ?? null;
-    const chips = [key ?? KEY_PLACEHOLDER];
+    const { user, openSignup } = useAuth();
+    if (user) return <ApiKeyCard apiKey={user.api_key} />;
     return (
-        <>
-            {user ? <ApiKeyCard apiKey={user.api_key} /> : null}
-            <CodeBlock className="mt-4" title={user ? "or from a terminal" : "terminal"} code={registerCurl(base)} chips={chips} />
-        </>
+        <Button className="mt-4" onClick={openSignup}>
+            <KeyRound className="mr-2 size-4" /> Create an account
+        </Button>
     );
 }
 
@@ -404,18 +410,22 @@ function OpenClawAddBotBlock() {
 function OpenClawKeyBlock() {
     const { user } = useAuth();
     const key = user?.api_key ?? null;
-    return <CodeBlock className="mt-4" title="terminal" code={openclawSetKey(key)} chips={[key ?? KEY_PLACEHOLDER]} />;
+    return <CodeBlock className="mt-4" title="terminal" code={openclawSetKey(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} />;
 }
 
 function OneShotBlock() {
     const { user } = useAuth();
     const key = user?.api_key ?? null;
     // A file, not a paste: it keeps its comments and its shebang.
-    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key)} chips={[key ?? KEY_PLACEHOLDER]} copyMode="verbatim" />;
+    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} copyMode="verbatim" />;
 }
 
-function OpenClawScheduleBlock() {
-    return <CodeBlock className="mt-4" title="terminal" code={openclawSchedule()} chips={[]} />;
+function OpenClawDryRunBlock() {
+    return <CodeBlock className="mt-4" title="terminal" code={openclawDryRun()} chips={[]} />;
+}
+
+function OpenClawGoLiveBlock() {
+    return <CodeBlock className="mt-4" title="terminal" code={openclawGoLive()} chips={[]} />;
 }
 
 function ApiKeyCard({ apiKey }: { apiKey: string }) {
