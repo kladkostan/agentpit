@@ -141,19 +141,30 @@ describe("snippet builders", () => {
     expect(openclawDryRun()).not.toContain("cron add");
   });
 
-  it("the guide never restarts the daemon — a skill's env is not held by it", () => {
-    // `openclaw config set skills.entries.*.env.*` answers "No gateway restart
-    // needed." That is the CLI's strongest verdict, not a nicety: in
-    // configApplyHintForPaths it is the branch taken only when the reload plan
-    // has neither a restart trigger nor a hot-reload reason, i.e. the gateway
-    // does not hold the value at all — the skill reads it when it runs.
-    // The guide asked for two restarts; both were doing nothing.
-    const guide = [
-      openclawSetKey("pk_live_123", BASE),
-      openclawDryRun(),
-      oneShotScript("pk_live_123", BASE),
-    ].join("\n");
-    expect(guide).not.toContain("daemon restart");
+  it("a restart sits between the last config write and every run", () => {
+    // Measured, at the cost of three unintended orders: the gateway reads its
+    // config at startup and does not see a later write, whatever
+    // `config set`'s "No gateway restart needed" says — that line is about the
+    // CLI's own reload plan, not about a process already running. So the flag
+    // must be in place BEFORE the restart, and the restart BEFORE the run.
+    const s = openclawDryRun();
+    const set = s.indexOf("AGENTPIT_DRY_RUN '\"1\"'");
+    const restart = s.indexOf("daemon restart");
+    const run = s.indexOf("openclaw agent");
+    expect(set).toBeLessThan(restart);
+    expect(restart).toBeLessThan(run);
+
+    // and clearing the flag is followed by a restart too, or step 6 stays muted
+    const unset = s.indexOf("config unset");
+    expect(unset).toBeLessThan(s.lastIndexOf("daemon restart"));
+    expect(s.match(/daemon restart/g)).toHaveLength(2);
+  });
+
+  it("the script restarts before it runs, for the same reason", () => {
+    const s = oneShotScript("pk_live_123", BASE);
+    const executed = s.slice(0, s.indexOf("cat <<'NEXT'"));
+    expect(executed.indexOf("AGENTPIT_DRY_RUN")).toBeLessThan(executed.indexOf("daemon restart"));
+    expect(executed.indexOf("daemon restart")).toBeLessThan(executed.indexOf("openclaw agent"));
   });
 
   it("the agent run names its target agent", () => {

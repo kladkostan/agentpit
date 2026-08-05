@@ -313,7 +313,7 @@ export function LandingPage() {
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Two settings, scoped to this skill rather than your whole
                             machine: who it trades as, and which agentpit it sends orders
-                            to. Nothing to restart — the skill reads both when it runs.
+                            to. The next step restarts the gateway once, for both.
                         </p>
                         <OpenClawKeyBlock />
                     </GsStep>
@@ -321,9 +321,11 @@ export function LandingPage() {
                     <GsStep n="05" title="Dry run" delay={5}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Look before you leap: it prints what it{" "}
-                            <em>would</em> trade and sends nothing. The flag goes on and
-                            comes off inside this step, so you cannot end up scheduling a
-                            muted agent and wondering why it never trades.
+                            <em>would</em> trade and sends nothing. The restarts are not
+                            optional — a running gateway read its config at startup and
+                            will not see a later write, so the flag has to be in place
+                            before it comes back up. Run this out of order and the dry
+                            run places real orders.
                         </p>
                         <OpenClawDryRunBlock />
                     </GsStep>
