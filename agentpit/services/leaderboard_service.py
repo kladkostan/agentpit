@@ -134,6 +134,16 @@ class LeaderboardService:
             written += 1
         return written
 
+    def prune_old(self, older_than: int) -> int:
+        """Drop snapshots older than `older_than`. Returns rows deleted.
+
+        Takes an absolute cutoff rather than a window so the caller owns the
+        clock -- the same reason `take_snapshot` takes `now`. Without this the
+        table grows by one row per account per tick forever.
+        """
+        with self._db.write() as conn:
+            return TableWrite.prune_account_snapshots(conn, older_than)
+
     def build_board(self) -> "list[LeaderboardRow]":
         """Assemble the board from the latest snapshot of each account.
 

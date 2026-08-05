@@ -323,15 +323,26 @@ async def _snapshot_loop(
         await asyncio.sleep(interval_seconds)
 
 
+def _run_leaderboard_tick(service, retention_seconds: int) -> tuple[int, int]:
+    now = int(time.time())
+    written = service.take_snapshot(now)
+    deleted = service.prune_old(now - retention_seconds)
+    return written, deleted
+
+
 async def _leaderboard_loop(
-    service: LeaderboardService, interval_seconds: int
+    service: LeaderboardService, interval_seconds: int, retention_seconds: int
 ) -> None:
     while True:
         try:
-            written = await asyncio.to_thread(
-                service.take_snapshot, int(time.time())
+            written, deleted = await asyncio.to_thread(
+                _run_leaderboard_tick, service, retention_seconds
             )
-            log.info("Leaderboard tick: %d accounts valued", written)
+            log.info(
+                "Leaderboard tick: %d accounts valued, %d snapshots pruned",
+                written,
+                deleted,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -420,8 +431,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         leaderboard_task: asyncio.Task | None = None
         if settings.leaderboard_enabled:
             log.info(
-                "Leaderboard loop enabled (interval=%ds)",
+                "Leaderboard loop enabled (interval=%ds, retention=%dd)",
                 settings.leaderboard_interval_seconds,
+                settings.snapshot_retention_days,
             )
             leaderboard_service = LeaderboardService(
                 db_session,
@@ -431,7 +443,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             leaderboard_task = asyncio.create_task(
                 _leaderboard_loop(
-                    leaderboard_service, settings.leaderboard_interval_seconds
+                    leaderboard_service,
+                    settings.leaderboard_interval_seconds,
+                    settings.snapshot_retention_days * 86_400,
                 )
             )
         else:

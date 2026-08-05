@@ -426,3 +426,23 @@ def test_the_snapshot_records_the_reset_figure_not_the_stale_one():
     conn.close()
     assert latest[user_id] == (0, 0)
     db.close()
+
+
+def test_prune_old_deletes_past_the_window_and_keeps_the_rest():
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="pruned@example.com", password_hash="x", handle=None
+    )
+    TableWrite.insert_account_snapshot(conn, user_id, 1_000, 1, 1)
+    TableWrite.insert_account_snapshot(conn, user_id, 5_000, 2, 2)
+    conn.close()
+
+    db = fresh_test_db()
+    service = LeaderboardService(db, onchain=None, accounts=None, settings=Settings())
+    assert service.prune_old(4_000) == 1
+
+    check = fresh_test_conn()
+    rows = check.execute("SELECT T FROM account_snapshots").fetchall()
+    check.close()
+    assert [r["T"] for r in rows] == [5_000]
+    db.close()
