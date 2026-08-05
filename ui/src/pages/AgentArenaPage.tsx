@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import {
   boardViewState,
   formatBoardAmount,
-  houseAgentHref,
   LEADERBOARD_SORTS,
   useLeaderboard,
   type BoardEntry,
@@ -49,9 +47,8 @@ export function AgentArenaPage() {
             <span aria-hidden>🏆</span> Agent Arena
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Every account that has traded on agentpit, ranked live. Our five
-            house personalities are marked "ours" — everyone else is running
-            their own.
+            Every account that has traded on agentpit, ranked by return on what
+            it was handed.
           </p>
         </div>
         <span className="text-sm text-muted-foreground">
@@ -125,24 +122,16 @@ export function AgentArenaPage() {
 function BoardRow({ entry }: { entry: BoardEntry }) {
   const addr = shortAddr(entry.address);
   const nameIsAddress = entry.name.toLowerCase().startsWith("0x");
-  const href = houseAgentHref(entry);
 
-  const cells = (
-    <>
+  return (
+    <li className="grid grid-cols-[3rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_7rem_7rem_6rem_4rem]">
       <span className="text-lg tabular-nums">
         {MEDALS[entry.rank - 1] ?? (
           <span className="text-muted-foreground">{entry.rank}</span>
         )}
       </span>
       <span className="min-w-0">
-        <span className="flex items-center gap-2">
-          <span className="truncate font-semibold">{entry.name}</span>
-          {entry.isHouseAgent ? (
-            <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              ours
-            </span>
-          ) : null}
-        </span>
+        <span className="block truncate font-semibold">{entry.name}</span>
         {!nameIsAddress ? (
           <span className="block truncate font-mono text-xs text-muted-foreground">
             {addr}
@@ -171,21 +160,6 @@ function BoardRow({ entry }: { entry: BoardEntry }) {
       <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
         {entry.trades}
       </span>
-    </>
-  );
-
-  const gridClass =
-    "grid grid-cols-[3rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_7rem_7rem_6rem_4rem]";
-
-  return (
-    <li>
-      {href ? (
-        <Link to={href} className={cn(gridClass, "transition-colors hover:bg-muted/50")}>
-          {cells}
-        </Link>
-      ) : (
-        <div className={gridClass}>{cells}</div>
-      )}
     </li>
   );
 }

@@ -4,7 +4,6 @@ import {
   DEFAULT_IDENTITY,
   equityPoints,
   formatBoardAmount,
-  houseAgentHref,
   LEADERBOARD_SORTS,
   lastHold,
   lastTrade,
@@ -335,7 +334,6 @@ function boardEntry(over: Partial<BoardEntry>): BoardEntry {
     earned: "50000000000",
     returnPct: 50,
     trades: 12,
-    isHouseAgent: false,
     ...over,
   };
 }
@@ -373,33 +371,5 @@ describe("boardViewState", () => {
     expect(boardViewState(boardResponse([]), new Error("transient"), [])).toBe(
       "empty",
     );
-  });
-});
-
-describe("houseAgentHref", () => {
-  it("links each of the five house agents by name", () => {
-    for (const name of [
-      "bold",
-      "cautious",
-      "contrarian",
-      "hybrid",
-      "longshot",
-    ]) {
-      expect(
-        houseAgentHref(boardEntry({ name, isHouseAgent: true })),
-      ).toBe(`/agents/${name}`);
-    }
-  });
-
-  it("does not link an ordinary trader even if their handle collides with a house id", () => {
-    expect(
-      houseAgentHref(boardEntry({ name: "bold", isHouseAgent: false })),
-    ).toBeNull();
-  });
-
-  it("does not link a house-flagged row whose name isn't one of the five known ids", () => {
-    expect(
-      houseAgentHref(boardEntry({ name: "mystery_bot", isHouseAgent: true })),
-    ).toBeNull();
   });
 });

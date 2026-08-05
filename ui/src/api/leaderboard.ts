@@ -220,7 +220,6 @@ export interface BoardEntry {
   earned: string;
   returnPct: number;
   trades: number;
-  isHouseAgent: boolean;
 }
 
 export interface BoardResponse {
@@ -278,22 +277,3 @@ export function boardViewState(
   return error ? "error" : "loading";
 }
 
-/** The five house personalities' ids double as their handles on the wire. */
-const HOUSE_AGENT_IDS = new Set([
-  "bold",
-  "cautious",
-  "contrarian",
-  "hybrid",
-  "longshot",
-]);
-
-/** Detail-page path for a board row, or null if it shouldn't link anywhere.
- *  Only the five house agents have a detail page (`AgentPage`, keyed by a
- *  fixed id space) — an arbitrary trader's row has nothing to link to. A
- *  house row whose `name` isn't one of the five known ids (shouldn't happen,
- *  but the wire is the wire) also renders as a plain row rather than linking
- *  somewhere that 404s. */
-export function houseAgentHref(entry: BoardEntry): string | null {
-  if (!entry.isHouseAgent) return null;
-  return HOUSE_AGENT_IDS.has(entry.name) ? `/agents/${entry.name}` : null;
-}

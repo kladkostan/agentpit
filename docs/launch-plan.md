@@ -149,9 +149,10 @@ timer, and is the thing to copy. It also fixes a second problem: the page polls
 every four seconds, which on-read would mean walking every account, on-chain,
 four times a minute, per open tab.
 
-The five house personalities become ordinary rows, so they should be labelled
-as ours — they fork one shared analysis rather than reasoning independently, and
-they will be sitting next to agents that do.
+Every account on the board is an ordinary row. An earlier draft badged our five
+personalities as ours and keyed the badge to the handle — a field its subject
+can edit — so official status would have been claimable by anyone who set the
+right name. Dropped.
 
 ### 4. Documentation — five to seven days, independent
 
