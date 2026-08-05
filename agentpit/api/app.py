@@ -52,6 +52,7 @@ from agentpit.polymarket.pinned import (
 from agentpit.polymarket.polymarket_sync import (
     auto_redeem_resolved_markets,
     fetch_and_sync_polymarket_markets,
+    list_scan_candidates,
     mirror_polymarket_resolutions,
 )
 from agentpit.services.account_service import AccountService
@@ -105,28 +106,52 @@ async def _polymarket_sync_loop(
 
 
 def _run_resolution_cycle(
-    db: DbSession, admin: OnchainAdmin, settings: Settings
-) -> tuple[int, int]:
+    db: DbSession, admin: OnchainAdmin, settings: Settings, scan_after: int = 0
+) -> tuple[int, int, int]:
+    """Returns (resolved, redeemed, next_scan_after).
+
+    Two passes over different candidate sets. The first is the cheap one that
+    always ran: markets whose stated end date has passed. The second walks the
+    whole unsettled table a slice at a time, because Polymarket dates a match to
+    the end of its tournament — 208 of 211 book-less ACTIVE markets on
+    production were closed upstream with an end date still days away, so the
+    first pass could not see them. `next_scan_after` wraps to 0 at the end.
+    """
     now = int(time.time())
     with db.write() as conn:
         resolved = mirror_polymarket_resolutions(conn, admin, now=now)
+
+        slice_ = list_scan_candidates(
+            conn, after_market_id=scan_after, limit=settings.resolution_scan_batch
+        )
+        if slice_:
+            resolved += mirror_polymarket_resolutions(
+                conn, admin, now=now, candidates=slice_
+            )
+            scan_after = slice_[-1].market_id
+        else:
+            scan_after = 0
     redeemed = 0
     if settings.auto_redeem_enabled:
         with _redeem_lock:
             redeemed = auto_redeem_resolved_markets(db, admin)
-    return resolved, redeemed
+    return resolved, redeemed, scan_after
 
 
 async def _resolution_mirror_loop(
     db: DbSession, admin: OnchainAdmin, settings: Settings
 ) -> None:
+    scan_after = 0
     while True:
         try:
-            resolved, redeemed = await asyncio.to_thread(
-                _run_resolution_cycle, db, admin, settings
+            resolved, redeemed, scan_after = await asyncio.to_thread(
+                _run_resolution_cycle, db, admin, settings, scan_after
             )
             log.info(
-                "Resolution cycle: %d resolved, %d redeemed", resolved, redeemed
+                "Resolution cycle: %d resolved, %d redeemed (scan past id %d)",
+                resolved,
+                redeemed,
+                scan_after,
             )
         except asyncio.CancelledError:
             raise
@@ -249,7 +274,7 @@ def _run_pin_resolve(
     if settings.auto_redeem_enabled:
         with _redeem_lock:
             redeemed = auto_redeem_resolved_markets(db, admin)
-    return resolved, redeemed
+    return resolved, redeemed, scan_after
 
 
 async def _pin_resolve_loop(

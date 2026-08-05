@@ -687,6 +687,11 @@ def _winner_index_if_resolved(pm_response: dict) -> int | None:
     return None
 
 
+def list_scan_candidates(db, *, after_market_id: int, limit: int) -> list:
+    """One slice of the rotating resolution scan. See TableRead.list_unresolved_markets_after."""
+    return TableRead.list_unresolved_markets_after(db, after_market_id, limit)
+
+
 def mirror_polymarket_resolutions(
     db,
     admin: OnchainAdmin,
@@ -694,6 +699,7 @@ def mirror_polymarket_resolutions(
     fetcher=_default_resolution_fetcher,
     now: int,
     market_ids: "set[int] | None" = None,
+    candidates: "list | None" = None,
 ) -> int:
     """Walk synced markets and mirror upstream resolutions onto the local CTF.
 
@@ -706,12 +712,19 @@ def mirror_polymarket_resolutions(
     the fast per-window resolve loop to check only a couple of just-ended
     pinned windows instead of scanning (and upstream-fetching) every market.
 
+    `candidates`, when given, replaces the end-date query entirely — that is how
+    the rotating scan feeds in markets whose stated end date has not arrived but
+    which upstream has already closed. Widening the candidate set cannot resolve
+    anything extra on its own: `_winner_index_if_resolved` still requires the
+    upstream document to say `closed` with a winning token.
+
     Returns the count of markets newly resolved this pass.
     """
     from eth_utils.crypto import keccak  # local import: avoid circulars at module load
 
     resolved_count = 0
-    candidates = TableRead.list_unresolved_ended_markets(db, now)
+    if candidates is None:
+        candidates = TableRead.list_unresolved_ended_markets(db, now)
     if market_ids is not None:
         candidates = [m for m in candidates if m.market_id in market_ids]
     for market in candidates:

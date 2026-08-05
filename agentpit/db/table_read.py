@@ -803,6 +803,32 @@ class TableRead:
         return [_row_to_market(row) for row in rows]
 
     @staticmethod
+    def list_unresolved_markets_after(
+        db: psycopg.Connection, after_market_id: int, limit: int
+    ) -> "list[Market]":
+        """Unsettled markets by id, for a scan that resumes where it left off.
+
+        Deliberately NOT filtered on END_DATE. Polymarket dates a short-lived
+        sports market to the end of its tournament rather than the end of the
+        match, so a market can be closed and settled upstream for days while its
+        stated end date is still in the future -- which `list_unresolved_ended_markets`
+        cannot see. Measured on production: 208 of 211 book-less ACTIVE markets
+        were in exactly that state.
+
+        The end-date filter was also a cost bound (one upstream fetch per
+        candidate per pass), so this replaces it with a slice: the caller walks
+        the table a batch at a time and wraps around at the end.
+        """
+        rows = db.execute(
+            f"SELECT {_MARKET_COLS} FROM markets "
+            "WHERE MARKET_STATE NOT IN ('RESOLVED', 'CANCELLED') "
+            "AND MARKET_ID > %s "
+            "ORDER BY MARKET_ID LIMIT %s",
+            (after_market_id, limit),
+        ).fetchall()
+        return [_row_to_market(row) for row in rows]
+
+    @staticmethod
     def list_resolved_unredeemed_markets(
         db: psycopg.Connection,
     ) -> "list[Market]":

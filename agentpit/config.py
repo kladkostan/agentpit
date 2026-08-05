@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     resolution_mirror_enabled: bool | None = Field(
         default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
     )
+    # How many markets the rotating resolution scan examines per cycle. The
+    # scan exists because Polymarket dates short-lived sports markets to the end
+    # of the tournament, so `END_DATE < now` never selects them while they are
+    # already settled upstream. One upstream fetch per market per cycle, so this
+    # is the cost knob: 200 every 5 minutes walks ~2,400 markets in an hour.
+    resolution_scan_batch: int = Field(
+        default=200, validation_alias="AGENTPIT_RESOLUTION_SCAN_BATCH"
+    )
     resolution_mirror_interval_seconds: int = Field(
         default=300, validation_alias="RESOLUTION_MIRROR_INTERVAL_SECONDS"
     )
