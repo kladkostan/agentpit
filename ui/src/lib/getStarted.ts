@@ -105,6 +105,30 @@ That was a dry run. Happy with what it picked? Then let it trade every 15 min:
 NEXT`;
 }
 
+/* ------------------------------------------------------------- copying --- */
+
+/** A snippet with its explanatory comments removed, for the clipboard.
+ *
+ *  Interactive zsh does not set `interactive_comments`, so a pasted `#` line
+ *  is not a comment — it is a command, and the shell answers
+ *  `zsh: command not found: #` once per line. A comment containing `;` is
+ *  worse: the shell splits there and tries to run the remainder as well.
+ *
+ *  So the block shows its comments and the clipboard carries only the
+ *  commands. A shebang survives, because a script that loses it stops being
+ *  a script; it is the one `#` line that is not commentary.
+ */
+export function commandsOnly(code: string): string {
+  const lines = code.split("\n");
+  const kept = lines.filter(
+    (line, i) => (i === 0 && line.startsWith("#!")) || !/^\s*#/.test(line),
+  );
+  return kept
+    .join("\n")
+    .replace(/\n{2,}/g, "\n")   // the blanks the comments used to separate
+    .trim();
+}
+
 /* -------------------------------------------------- display tokenizer --- */
 
 export type SnippetToken = {

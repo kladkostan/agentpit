@@ -410,7 +410,8 @@ function OpenClawKeyBlock() {
 function OneShotBlock() {
     const { user } = useAuth();
     const key = user?.api_key ?? null;
-    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key)} chips={[key ?? KEY_PLACEHOLDER]} />;
+    // A file, not a paste: it keeps its comments and its shebang.
+    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key)} chips={[key ?? KEY_PLACEHOLDER]} copyMode="verbatim" />;
 }
 
 function OpenClawScheduleBlock() {

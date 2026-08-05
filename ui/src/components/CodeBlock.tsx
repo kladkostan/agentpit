@@ -1,24 +1,31 @@
 import { Check, Copy } from "lucide-react";
-import { tokenizeSnippet } from "@/lib/getStarted";
+import { commandsOnly, tokenizeSnippet } from "@/lib/getStarted";
 import { useCopyFeedback } from "@/lib/useCopyFeedback";
 import { cn } from "@/lib/utils";
 
 /** Dark-canvas code card (dark in BOTH themes — code reads best on ink).
- *  `code` is the single source of truth: it is tokenized for display AND
- *  copied verbatim, so what the user sees is exactly what they paste. */
+ *
+ *  `code` is the single source of truth for what is DISPLAYED. What gets
+ *  copied is deliberately not identical: `copyMode="commands"` (the default,
+ *  for anything pasted into a prompt) drops the explanatory comments, because
+ *  interactive zsh runs a pasted `#` line rather than ignoring it and answers
+ *  `command not found: #`. Use `copyMode="verbatim"` for a block that is a
+ *  file rather than a paste — a script keeps its comments. */
 export function CodeBlock({
   title,
   code,
   chips = [],
   className,
+  copyMode = "commands",
 }: {
   title: string;
   code: string;
   chips?: string[];
   className?: string;
+  copyMode?: "commands" | "verbatim";
 }) {
   const { copied, copy } = useCopyFeedback();
-  const onCopy = () => copy(code);
+  const onCopy = () => copy(copyMode === "verbatim" ? code : commandsOnly(code));
 
   return (
     <div

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  commandsOnly,
   openclawAddBot,
   openclawInstall,
   openclawSchedule,
@@ -34,6 +35,34 @@ describe("snippet builders", () => {
     expect(s).toContain("pk_live_123");
     // Read at startup — without this the key silently does nothing.
     expect(s).toContain("daemon restart");
+  });
+
+  it("copying a terminal step yields commands only", () => {
+    // Interactive zsh does not enable `interactive_comments`, so a pasted `#`
+    // line is run as a command: `zsh: command not found: #`. Worse, a comment
+    // containing `;` splits there and zsh tries to run the remainder too.
+    // The block still SHOWS its comments; only the clipboard drops them.
+    for (const snippet of [openclawInstall(), openclawSetKey("pk_live_123"), openclawSchedule()]) {
+      const copied = commandsOnly(snippet);
+      expect(copied).not.toMatch(/^\s*#/m);
+      expect(copied).not.toMatch(/^\s*$/m);          // no blank runs left behind
+      expect(copied.startsWith("openclaw") || copied.startsWith("curl")).toBe(true);
+    }
+    // and the commands themselves survive intact
+    expect(commandsOnly(openclawSchedule())).toContain("openclaw cron add --every 15m");
+  });
+
+  it("commandsOnly keeps a shebang, so a script is still a script", () => {
+    const script = "#!/usr/bin/env bash\n# explain\nset -eu\n";
+    expect(commandsOnly(script)).toBe("#!/usr/bin/env bash\nset -eu");
+  });
+
+  it("the setup.sh block is copied verbatim — it is a file, not a paste", () => {
+    // Stripping comments out of a script would also strip its shebang's
+    // meaning as documentation and could cut lines inside the heredoc.
+    const s = oneShotScript("pk_live_123");
+    expect(s).toContain("#!/usr/bin/env bash");
+    expect(s).toMatch(/^# \d\./m);
   });
 
   it("the wizard runs once, and only asks what this guide needs", () => {
