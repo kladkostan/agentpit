@@ -1,3 +1,5 @@
+import math
+
 from agentpit.config import Settings
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
@@ -561,6 +563,13 @@ def test_downsample_keeps_the_newest_point_and_respects_the_cap():
     assert len(thinned) <= 60
     assert thinned[-1] == points[-1]
     assert thinned == sorted(thinned)
+    # The three assertions above are all satisfied by `points[-60:]`, which
+    # would silently reduce a 7-day curve to its last five hours. What
+    # downsample actually promises is *evenly spaced* samples across the
+    # whole window, so pin the other end too: the first kept point must be
+    # close to the true first point, not merely somewhere before the last.
+    stride = math.ceil(len(points) / 60)
+    assert thinned[0][0] - points[0][0] <= stride
 
 
 def test_downsample_leaves_a_short_history_alone():
