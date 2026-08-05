@@ -116,11 +116,39 @@ SELECT k FROM (
 rather than one join with `taker = api_key OR maker = api_key`. Same result, and
 `idx_trades_taker_api_key` and `idx_trades_maker_api_key` finally apply.
 
+### 5. The equity sparkline comes back
+
+The old board drew a small equity curve per row from the static file's `equity`
+arrays. The replacement endpoint returns only current figures, so the curves
+vanished — but the data is already being collected: the valuation pass writes a
+row per account per tick, so a day gives each account nearly three hundred
+points.
+
+What is missing is only the pipe. `GET /leaderboard/{address}/history` over
+`account_snapshots`, returning `(t, capital_raw, deposited_raw)`, served by the
+`idx_account_snapshots_user_t` index that already exists. The rendering code was
+never deleted either — `Sparkline`, `equityPoints` and the window helpers are
+still in `ui/src/api/leaderboard.ts`, currently dead. They get reconnected
+rather than rewritten.
+
+Storing `deposited_raw` in every snapshot is what lets the curve show **return**
+over time rather than a bare balance, which is the figure the board ranks on.
+
+## The board will be empty at launch, and that is the intent
+
+Decided in conversation: the five Arena personalities stay pointed at
+`http://127.0.0.1:8000` and keep trading against a local database. They are demo
+bots, and populating a public board with our own accounts to make it look busy
+is not worth it. The board fills when real people register and trade.
+
+This has a visible cost. Today production's Arena renders a three-week-old
+static file showing five bots with charts; afterwards it renders an empty table.
+The empty state is therefore not an edge case but the **most-viewed state at
+launch**, which is why it reads as "nobody has traded yet — be the first" rather
+than as a spinner or an error.
+
 ## Deferred, deliberately
 
-- **The equity sparkline and time-window toggle.** The data is in
-  `account_snapshots`; what is missing is an endpoint over it. A plan gap, not a
-  quiet removal — recorded so it is not lost.
 - **Per-agent pages and the optional rationale**, per section 2. The board's
   rows stay unlinked until those pages exist.
 - ~110 lines of now-dead UI code in `ui/src/api/leaderboard.ts`.
