@@ -118,9 +118,10 @@ export function LandingPage() {
                         </span>
                     </h2>
                     <p className="mt-3 max-w-xl text-muted-foreground">
-                        AgentPit runs on SKALE, a zero gas-fee Ethereum-compatible
-                        network. Every simulated trade settles on-chain instantly, giving
-                        your agents a real blockchain environment at zero cost.
+                        AgentPit is built for SKALE. Orders settle through the same
+                        conditional-token contracts the real market runs on, so the
+                        mechanics your agent learns in the sandbox are the mechanics it
+                        meets on the live chain.
                     </p>
                 </div>
 
@@ -130,25 +131,24 @@ export function LandingPage() {
                         {
                             eyebrow: "What agentpit puts on it",
                             title: "Your position is a token you hold",
-                            lead: "Not a number in our database that we could edit. The paper is fake on purpose; the machinery under it is the real thing.",
+                            lead: "The paper is fake on purpose. The machinery under it is not.",
                             icon: "🔗",
                             points: [
-                                ["A wallet of your own.", "Signing up mints an EVM keypair and funds it. Every order your agent sends is signed by that key."],
-                                ["The same contracts Polymarket runs on.", "Conditional Token Framework for the outcome tokens, a CTF exchange for matching — vendored, not reimplemented."],
-                                ["Fills settle on-chain.", "When two orders cross, the match goes to the exchange contract as a transaction. The fill is a settled trade, not a row we wrote."],
-                                ["Resolution pays out from the contract.", "A market resolves, you redeem, and the tokens burn for collateral. Nobody hands you a number."],
+                                ["Your own wallet", "minted at signup, signs every order"],
+                                ["Polymarket's contracts", "CTF tokens and exchange, vendored"],
+                                ["Fills settle on-chain", "each match is a transaction"],
+                                ["Payout from the contract", "redeem when the market resolves"],
                             ],
                         },
                         {
                             eyebrow: "Why this chain",
                             title: "What SKALE gives it",
-                            lead: "A zero gas-fee, Ethereum-compatible network — which is what makes an always-on trading agent affordable to run at all.",
+                            lead: "Built for applications that transact constantly — which an always-on agent is.",
                             icon: "⚡",
                             points: [
-                                ["Zero gas fees.", "Every order, fill and settlement costs nothing, so an agent can quote and re-quote all day without transaction costs eating the P&L."],
-                                ["Sub-second finality.", "Confirmed fills immediately. No waiting on blocks, no mempool racing, no front-running."],
-                                ["Fully EVM-compatible.", "Any wallet, library or contract that works on Ethereum works here. No rewrites, no new tooling to learn."],
-                                ["Throughput that is yours.", "A dedicated chain rather than a lane on a shared one, so your agent is not queueing behind somebody else's mint."],
+                                ["EVM-compatible", "your wallet and libraries already work"],
+                                ["Verifiable settlement", "every fill has a transaction behind it"],
+                                ["Real contracts, paper money", "the same code path as live trading"],
                             ],
                         },
                     ].map(({ eyebrow, title, lead, icon, points }) => (
@@ -164,11 +164,14 @@ export function LandingPage() {
                             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                                 {lead}
                             </p>
-                            <ul className="mt-5 space-y-3 border-t border-blue-600/10 pt-5 dark:border-blue-400/10">
+                            <ul className="mt-6 space-y-px overflow-hidden rounded-xl border border-blue-600/10 dark:border-blue-400/10">
                                 {points.map(([head, rest]) => (
-                                    <li key={head} className="text-sm leading-relaxed text-muted-foreground">
-                                        <span className="font-semibold text-foreground">{head}</span>{" "}
-                                        {rest}
+                                    <li
+                                        key={head}
+                                        className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 bg-blue-600/[0.04] px-4 py-3 dark:bg-blue-400/[0.04]"
+                                    >
+                                        <span className="text-sm font-semibold">{head}</span>
+                                        <span className="text-sm text-muted-foreground">{rest}</span>
                                     </li>
                                 ))}
                             </ul>
