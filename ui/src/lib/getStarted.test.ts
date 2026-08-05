@@ -29,12 +29,10 @@ describe("snippet builders", () => {
     expect(openclawAddBot()).toContain("skalenetwork/agentpit-examples");
   });
 
-  it("the key is scoped to the skill and the gateway is restarted", () => {
+  it("the key is scoped to the skill, not the whole machine", () => {
     const s = openclawSetKey("pk_live_123");
     expect(s).toContain("skills.entries.agentpit-reference.env.AGENTPIT_API_KEY");
     expect(s).toContain("pk_live_123");
-    // Read at startup — without this the key silently does nothing.
-    expect(s).toContain("daemon restart");
   });
 
   it("copying a terminal step yields commands only", () => {
@@ -97,7 +95,6 @@ describe("snippet builders", () => {
     expect(s).toContain("skalenetwork/agentpit-examples");
     expect(s).toContain("AGENTPIT_API_KEY");
     expect(s).toContain("pk_live_123");
-    expect(s).toContain("daemon restart");
   });
 
   it("the one-shot script never goes live by itself", () => {
@@ -126,27 +123,19 @@ describe("snippet builders", () => {
     expect(s).toContain("config unset");   // otherwise it schedules a no-op
   });
 
-  it("the daemon is restarted twice across the guide, not three times", () => {
-    // The gateway reads these values at startup, so it needs restarting once
-    // per change — and the value changes twice: armed for the dry run, then
-    // disarmed to go live. Setting the key and the flag used to sit in
-    // separate steps with a restart apiece, which bought nothing: nothing runs
-    // between them. The one-shot script already did it in one.
-    const guide = openclawSetKey("pk_live_123") + "\n" + openclawSchedule();
-    expect(guide.match(/openclaw daemon restart/g)).toHaveLength(2);
-
-    // The script runs the first half and only PRINTS the going-live half, so
-    // count what it executes: everything before the heredoc.
-    const script = oneShotScript("pk_live_123");
-    const executed = script.slice(0, script.indexOf("cat <<'NEXT'"));
-    expect(executed.match(/openclaw daemon restart/g)).toHaveLength(1);
-  });
-
-  it("both values are in place before the single restart that arms them", () => {
-    const s = openclawSetKey("pk_live_123");
-    const restart = s.indexOf("daemon restart");
-    expect(s.indexOf("AGENTPIT_API_KEY")).toBeLessThan(restart);
-    expect(s.indexOf("AGENTPIT_DRY_RUN")).toBeLessThan(restart);
+  it("the guide never restarts the daemon — a skill's env is not held by it", () => {
+    // `openclaw config set skills.entries.*.env.*` answers "No gateway restart
+    // needed." That is the CLI's strongest verdict, not a nicety: in
+    // configApplyHintForPaths it is the branch taken only when the reload plan
+    // has neither a restart trigger nor a hot-reload reason, i.e. the gateway
+    // does not hold the value at all — the skill reads it when it runs.
+    // The guide asked for two restarts; both were doing nothing.
+    const guide = [
+      openclawSetKey("pk_live_123"),
+      openclawSchedule(),
+      oneShotScript("pk_live_123"),
+    ].join("\n");
+    expect(guide).not.toContain("daemon restart");
   });
 
   it("the agent run names its target agent", () => {

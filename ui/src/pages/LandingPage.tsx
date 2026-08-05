@@ -312,9 +312,9 @@ export function LandingPage() {
                     <GsStep n="04" title="Give it your key, safety on" delay={4}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Scoped to this skill alone, not your whole machine. The
-                            dry-run flag goes in beside it so the first run cannot place
-                            an order. The gateway reads both at startup, so it has to be
-                            restarted — that is the one step people forget.
+                            dry-run flag goes in beside it, so the first run cannot place
+                            an order. Nothing to restart: the skill reads both when it
+                            runs.
                         </p>
                         <OpenClawKeyBlock />
                     </GsStep>

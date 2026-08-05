@@ -36,19 +36,17 @@ export function openclawAddBot(): string {
 
 /** Step 3 — hand it your agentpit key, and hold it back while you look.
  *
- *  Both values land before one restart. They used to sit in separate steps
- *  with a restart apiece, which bought nothing: the gateway reads them at
- *  startup and nothing runs in between. */
+ *  No `daemon restart` here or anywhere else in the guide. `config set` on a
+ *  skill's env answers "No gateway restart needed." — the gateway never holds
+ *  the value, the skill reads it when it runs. Two restarts used to sit in
+ *  these steps doing nothing. */
 export function openclawSetKey(key: string | null): string {
   return `openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY ${key ?? KEY_PLACEHOLDER}
 
 # safety on for the first run: it will print what it WOULD trade and send
 # nothing. The quotes are not decoration — config values are read as JSON, and
 # without them the 1 arrives as a number where a string is required
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
-
-# both are read at startup, so the gateway has to come back up — once, for both
-openclaw daemon restart`;
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'`;
 }
 
 /** Step 4 — look before you leap, then let it run. */
@@ -58,7 +56,6 @@ openclaw agent --agent main --message "run the agentpit-reference skill"
 
 # happy with what it picked? drop the dry run and let it trade every 15 minutes
 openclaw config unset skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN
-openclaw daemon restart
 openclaw cron add --every 15m "run the agentpit-reference skill"`;
 }
 
@@ -88,7 +85,6 @@ openclaw skills install git:https://github.com/skalenetwork/agentpit-examples --
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY "$KEY"
 # quoted because config values are read as JSON and this one has to stay a string
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
-openclaw daemon restart
 
 # 4. show what it WOULD trade — nothing is sent. "main" is the default agent
 #    id; openclaw agents list if yours is named otherwise
@@ -99,7 +95,6 @@ cat <<'NEXT'
 That was a dry run. Happy with what it picked? Then let it trade every 15 min:
 
   openclaw config unset skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN
-  openclaw daemon restart
   openclaw cron add --every 15m "run the agentpit-reference skill"
 
 NEXT`;
