@@ -39,8 +39,10 @@ openclaw daemon restart`;
 
 /** Step 4 — look before you leap, then let it run. */
 export function openclawSchedule(): string {
-  return `# first, a dry run: it prints what it WOULD trade and sends nothing
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN 1
+  return `# first, a dry run: it prints what it WOULD trade and sends nothing.
+# the quotes are not decoration — config values are read as JSON, and without
+# them the 1 arrives as a number where a string is required
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
 openclaw daemon restart
 openclaw agent --message "run the agentpit-reference skill"
 
@@ -74,7 +76,8 @@ openclaw skills install git:https://github.com/skalenetwork/agentpit-examples --
 # 3. your key, scoped to this skill rather than the whole machine,
 #    and a dry run for the first cycle
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY "$KEY"
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN 1
+# quoted because config values are read as JSON and this one has to stay a string
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
 openclaw daemon restart
 
 # 4. show what it WOULD trade — nothing is sent

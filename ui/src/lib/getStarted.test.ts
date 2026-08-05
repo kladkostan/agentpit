@@ -53,7 +53,7 @@ describe("snippet builders", () => {
     // A script pasted off a web page must not start placing orders. It ends on
     // a dry run and only PRINTS the lines that make it real.
     const s = oneShotScript("pk_live_123");
-    expect(s).toContain("AGENTPIT_DRY_RUN 1");
+    expect(s).toContain("AGENTPIT_DRY_RUN");
     const live = s.indexOf("cron add");
     const printed = s.indexOf("cat <<'NEXT'");
     expect(printed).toBeGreaterThan(-1);
@@ -69,9 +69,23 @@ describe("snippet builders", () => {
 
   it("the dry run comes before the schedule, and is switched off after", () => {
     const s = openclawSchedule();
-    expect(s.indexOf("AGENTPIT_DRY_RUN 1")).toBeGreaterThan(-1);
-    expect(s.indexOf("AGENTPIT_DRY_RUN 1")).toBeLessThan(s.indexOf("cron add"));
+    expect(s.indexOf("AGENTPIT_DRY_RUN")).toBeGreaterThan(-1);
+    expect(s.indexOf("AGENTPIT_DRY_RUN")).toBeLessThan(s.indexOf("cron add"));
     expect(s).toContain("config unset");   // otherwise it schedules a no-op
+  });
+
+  it("the dry-run value is quoted so the config parser keeps it a string", () => {
+    // `openclaw config set` parses the value as JSON before validating it, and
+    // a skill's env map is string-to-string. An unquoted 1 arrives as a number
+    // and the command fails outright with
+    //   Invalid input: expected string, received number
+    // which is where the first person to follow this guide got stuck. The
+    // reference agent compares `os.environ["AGENTPIT_DRY_RUN"] == "1"`, so no
+    // other value works either -- the quotes are the whole fix.
+    for (const snippet of [openclawSchedule(), oneShotScript("pk_live_123")]) {
+      expect(snippet).toContain(`AGENTPIT_DRY_RUN '"1"'`);
+      expect(snippet).not.toMatch(/AGENTPIT_DRY_RUN 1\b/);
+    }
   });
 
 });
