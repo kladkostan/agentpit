@@ -154,6 +154,19 @@ personalities as ours and keyed the badge to the handle — a field its subject
 can edit — so official status would have been claimable by anyone who set the
 right name. Dropped.
 
+**Deploy checklist: the valuation pass has to be turned on.** The background
+pass above is opt-in, defaulting to off, gated by `AGENTPIT_LEADERBOARD_ENABLED`.
+The only place it is set today is `deploy/env.prod.example`, a template a human
+copies once to the server's `.env`; the file does not update itself when the
+template gains a line after that copy already happened. Miss it and
+`account_snapshots` never gets a row — the board renders the exact empty state a
+brand-new site is supposed to show, so a trader who never appears looks like
+nobody has traded rather than like a broken deploy, and nothing but a log line
+says otherwise. Confirm `AGENTPIT_LEADERBOARD_ENABLED=true` is actually present
+in the server's `.env` on every deploy, the same way `SNAPSHOT_ENABLED` needs
+its own check — both are opt-in background-pass flags that default to off and
+raise no error when forgotten, only an absence that reads as normal.
+
 ### 4. Documentation — five to seven days, independent
 
 Self-hosted at `agentpit.dev/docs`, no vendor. Guides in Markdown; the API

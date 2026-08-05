@@ -449,9 +449,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             )
         else:
-            log.info(
-                "Leaderboard loop disabled "
-                "(set AGENTPIT_LEADERBOARD_ENABLED=true to enable)"
+            log.warning(
+                "Leaderboard loop disabled (set AGENTPIT_LEADERBOARD_ENABLED=true "
+                "to enable) -- the public board will stay permanently empty, and "
+                "an empty board looks identical to one nobody has traded on yet"
             )
 
         mirror_tasks: list[asyncio.Task] = []
