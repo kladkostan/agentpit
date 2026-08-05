@@ -316,13 +316,24 @@ class TableRead:
         address off a public board by default, and an account that never
         traded has nothing to rank. The house is excluded because it is the
         counterparty to nearly every trade rather than a competitor.
+
+        The two api-key columns are separate scans over a UNION ALL rather
+        than one join on `taker = key OR maker = key`. Postgres cannot
+        index-drive an OR across two columns, so the readable form planned a
+        nested loop that discarded 47.6M rows while
+        `idx_trades_taker_api_key` and `idx_trades_maker_api_key` sat unused.
+        Each branch now drives its own index. `DISTINCT` already collapses the
+        duplicate a self-matched trade produces.
         """
         rows = db.execute(
             """
             SELECT DISTINCT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
             FROM users u
-            JOIN trades t
-              ON t.TAKER_API_KEY = u.API_KEY OR t.MAKER_API_KEY = u.API_KEY
+            JOIN (
+                SELECT TAKER_API_KEY AS K FROM trades
+                UNION ALL
+                SELECT MAKER_API_KEY AS K FROM trades
+            ) t ON t.K = u.API_KEY
             WHERE u.IS_BOT = 0
             ORDER BY u.USER_ID
             """
@@ -338,12 +349,23 @@ class TableRead:
 
     @staticmethod
     def count_trades_by_user(db: psycopg.Connection) -> "dict[str, int]":
+        """user_id -> number of trades it took part in, either side.
+
+        Same UNION ALL rewrite as `list_traded_accounts`, and the reason
+        `COUNT(DISTINCT t.TRADE_ID)` is not `COUNT(*)`: the union emits one row
+        per api-key column, so an account that was both taker and maker on a
+        trade appears twice. The OR-join this replaces produced a single joined
+        row, and the figure on the board must not change.
+        """
         rows = db.execute(
             """
-            SELECT u.USER_ID AS UID, COUNT(*) AS N
+            SELECT u.USER_ID AS UID, COUNT(DISTINCT t.TRADE_ID) AS N
             FROM users u
-            JOIN trades t
-              ON t.TAKER_API_KEY = u.API_KEY OR t.MAKER_API_KEY = u.API_KEY
+            JOIN (
+                SELECT TRADE_ID, TAKER_API_KEY AS K FROM trades
+                UNION ALL
+                SELECT TRADE_ID, MAKER_API_KEY AS K FROM trades
+            ) t ON t.K = u.API_KEY
             GROUP BY u.USER_ID
             """
         ).fetchall()

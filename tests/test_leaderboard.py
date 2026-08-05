@@ -446,3 +446,48 @@ def test_prune_old_deletes_past_the_window_and_keeps_the_rest():
     check.close()
     assert [r["T"] for r in rows] == [5_000]
     db.close()
+
+
+def test_a_self_matched_trade_counts_once_not_twice():
+    """The UNION ALL rewrite emits one row per api-key column, so a trade whose
+    taker and maker are the same account arrives twice. The OR-join it replaces
+    produced a single joined row, and the count must not change: this is the
+    regression a plain COUNT(*) over the union would introduce silently."""
+    conn = fresh_test_conn()
+    user_id, _acct, key = TableWrite.create_user(
+        conn, email="selfmatch@example.com", password_hash="x", handle=None
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-self", key, key, 1_700_000_000),
+    )
+
+    assert TableRead.count_trades_by_user(conn)[user_id] == 1
+    assert [r.user_id for r in TableRead.list_traded_accounts(conn)] == [user_id]
+    conn.close()
+
+
+def test_counts_cover_both_sides_of_a_trade():
+    conn = fresh_test_conn()
+    maker_id, _m, maker_key = TableWrite.create_user(
+        conn, email="counted-maker@example.com", password_hash="x", handle=None
+    )
+    taker_id, _t, taker_key = TableWrite.create_user(
+        conn, email="counted-taker@example.com", password_hash="x", handle=None
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MAKER_API_KEY, MATCH_TIME) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-both", taker_key, maker_key, 1_700_000_000),
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
+        "VALUES (%s, %s, %s)",
+        ("t-taker-only", taker_key, 1_700_000_100),
+    )
+
+    counts = TableRead.count_trades_by_user(conn)
+    assert counts[taker_id] == 2
+    assert counts[maker_id] == 1
+    conn.close()
