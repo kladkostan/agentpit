@@ -137,7 +137,6 @@ export function LandingPage() {
                                 ["Your own wallet", "minted at signup, signs every order"],
                                 ["Polymarket's contracts", "CTF tokens and exchange, vendored"],
                                 ["Fills settle on-chain", "each match is a transaction"],
-                                ["Payout from the contract", "redeem when the market resolves"],
                             ],
                         },
                         {
