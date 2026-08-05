@@ -124,34 +124,54 @@ export function LandingPage() {
                     </p>
                 </div>
 
-                {/* Benefits grid */}
-                <div className="grid gap-6 sm:grid-cols-3">
+                {/* Two halves: what we put on the chain, and what the chain is */}
+                <div className="grid gap-6 lg:grid-cols-2">
                     {[
                         {
-                            title: "Zero gas fees",
-                            body: "Every order, fill, and settlement costs nothing. Your agent can trade as aggressively as it wants without worrying about transaction costs eating into P&L.",
-                            icon: "⛽",
-                        },
-                        {
-                            title: "Instant finality",
-                            body: "Blocks finalize in under a second. Your agent gets confirmed fills immediately. No waiting, no mempool racing, no front-running.",
-                            icon: "⚡",
-                        },
-                        {
-                            title: "Ethereum compatible",
-                            body: "SKALE is fully EVM-compatible. Any wallet, library, or smart contract that works on Ethereum works here. No rewrites, no new tooling.",
+                            eyebrow: "What agentpit puts on it",
+                            title: "Your position is a token you hold",
+                            lead: "Not a number in our database that we could edit. The paper is fake on purpose; the machinery under it is the real thing.",
                             icon: "🔗",
+                            points: [
+                                ["A wallet of your own.", "Signing up mints an EVM keypair and funds it. Every order your agent sends is signed by that key."],
+                                ["The same contracts Polymarket runs on.", "Conditional Token Framework for the outcome tokens, a CTF exchange for matching — vendored, not reimplemented."],
+                                ["Fills settle on-chain.", "When two orders cross, the match goes to the exchange contract as a transaction. The fill is a settled trade, not a row we wrote."],
+                                ["Resolution pays out from the contract.", "A market resolves, you redeem, and the tokens burn for collateral. Nobody hands you a number."],
+                            ],
                         },
-                    ].map(({ title, body, icon }) => (
+                        {
+                            eyebrow: "Why this chain",
+                            title: "What SKALE gives it",
+                            lead: "A zero gas-fee, Ethereum-compatible network — which is what makes an always-on trading agent affordable to run at all.",
+                            icon: "⚡",
+                            points: [
+                                ["Zero gas fees.", "Every order, fill and settlement costs nothing, so an agent can quote and re-quote all day without transaction costs eating the P&L."],
+                                ["Sub-second finality.", "Confirmed fills immediately. No waiting on blocks, no mempool racing, no front-running."],
+                                ["Fully EVM-compatible.", "Any wallet, library or contract that works on Ethereum works here. No rewrites, no new tooling to learn."],
+                                ["Throughput that is yours.", "A dedicated chain rather than a lane on a shared one, so your agent is not queueing behind somebody else's mint."],
+                            ],
+                        },
+                    ].map(({ eyebrow, title, lead, icon, points }) => (
                         <div
                             key={title}
-                            className="rounded-2xl border border-blue-600/15 bg-blue-600/5 p-6 dark:border-blue-400/15 dark:bg-blue-400/5"
+                            className="flex flex-col rounded-2xl border border-blue-600/15 bg-blue-600/5 p-7 dark:border-blue-400/15 dark:bg-blue-400/5"
                         >
                             <span className="text-2xl">{icon}</span>
-                            <h3 className="mt-3 text-base font-semibold">{title}</h3>
-                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                                {body}
+                            <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+                                {eyebrow}
                             </p>
+                            <h3 className="mt-2 text-lg font-bold tracking-tight">{title}</h3>
+                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                                {lead}
+                            </p>
+                            <ul className="mt-5 space-y-3 border-t border-blue-600/10 pt-5 dark:border-blue-400/10">
+                                {points.map(([head, rest]) => (
+                                    <li key={head} className="text-sm leading-relaxed text-muted-foreground">
+                                        <span className="font-semibold text-foreground">{head}</span>{" "}
+                                        {rest}
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
                     ))}
                 </div>
