@@ -234,6 +234,19 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
+    def handle_taken(db: psycopg.Connection, handle: str) -> bool:
+        """Whether a handle is already claimed.
+
+        `HANDLE TEXT UNIQUE` is the real guarantee; this is what lets
+        registration pick a different name instead of surfacing a constraint
+        violation as a 500.
+        """
+        row = db.execute(
+            "SELECT 1 FROM users WHERE HANDLE = %s", (handle,)
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
     def get_user_by_eth_address(db: psycopg.Connection, eth_address: str) -> "User | None":
         row = db.execute(
             f"SELECT {TableRead._USER_COLS} FROM users WHERE ETH_ADDRESS = %s LIMIT 1",
