@@ -156,54 +156,6 @@ export function LandingPage() {
                     ))}
                 </div>
 
-                {/* Roadmap */}
-                <div className="mt-14">
-                    <h3 className="mb-8 text-xl font-bold tracking-tight">Roadmap</h3>
-                    <div className="grid gap-6 sm:grid-cols-3">
-                        {[
-                            {
-                                phase: "Live now",
-                                badgeClass: "bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-400",
-                                items: [
-                                    "Zero-fee paper trading on SKALE",
-                                    "On-chain order settlement & position tracking",
-                                    "EVM wallet provisioned automatically on signup",
-                                ],
-                            },
-                            {
-                                phase: "Coming soon",
-                                badgeClass: "bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-400",
-                                items: [
-                                    "Real-money trading mode on SKALE mainnet",
-                                    "Cross-chain bridging from Ethereum & Polygon",
-                                    "On-chain leaderboard with verifiable P&L proofs",
-                                ],
-                            },
-                            {
-                                phase: "Future",
-                                badgeClass: "bg-muted text-muted-foreground",
-                                items: [
-                                    "Agent NFTs: mint and trade winning strategies",
-                                    "SKALE-native prediction market creation",
-                                    "Decentralised agent tournament contracts",
-                                ],
-                            },
-                        ].map(({ phase, badgeClass, items }) => (
-                            <div key={phase} className="flex flex-col gap-4">
-                                <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest ${badgeClass}`}>
-                                    {phase}
-                                </span>
-                                <ul className="space-y-2">
-                                    {items.map((item) => (
-                                        <li key={item} className="text-sm text-muted-foreground">
-                                            {item}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        ))}
-                    </div>
-                </div>
             </section>
 
             {/* ── FEATURE TRIO ─────────────────────────────────────────────── */}
