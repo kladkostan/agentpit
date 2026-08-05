@@ -104,11 +104,19 @@ def test_latest_snapshot_breaks_a_tied_t_by_insertion_order():
 
 
 class _FakeOnchainBalance:
-    """usd_balance keyed by address; unknown addresses read as `default`."""
+    """usd_balance keyed by address; unknown addresses read as `default`.
+    `deployment_id` mirrors OnchainAdmin's property -- the valuation pass reads
+    it once per account to decide whether the chain was replaced."""
 
-    def __init__(self, balances: dict[str, int] | None = None, default: int = 0):
+    def __init__(
+        self,
+        balances: dict[str, int] | None = None,
+        default: int = 0,
+        deployment_id: str = "test-deployment",
+    ):
         self._balances = balances or {}
         self._default = default
+        self.deployment_id = deployment_id
 
     def usd_balance(self, address: str) -> int:
         return self._balances.get(address, self._default)
@@ -293,3 +301,128 @@ def test_ties_break_deterministically_by_address():
         first = [r.address for r in rank_rows([a, b], sort)]
         second = [r.address for r in rank_rows([b, a], sort)]
         assert first == second, f"sort={sort} was not deterministic"
+
+
+# ----- take_snapshot: the wipe reset moves here -----------------------------
+
+
+def _seed_traded_user(email: str, *, deployed: str | None, deposited: int):
+    """A traded account with a stored deployment identity and a deposit
+    ledger. Returns (user_id, account)."""
+    conn = fresh_test_conn()
+    user_id, acct, key = TableWrite.create_user(
+        conn, email=email, password_hash="x", handle=None
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
+        "VALUES (%s, %s, %s)",
+        (f"t-{email}", key, 1_700_000_000),
+    )
+    TableWrite.set_total_deposited(conn, user_id, deposited)
+    if deployed is not None:
+        TableWrite.set_deployment_id(conn, user_id, deployed)
+    conn.close()
+    return user_id, acct
+
+
+def _deposited(user_id: str) -> int | None:
+    conn = fresh_test_conn()
+    row = conn.execute(
+        "SELECT TOTAL_DEPOSITED FROM users WHERE USER_ID = %s", (user_id,)
+    ).fetchone()
+    conn.close()
+    return None if row is None else row["TOTAL_DEPOSITED"]
+
+
+def test_the_pass_resets_a_wiped_account_the_bots_never_top_up():
+    """The whole point of moving the check here. This account authenticates by
+    API key: it never logs in and never tops up, so neither of the two earlier
+    homes for this reset could ever reach it."""
+    user_id, acct = _seed_traded_user(
+        "wiped@example.com", deployed="old-deployment", deposited=900_000_000_000
+    )
+    db = fresh_test_db()
+    onchain = _FakeOnchainBalance({acct.address: 0}, deployment_id="new-deployment")
+    service = LeaderboardService(db, onchain, _FakeAccounts(), Settings())
+
+    service.take_snapshot(1_700_003_000)
+
+    assert _deposited(user_id) == 0
+    db.close()
+
+
+def test_a_second_pass_leaves_the_reset_figure_alone():
+    """The test the two previous attempts lacked. A level-triggered check --
+    'balance is zero', 'identity does not match' evaluated against a value the
+    reset itself does not change -- re-fires every tick and erases whatever the
+    account was granted in between. The reset swaps the identity, so the second
+    pass matches and changes nothing."""
+    user_id, acct = _seed_traded_user(
+        "twice@example.com", deployed="old-deployment", deposited=900_000_000_000
+    )
+    db = fresh_test_db()
+    onchain = _FakeOnchainBalance({acct.address: 0}, deployment_id="new-deployment")
+    service = LeaderboardService(db, onchain, _FakeAccounts(), Settings())
+
+    service.take_snapshot(1_700_003_000)
+    conn = fresh_test_conn()
+    TableWrite.set_total_deposited(conn, user_id, 100_000_000_000)
+    conn.close()
+    service.take_snapshot(1_700_003_300)
+
+    assert _deposited(user_id) == 100_000_000_000
+    db.close()
+
+
+def test_an_unchanged_deployment_accumulates_untouched():
+    user_id, acct = _seed_traded_user(
+        "same@example.com", deployed="same-deployment", deposited=140_000_000_000
+    )
+    db = fresh_test_db()
+    onchain = _FakeOnchainBalance({acct.address: 0}, deployment_id="same-deployment")
+    service = LeaderboardService(db, onchain, _FakeAccounts(), Settings())
+
+    service.take_snapshot(1_700_003_000)
+
+    assert _deposited(user_id) == 140_000_000_000
+    db.close()
+
+
+def test_an_absent_identity_is_recorded_without_a_reset():
+    """The row predates the column, which is no evidence of a wipe. Recording
+    it is what makes the NEXT redeploy detectable."""
+    user_id, acct = _seed_traded_user(
+        "absent@example.com", deployed=None, deposited=140_000_000_000
+    )
+    db = fresh_test_db()
+    onchain = _FakeOnchainBalance({acct.address: 0}, deployment_id="first-seen")
+    service = LeaderboardService(db, onchain, _FakeAccounts(), Settings())
+
+    service.take_snapshot(1_700_003_000)
+
+    assert _deposited(user_id) == 140_000_000_000
+    conn = fresh_test_conn()
+    stored = TableRead.get_deployment_id(conn, user_id)
+    conn.close()
+    assert stored == "first-seen"
+    db.close()
+
+
+def test_the_snapshot_records_the_reset_figure_not_the_stale_one():
+    """Ordering, asserted directly: the reset must land before the deposit is
+    read, or the row written this tick still carries the pre-wipe number and
+    the board shows -100% until the next pass."""
+    user_id, acct = _seed_traded_user(
+        "ordering@example.com", deployed="old", deposited=900_000_000_000
+    )
+    db = fresh_test_db()
+    onchain = _FakeOnchainBalance({acct.address: 0}, deployment_id="new")
+    service = LeaderboardService(db, onchain, _FakeAccounts(), Settings())
+
+    service.take_snapshot(1_700_004_000)
+
+    conn = fresh_test_conn()
+    latest = TableRead.latest_account_snapshots(conn)
+    conn.close()
+    assert latest[user_id] == (0, 0)
+    db.close()
