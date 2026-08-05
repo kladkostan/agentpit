@@ -231,16 +231,13 @@ from agentpit.services.leaderboard_service import (
 )
 
 
-def _row(
-    name, capital, deposited, trades=1, is_house_agent=False, address="0x" + "11" * 20
-):
+def _row(name, capital, deposited, trades=1, address="0x" + "11" * 20):
     return LeaderboardRow(
         name=name,
         address=address,
         capital_raw=capital,
         deposited_raw=deposited,
         trades=trades,
-        is_house_agent=is_house_agent,
     )
 
 
@@ -296,41 +293,3 @@ def test_ties_break_deterministically_by_address():
         first = [r.address for r in rank_rows([a, b], sort)]
         second = [r.address for r in rank_rows([b, a], sort)]
         assert first == second, f"sort={sort} was not deterministic"
-
-
-def test_build_board_flags_house_agents_by_handle():
-    """The five Arena personalities are marked by matching
-    Settings.house_agent_handles against the account's handle -- a wrong
-    settings field or a case mismatch would otherwise pass the rest of the
-    suite untouched, since the only other is_house_agent test passes the bool
-    straight into LeaderboardRow without going through build_board at all."""
-    conn = fresh_test_conn()
-    house_id, house_acct, house_key = TableWrite.create_user(
-        conn, email="house-agent@example.com", password_hash="x", handle="bold"
-    )
-    other_id, other_acct, other_key = TableWrite.create_user(
-        conn, email="not-house@example.com", password_hash="x", handle="not_house"
-    )
-    conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t-house", house_key, 1_700_000_000),
-    )
-    conn.execute(
-        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME) "
-        "VALUES (%s, %s, %s)",
-        ("t-other", other_key, 1_700_000_100),
-    )
-    TableWrite.insert_account_snapshot(conn, house_id, 1_800_000_000, 10, 10)
-    TableWrite.insert_account_snapshot(conn, other_id, 1_800_000_000, 10, 10)
-    conn.close()
-
-    db = fresh_test_db()
-    # onchain/accounts are never touched by build_board -- passing None proves
-    # it, the same way the endpoint-level test proves it with raising fakes.
-    service = LeaderboardService(db, onchain=None, accounts=None, settings=Settings())
-    flagged = {row.address: row.is_house_agent for row in service.build_board()}
-    db.close()
-
-    assert flagged[house_acct.address] is True
-    assert flagged[other_acct.address] is False

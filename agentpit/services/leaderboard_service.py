@@ -21,7 +21,6 @@ class LeaderboardRow(BaseModel):
     capital_raw: int
     deposited_raw: int
     trades: int
-    is_house_agent: bool
 
     @property
     def earned_raw(self) -> int:
@@ -151,8 +150,6 @@ class LeaderboardService:
                     capital_raw=capital,
                     deposited_raw=deposited,
                     trades=counts.get(account.user_id, 0),
-                    is_house_agent=account.handle
-                    in self._settings.house_agent_handles,
                 )
             )
         return rows

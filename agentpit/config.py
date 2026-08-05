@@ -187,13 +187,6 @@ class Settings(BaseSettings):
     topup_cooldown_seconds: int = Field(
         default=86_400, validation_alias="AGENTPIT_TOPUP_COOLDOWN_SECONDS"
     )
-    # The five Arena personalities are ours: they fork one shared analysis
-    # rather than reasoning independently, and they sit next to agents that
-    # do. Labelled on the board rather than hidden from it.
-    house_agent_handles: list[str] = Field(
-        default=["bold", "cautious", "contrarian", "hybrid", "longshot"],
-        validation_alias="AGENTPIT_HOUSE_AGENT_HANDLES",
-    )
     # House gas. The mirror signs its own split transactions, so the account
     # spends gas continuously and its signup grant is not a lifetime supply:
     # production burned it in ~82 minutes and the mirror then failed silently.

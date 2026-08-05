@@ -23,7 +23,6 @@ class LeaderboardEntry(BaseModel):
     earned: str
     returnPct: float
     trades: int
-    isHouseAgent: bool
 
 
 class LeaderboardResponse(BaseModel):
@@ -58,7 +57,6 @@ def get_leaderboard(
             earned=str(row.earned_raw),
             returnPct=round(row.return_pct, 2),
             trades=row.trades,
-            isHouseAgent=row.is_house_agent,
         ).model_dump()
         for i, row in enumerate(ranked)
     ]
