@@ -44,7 +44,9 @@ export function openclawSchedule(): string {
 # them the 1 arrives as a number where a string is required
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
 openclaw daemon restart
-openclaw agent --message "run the agentpit-reference skill"
+
+# "main" is your agent — openclaw agents list, if yours is named otherwise
+openclaw agent --agent main --message "run the agentpit-reference skill"
 
 # happy with what it picked? drop the dry run and let it trade every 15 minutes
 openclaw config unset skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN
@@ -80,8 +82,9 @@ openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY "$KEY
 openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
 openclaw daemon restart
 
-# 4. show what it WOULD trade — nothing is sent
-openclaw agent --message "run the agentpit-reference skill"
+# 4. show what it WOULD trade — nothing is sent. "main" is the default agent
+#    id; openclaw agents list if yours is named otherwise
+openclaw agent --agent main --message "run the agentpit-reference skill"
 
 cat <<'NEXT'
 

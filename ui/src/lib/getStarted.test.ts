@@ -74,6 +74,17 @@ describe("snippet builders", () => {
     expect(s).toContain("config unset");   // otherwise it schedules a no-op
   });
 
+  it("the agent run names its target agent", () => {
+    // `openclaw agent --message ...` refuses to pick a session for you, even
+    // when exactly one agent exists and is marked default:
+    //   No target session selected. Use --agent <id>, --session-key <key>, ...
+    // `main` is the built-in default agent id (`openclaw agents list --json`
+    // reports it with isDefault: true on a stock install).
+    for (const snippet of [openclawSchedule(), oneShotScript("pk_live_123")]) {
+      expect(snippet).toContain("openclaw agent --agent main --message");
+    }
+  });
+
   it("the dry-run value is quoted so the config parser keeps it a string", () => {
     // `openclaw config set` parses the value as JSON before validating it, and
     // a skill's env map is string-to-string. An unquoted 1 arrives as a number
