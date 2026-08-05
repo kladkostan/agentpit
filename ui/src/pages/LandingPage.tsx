@@ -322,18 +322,19 @@ export function LandingPage() {
                         <OpenClawAddBotBlock />
                     </GsStep>
 
-                    <GsStep n="04" title="Give it your key" delay={4}>
+                    <GsStep n="04" title="Give it your key, safety on" delay={4}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Scoped to this skill alone, not your whole machine. The
-                            gateway reads it at startup, so it has to be restarted. That
-                            is the one step people forget.
+                            dry-run flag goes in beside it so the first run cannot place
+                            an order. The gateway reads both at startup, so it has to be
+                            restarted — that is the one step people forget.
                         </p>
                         <OpenClawKeyBlock />
                     </GsStep>
 
                     <GsStep n="05" title="Dry run, then let it trade" delay={5}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
-                            Look before you leap: the first run prints what it{" "}
+                            Look before you leap: this run prints what it{" "}
                             <em>would</em> trade and sends nothing. Worth repeating every
                             time you change the prompt.
                         </p>

@@ -29,23 +29,26 @@ export function openclawAddBot(): string {
   return `openclaw skills install git:https://github.com/skalenetwork/agentpit-examples`;
 }
 
-/** Step 3 — hand it your agentpit key, scoped to this skill alone. */
+/** Step 3 — hand it your agentpit key, and hold it back while you look.
+ *
+ *  Both values land before one restart. They used to sit in separate steps
+ *  with a restart apiece, which bought nothing: the gateway reads them at
+ *  startup and nothing runs in between. */
 export function openclawSetKey(key: string | null): string {
   return `openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY ${key ?? KEY_PLACEHOLDER}
 
-# the key is read at startup, so the gateway has to come back up
+# safety on for the first run: it will print what it WOULD trade and send
+# nothing. The quotes are not decoration — config values are read as JSON, and
+# without them the 1 arrives as a number where a string is required
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
+
+# both are read at startup, so the gateway has to come back up — once, for both
 openclaw daemon restart`;
 }
 
 /** Step 4 — look before you leap, then let it run. */
 export function openclawSchedule(): string {
-  return `# first, a dry run: it prints what it WOULD trade and sends nothing.
-# the quotes are not decoration — config values are read as JSON, and without
-# them the 1 arrives as a number where a string is required
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_DRY_RUN '"1"'
-openclaw daemon restart
-
-# "main" is your agent — openclaw agents list, if yours is named otherwise
+  return `# "main" is your agent — openclaw agents list, if yours is named otherwise
 openclaw agent --agent main --message "run the agentpit-reference skill"
 
 # happy with what it picked? drop the dry run and let it trade every 15 minutes

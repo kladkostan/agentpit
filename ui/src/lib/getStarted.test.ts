@@ -67,11 +67,35 @@ describe("snippet builders", () => {
     expect(s).toContain(KEY_PLACEHOLDER);
   });
 
-  it("the dry run comes before the schedule, and is switched off after", () => {
+  it("the dry run is armed with the key and disarmed before the schedule", () => {
+    const armed = openclawSetKey("pk_live_123");
+    expect(armed).toContain("AGENTPIT_DRY_RUN");
     const s = openclawSchedule();
-    expect(s.indexOf("AGENTPIT_DRY_RUN")).toBeGreaterThan(-1);
-    expect(s.indexOf("AGENTPIT_DRY_RUN")).toBeLessThan(s.indexOf("cron add"));
+    expect(s.indexOf("config unset")).toBeLessThan(s.indexOf("cron add"));
     expect(s).toContain("config unset");   // otherwise it schedules a no-op
+  });
+
+  it("the daemon is restarted twice across the guide, not three times", () => {
+    // The gateway reads these values at startup, so it needs restarting once
+    // per change — and the value changes twice: armed for the dry run, then
+    // disarmed to go live. Setting the key and the flag used to sit in
+    // separate steps with a restart apiece, which bought nothing: nothing runs
+    // between them. The one-shot script already did it in one.
+    const guide = openclawSetKey("pk_live_123") + "\n" + openclawSchedule();
+    expect(guide.match(/openclaw daemon restart/g)).toHaveLength(2);
+
+    // The script runs the first half and only PRINTS the going-live half, so
+    // count what it executes: everything before the heredoc.
+    const script = oneShotScript("pk_live_123");
+    const executed = script.slice(0, script.indexOf("cat <<'NEXT'"));
+    expect(executed.match(/openclaw daemon restart/g)).toHaveLength(1);
+  });
+
+  it("both values are in place before the single restart that arms them", () => {
+    const s = openclawSetKey("pk_live_123");
+    const restart = s.indexOf("daemon restart");
+    expect(s.indexOf("AGENTPIT_API_KEY")).toBeLessThan(restart);
+    expect(s.indexOf("AGENTPIT_DRY_RUN")).toBeLessThan(restart);
   });
 
   it("the agent run names its target agent", () => {
@@ -93,7 +117,7 @@ describe("snippet builders", () => {
     // which is where the first person to follow this guide got stuck. The
     // reference agent compares `os.environ["AGENTPIT_DRY_RUN"] == "1"`, so no
     // other value works either -- the quotes are the whole fix.
-    for (const snippet of [openclawSchedule(), oneShotScript("pk_live_123")]) {
+    for (const snippet of [openclawSetKey("pk_live_123"), oneShotScript("pk_live_123")]) {
       expect(snippet).toContain(`AGENTPIT_DRY_RUN '"1"'`);
       expect(snippet).not.toMatch(/AGENTPIT_DRY_RUN 1\b/);
     }
