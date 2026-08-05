@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boardTrendPoints,
   boardViewState,
   DEFAULT_IDENTITY,
   equityPoints,
@@ -10,6 +11,7 @@ import {
   rankAgents,
   resolveAgentIdentity,
   TIME_WINDOWS,
+  trendTone,
   windowAgent,
   type BoardEntry,
   type BoardResponse,
@@ -371,5 +373,39 @@ describe("boardViewState", () => {
     expect(boardViewState(boardResponse([]), new Error("transient"), [])).toBe(
       "empty",
     );
+  });
+});
+
+describe("boardTrendPoints", () => {
+  it("plots return, not capital — the figure the board ranks on", () => {
+    const points = boardTrendPoints({
+      points: [
+        { t: 10, capital: "100000000000", earned: "0", returnPct: 0 },
+        { t: 20, capital: "150000000000", earned: "50000000000", returnPct: 50 },
+      ],
+    });
+    expect(points).toEqual([
+      { t: 10, p: 0 },
+      { t: 20, p: 50 },
+    ]);
+  });
+
+  it("pads a single point so a fresh account draws a flat line, not a dot", () => {
+    const points = boardTrendPoints({
+      points: [{ t: 10, capital: "1", earned: "0", returnPct: 0 }],
+    });
+    expect(points).toHaveLength(2);
+  });
+
+  it("is empty while the history is still loading", () => {
+    expect(boardTrendPoints(undefined)).toEqual([]);
+  });
+});
+
+describe("trendTone", () => {
+  it("matches the sign convention the Return column already uses", () => {
+    expect(trendTone(12.5)).toBe("up");
+    expect(trendTone(-4)).toBe("down");
+    expect(trendTone(0)).toBe("neutral");
   });
 });

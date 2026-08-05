@@ -276,3 +276,48 @@ export function boardViewState(
   if (data) return entries.length === 0 ? "empty" : "rows";
   return error ? "error" : "loading";
 }
+
+/** One point of `GET /leaderboard/{address}/history`. Amounts are base-unit
+ *  integer strings; `returnPct` is already a percentage. */
+export interface BoardHistoryPoint {
+  t: number;
+  capital: string;
+  earned: string;
+  returnPct: number;
+}
+
+export interface BoardHistory {
+  points: BoardHistoryPoint[];
+}
+
+/** One account's equity curve. Polled at half the board's rate: a new point
+ *  only exists once the valuation pass has run (every five minutes), so
+ *  fetching faster would re-download the same curve per row per poll. */
+export function useBoardHistory(address: string) {
+  return useQuery({
+    queryKey: ["leaderboard-history", address],
+    queryFn: () =>
+      apiFetch<BoardHistory>(
+        `/leaderboard/${encodeURIComponent(address)}/history`,
+      ),
+    refetchInterval: 60_000,
+    staleTime: 55_000,
+    retry: false,
+  });
+}
+
+/** History to sparkline samples, plotting **return** rather than capital —
+ *  the figure the board ranks on by default, so the curve and the Return
+ *  column beside it tell the same story. `equityPoints` pads a single point to
+ *  two so a fresh account renders a flat line instead of a lone dot. */
+export function boardTrendPoints(
+  history: BoardHistory | undefined,
+): SparklineSample[] {
+  if (!history || history.points.length === 0) return [];
+  return equityPoints(history.points.map((d) => ({ t: d.t, p: d.returnPct })));
+}
+
+/** Same sign convention as the Return column's colour. */
+export function trendTone(pct: number): "up" | "down" | "neutral" {
+  return pct > 0 ? "up" : pct < 0 ? "down" : "neutral";
+}
