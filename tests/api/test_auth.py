@@ -4,6 +4,8 @@ Anvil + the deployed exchange must be running — register hits the faucet
 and grants approvals as part of every signup.
 """
 
+import re
+
 from fastapi.testclient import TestClient
 
 from agentpit.api.main import app
@@ -219,3 +221,33 @@ def test_me_rejects_invalid_api_key():
     with TestClient(app) as client:
         resp = client.get("/me", headers={"X-API-Key": "nope-not-a-key"})
         assert resp.status_code == 401
+
+
+def test_register_without_a_handle_generates_one():
+    """A leaderboard of accounts that never set a handle is a column of hex
+    strings. The generated name is a starting point -- PATCH /me still
+    changes it -- but nobody starts nameless."""
+    with TestClient(app) as client:
+        resp = client.post(
+            "/register",
+            json={"email": "nameless@example.com", "password": "hunter22hunter22"},
+        )
+        assert resp.status_code == 200, resp.text
+        handle = resp.json()["user"]["handle"]
+        assert handle, "registration must not leave the handle blank"
+        assert re.fullmatch(r"[a-zA-Z0-9_]{1,15}", handle), handle
+
+
+def test_register_with_a_handle_keeps_it():
+    """Generation fills a blank; it never overrides a choice."""
+    with TestClient(app) as client:
+        resp = client.post(
+            "/register",
+            json={
+                "email": "chosen@example.com",
+                "password": "hunter22hunter22",
+                "handle": "chosen_name",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["user"]["handle"] == "chosen_name"

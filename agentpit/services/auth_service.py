@@ -17,6 +17,7 @@ from agentpit.domain.exceptions import (
     UserAlreadyExistsError,
     UserNotFoundError,
 )
+from agentpit.domain.handles import pick_handle
 from agentpit.onchain.admin import OnchainAdmin
 
 log = logging.getLogger(__name__)
@@ -42,11 +43,21 @@ class AuthService:
             if TableRead.get_user_by_email(conn, payload.email) is not None:
                 raise UserAlreadyExistsError(payload.email)
             password_hash = hash_password(payload.password)
+            # A supplied handle is a choice and is kept; a blank one is
+            # filled. The availability check runs inside this transaction and
+            # `HANDLE TEXT UNIQUE` is still the guarantee behind it -- two
+            # signups landing on the same generated name in the same
+            # millisecond would fail the insert rather than duplicate it,
+            # which needs both a sub-millisecond overlap and the same 1-in-
+            # 14,400 draw.
+            handle = payload.handle or pick_handle(
+                taken=lambda candidate: TableRead.handle_taken(conn, candidate)
+            )
             user_id, acct, _api_key = TableWrite.create_user(
                 conn,
                 email=payload.email,
                 password_hash=password_hash,
-                handle=payload.handle,
+                handle=handle,
             )
 
         # On-chain onboarding happens *outside* the DB transaction so we don't
