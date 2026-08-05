@@ -118,10 +118,8 @@ export function LandingPage() {
                         </span>
                     </h2>
                     <p className="mt-3 max-w-xl text-muted-foreground">
-                        AgentPit is built for SKALE. Orders settle through the same
-                        conditional-token contracts the real market runs on, so the
-                        mechanics your agent learns in the sandbox are the mechanics it
-                        meets on the live chain.
+                        What your agent learns in the sandbox is what it meets on the
+                        live chain — same contracts, same settlement, paper money.
                     </p>
                 </div>
 
@@ -129,51 +127,64 @@ export function LandingPage() {
                 <div className="grid gap-6 lg:grid-cols-2">
                     {[
                         {
-                            eyebrow: "What agentpit puts on it",
+                            eyebrow: "What we put on it",
                             title: "Your position is a token you hold",
                             lead: "The paper is fake on purpose. The machinery under it is not.",
-                            icon: "🔗",
-                            points: [
-                                ["Your own wallet", "minted at signup, signs every order"],
-                                ["Polymarket's contracts", "CTF tokens and exchange, vendored"],
-                                ["Fills settle on-chain", "each match is a transaction"],
+                            icon: Wallet,
+                            tint: "#7BB8F8",
+                            rows: [
+                                ["Wallet", "minted at signup, signs every order"],
+                                ["Contracts", "Polymarket's CTF tokens and exchange"],
+                                ["Fills", "each match settles as a transaction"],
                             ],
                         },
                         {
                             eyebrow: "Why this chain",
                             title: "What SKALE gives it",
                             lead: "Built for applications that transact constantly — which an always-on agent is.",
-                            icon: "⚡",
-                            points: [
-                                ["EVM-compatible", "your wallet and libraries already work"],
-                                ["Verifiable settlement", "every fill has a transaction behind it"],
-                                ["Real contracts, paper money", "the same code path as live trading"],
+                            icon: Zap,
+                            tint: "#2D7DD2",
+                            rows: [
+                                ["EVM", "your wallet and libraries already work"],
+                                ["Receipts", "every fill has a transaction behind it"],
+                                ["Parity", "paper money, the same code path as live"],
                             ],
                         },
-                    ].map(({ eyebrow, title, lead, icon, points }) => (
+                    ].map(({ eyebrow, title, lead, icon: Icon, tint, rows }) => (
                         <div
                             key={title}
                             className="flex flex-col rounded-2xl border border-blue-600/15 bg-blue-600/5 p-7 dark:border-blue-400/15 dark:bg-blue-400/5"
                         >
-                            <span className="text-2xl">{icon}</span>
-                            <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
-                                {eyebrow}
-                            </p>
-                            <h3 className="mt-2 text-lg font-bold tracking-tight">{title}</h3>
-                            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                            <div className="flex items-center gap-3">
+                                <span
+                                    className="grid size-9 shrink-0 place-items-center rounded-lg"
+                                    style={{ backgroundColor: `${tint}1A` }}
+                                >
+                                    <Icon className="size-[18px]" style={{ color: tint }} />
+                                </span>
+                                <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                                    {eyebrow}
+                                </p>
+                            </div>
+                            <h3 className="mt-5 text-lg font-bold tracking-tight">{title}</h3>
+                            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                                 {lead}
                             </p>
-                            <ul className="mt-6 space-y-px overflow-hidden rounded-xl border border-blue-600/10 dark:border-blue-400/10">
-                                {points.map(([head, rest]) => (
-                                    <li
-                                        key={head}
-                                        className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 bg-blue-600/[0.04] px-4 py-3 dark:bg-blue-400/[0.04]"
+                            {/* An order ticket, not a bullet list: the mono key does the
+                                labelling so the value can stay one short line. */}
+                            <dl className="mt-6 divide-y divide-blue-600/10 border-t border-blue-600/10 dark:divide-blue-400/10 dark:border-blue-400/10">
+                                {rows.map(([key, value]) => (
+                                    <div
+                                        key={key}
+                                        className="grid grid-cols-1 gap-x-4 py-3 sm:grid-cols-[5.5rem_1fr] sm:items-baseline"
                                     >
-                                        <span className="text-sm font-semibold">{head}</span>
-                                        <span className="text-sm text-muted-foreground">{rest}</span>
-                                    </li>
+                                        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-blue-700 dark:text-blue-400">
+                                            {key}
+                                        </dt>
+                                        <dd className="text-sm text-foreground/85">{value}</dd>
+                                    </div>
                                 ))}
-                            </ul>
+                            </dl>
                         </div>
                     ))}
                 </div>
