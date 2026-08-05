@@ -9,6 +9,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.account_service import AccountService
+from agentpit.services.deployment_reset import reconcile_deployment
 
 log = logging.getLogger(__name__)
 
@@ -97,29 +98,6 @@ class LeaderboardService:
         value_whole = rows[0]["value"] if rows else 0.0
         return cash + int(round(value_whole * 10**6))
 
-    def _reconcile_deployment(self, conn, user_id: str) -> None:
-        """Start the deposit ledger over when the chain underneath it changed.
-
-        The database outlives a disposable anvil, so after a redeploy an
-        account holds nothing on chain while TOTAL_DEPOSITED still carries
-        every historical grant and `earned` reads deeply negative. The stored
-        identity makes that an edge rather than a level: `reset_deposits`
-        writes the new one in the same statement, so this fires once per
-        redeploy per account and is a no-op on every later tick.
-
-        This runs here, and not only in `top_up`, because `top_up` is reached
-        by logging in and pressing a button -- and the accounts that most need
-        the reset authenticate by API key and do neither. This pass sees every
-        account that has traded, whatever it authenticates with.
-        """
-        current = self._onchain.deployment_id
-        seen = TableRead.get_deployment_id(conn, user_id)
-        if seen is None:
-            # Predates the column: record it, but claim no knowledge of a wipe.
-            TableWrite.set_deployment_id(conn, user_id, current)
-        elif seen != current:
-            TableWrite.reset_deposits(conn, user_id, current)
-
     def take_snapshot(self, now: int) -> int:
         """Value every trading account. Returns the number of rows written.
 
@@ -135,8 +113,12 @@ class LeaderboardService:
                 capital = self._capital_raw(account.eth_address)
                 with self._db.write() as conn:
                     # Before the deposit is read, not after: the row written
-                    # this tick must carry the corrected figure.
-                    self._reconcile_deployment(conn, account.user_id)
+                    # this tick must carry the corrected figure. See
+                    # deployment_reset.reconcile_deployment for why this runs
+                    # here at all, not only in BalanceService.top_up.
+                    reconcile_deployment(
+                        conn, account.user_id, self._onchain.deployment_id
+                    )
                     deposited = TableRead.get_total_deposited(
                         conn, account.user_id, self._settings.paper_balance_target_raw
                     )

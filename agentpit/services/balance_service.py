@@ -8,6 +8,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.account_service import AccountService
+from agentpit.services.deployment_reset import reconcile_deployment
 
 
 class TopUpResult(BaseModel):
@@ -91,27 +92,10 @@ class BalanceService:
                 balance_raw=balance, minted_raw=0, next_allowed_at=allowed_at
             )
 
-        # A redeploy replaces the contracts, so everything granted against the
-        # old ones is gone -- but the database survives and would carry the
-        # figure forward, making `earned` read deeply negative. The stored
-        # identity makes this an edge: the reset writes the new one, so it
-        # fires exactly once per redeploy per account. (An earlier attempt used
-        # a zero native balance, which is a level -- nothing here refunds gas,
-        # so it stayed true and re-fired on every later top-up.)
-        current_deployment = self._onchain.deployment_id
-        with self._db.read() as conn:
-            seen_deployment = TableRead.get_deployment_id(conn, user.user_id)
-        if seen_deployment is None:
-            # Predates the column: record it, but claim no knowledge of a wipe.
-            with self._db.write() as conn:
-                TableWrite.set_deployment_id(
-                    conn, user.user_id, current_deployment
-                )
-        elif seen_deployment != current_deployment:
-            with self._db.write() as conn:
-                TableWrite.reset_deposits(
-                    conn, user.user_id, current_deployment
-                )
+        # See deployment_reset.reconcile_deployment for why this runs on
+        # every top-up.
+        with self._db.write() as conn:
+            reconcile_deployment(conn, user.user_id, self._onchain.deployment_id)
 
         # Claim the day atomically before minting, so the claim can never be
         # outrun by a concurrent request. The predicate reads the row's own
