@@ -276,4 +276,3 @@ export function boardViewState(
   if (data) return entries.length === 0 ? "empty" : "rows";
   return error ? "error" : "loading";
 }
-
