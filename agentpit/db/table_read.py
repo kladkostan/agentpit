@@ -282,15 +282,6 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
-    def get_password_hash_by_email(db: psycopg.Connection, email: str) -> str | None:
-        """Used by login — returns the bcrypt hash so the service can verify."""
-        row = db.execute(
-            "SELECT PASSWORD_HASH FROM users WHERE EMAIL = %s LIMIT 1",
-            (email,),
-        ).fetchone()
-        return row["PASSWORD_HASH"] if row else None
-
-    @staticmethod
     def get_password_hash_by_userid(db: psycopg.Connection, user_id: str) -> str | None:
         row = db.execute(
             "SELECT PASSWORD_HASH FROM users WHERE USER_ID = %s LIMIT 1",

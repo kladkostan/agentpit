@@ -78,6 +78,22 @@ def test_second_google_sign_in_returns_the_same_account(google):
         assert second["user"]["eth_address"] == first["user"]["eth_address"]
 
 
+def test_a_changed_google_email_still_finds_the_same_account(google):
+    """`sub` is looked up first for a reason: the address on a Google account
+    can change, and an email-first lookup would treat a returning user as a
+    stranger and mint them a second wallet."""
+    google({"cred-first": GoogleIdentity(sub="sub-ivan", email="ivan@example.com")})
+    with TestClient(app) as client:
+        first = client.post("/auth/google", json={"credential": "cred-first"}).json()
+
+    google({"cred-renamed": GoogleIdentity(sub="sub-ivan", email="ivan.new@example.com")})
+    with TestClient(app) as client:
+        again = client.post("/auth/google", json={"credential": "cred-renamed"}).json()
+        assert again["created"] is False
+        assert again["user"]["user_id"] == first["user"]["user_id"]
+        assert again["user"]["eth_address"] == first["user"]["eth_address"]
+
+
 def test_google_sign_in_links_to_a_matching_password_account(google):
     """Same person, new door. One address is one account — a second row would be
     a second wallet, a second balance and a second row on the board."""
@@ -108,6 +124,25 @@ def test_linking_ignores_email_case(google):
         ).json()
         linked = client.post("/auth/google", json={"credential": "cred-carol"}).json()
         assert linked["user"]["user_id"] == registered["user"]["user_id"]
+
+
+def test_linking_retires_the_password_that_was_on_the_account(google):
+    """Nobody verified the address when that password was set, so it cannot
+    keep working once the address's real owner arrives with a Google token."""
+    google({"cred-heidi": GoogleIdentity(sub="sub-heidi", email="heidi@example.com")})
+    with TestClient(app) as client:
+        client.post(
+            "/register",
+            json={"email": "heidi@example.com", "password": "hunter22hunter22"},
+        )
+        client.post("/auth/google", json={"credential": "cred-heidi"})
+
+        resp = client.post(
+            "/login",
+            json={"email": "heidi@example.com", "password": "hunter22hunter22"},
+        )
+        assert resp.status_code == 401
+        assert "google" in resp.json()["detail"].lower()
 
 
 def test_a_rejected_credential_is_unauthorized(google):

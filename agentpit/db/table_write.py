@@ -87,11 +87,20 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
-    def set_google_sub(
+    def link_google_identity(
         db: psycopg.Connection, user_id: str, google_sub: str
     ) -> bool:
+        """Hand an existing account to a Google identity.
+
+        The password goes with the stamp, in one statement. We never verified
+        that whoever set that password owns the address -- registration has no
+        email confirmation -- so anybody could have claimed a stranger's
+        address before its owner ever arrived. The Google token is the only
+        proof of ownership in play, so it takes the account whole.
+        """
         cur = db.execute(
-            "UPDATE users SET GOOGLE_SUB = %s WHERE USER_ID = %s",
+            "UPDATE users SET GOOGLE_SUB = %s, PASSWORD_HASH = NULL "
+            "WHERE USER_ID = %s",
             (google_sub, user_id),
         )
         return cur.rowcount > 0

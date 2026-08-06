@@ -63,14 +63,18 @@ def test_many_accounts_may_have_no_google_sub():
     conn.close()
 
 
-def test_stamps_a_google_sub_on_an_existing_account():
+def test_linking_stamps_the_sub_and_drops_the_password():
+    """Linking hands the account to the Google identity. The password that was
+    on it was never proof of anything -- nobody verified the address when it
+    was set."""
     conn = fresh_test_conn()
     user_id, _acct, _key = TableWrite.create_user(
         conn, email="link@example.com", password_hash="x", handle="Link"
     )
-    assert TableWrite.set_google_sub(conn, user_id, "sub-linked") is True
+    assert TableWrite.link_google_identity(conn, user_id, "sub-linked") is True
     found = TableRead.get_user_by_google_sub(conn, "sub-linked")
     assert found is not None and found.user_id == user_id
+    assert TableRead.get_password_hash_by_userid(conn, user_id) is None
     conn.close()
 
 

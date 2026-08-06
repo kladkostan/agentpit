@@ -1,5 +1,7 @@
 import logging
 
+from eth_account.signers.local import LocalAccount
+
 from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.auth.passwords import hash_password, verify_password
@@ -96,12 +98,28 @@ class AuthService:
         if by_email is not None:
             # The same person arriving by a new door. Splitting them across two
             # accounts is not cosmetic: each one holds its own paper balance,
-            # its own positions and its own standing on the board, so the second
-            # would put their money somewhere they cannot see from where they
-            # are standing. The email is verified -- that check is what makes
-            # this safe.
+            # its own positions and its own standing on the board, so the
+            # second would put their money somewhere they cannot see from where
+            # they are standing.
+            #
+            # The password on that row goes with the link. Google verified this
+            # address; we never did -- registration takes any address on trust
+            # -- so a password already sitting on it is not evidence that
+            # whoever set it owns the address. Leaving it would let somebody
+            # who registered a stranger's address keep a working credential on
+            # the account its real owner just walked into.
             with self._db.write() as conn:
-                TableWrite.set_google_sub(conn, by_email.user_id, identity.sub)
+                linked = TableWrite.link_google_identity(
+                    conn, by_email.user_id, identity.sub
+                )
+            if not linked:
+                # The row went away between the read above and this write.
+                # Issuing a token for it would hand back credentials for an
+                # account that no longer exists.
+                log.warning(
+                    "google link found no row for user %s", by_email.user_id
+                )
+                raise InvalidCredentialsError("invalid Google credential")
             self._maybe_reonboard(by_email)
             return self._google_response(by_email, created=False)
 
@@ -250,7 +268,7 @@ class AuthService:
                 "resetting deposited balance failed for %s", user.user_id
             )
 
-    def _onboard_new_account(self, user_id: str, acct) -> User:
+    def _onboard_new_account(self, user_id: str, acct: LocalAccount) -> User:
         """Everything a new account needs once its row exists.
 
         Both signup paths call this and neither does the work inline. Two copies
