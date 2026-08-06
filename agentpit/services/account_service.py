@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 
 from agentpit.datastructures.activity_wire import ActivityWire
 from agentpit.datastructures.market_state import MarketState
@@ -8,6 +9,30 @@ from agentpit.db.table_read import TableRead
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.polymarket.format import price_to_float, size_to_float
 from agentpit.polymarket.resolve import resolve_by_token_id
+
+
+@dataclass(frozen=True)
+class _TokenFlow:
+    """What a user's fills of one outcome token add up to.
+
+    Sizes are micro-shares and costs are price-micro x size-micro, so a ratio
+    of the two is a micro-price and needs no intermediate rounding.
+    """
+
+    bought_size: int
+    bought_cost: int
+    sold_size: int
+    sold_proceeds: int
+    last_sell_time: int
+
+    @property
+    def net_size(self) -> int:
+        return self.bought_size - self.sold_size
+
+    @property
+    def avg_buy_price_micro(self) -> int:
+        """Size-weighted micro-price paid per share; 0 when nothing was bought."""
+        return self.bought_cost // self.bought_size if self.bought_size else 0
 
 
 class AccountService:
@@ -162,25 +187,144 @@ class AccountService:
                         endDate=str(mkt.end_date) if mkt.end_date else "",
                     )
                 )
+            out.extend(
+                self._sold_out_positions(
+                    conn, eth_address, user.api_key, skip_market_ids=set(payout_micro)
+                )
+            )
+        return out
+
+    def _sold_out_positions(
+        self, conn, eth_address: str, api_key: str, *, skip_market_ids: set[int]
+    ) -> list[PositionWire]:
+        """Positions the user closed by SELLING every share back.
+
+        Such an exit leaves no REDEEM to reconstruct from and no token balance
+        for the Active list to find, so without this the position — and its
+        realized profit — disappears from the Closed tab, the predictions
+        count, Biggest Win and the P/L chart at once.
+
+        Markets that produced a redeem are skipped: that reconstruction already
+        owns them. The two cannot both apply anyway — redeeming needs tokens,
+        and a market whose fills net to zero has none left.
+        """
+        out: list[PositionWire] = []
+        for mkt in TableRead.list_markets_with_user_activity(conn, api_key):
+            if mkt.market_id in skip_market_ids:
+                continue
+            tokens = mkt.erc1155_tokens
+            for idx, (token_id, label) in enumerate(tokens):
+                flow = self._token_flow(conn, api_key, token_id)
+                # Sold out exactly: bought something, sold it all back. A
+                # partial exit still holds tokens and belongs in Active, where
+                # its remaining size and live price are the interesting numbers.
+                if flow.sold_size <= 0 or flow.net_size != 0:
+                    continue
+                size = size_to_float(flow.sold_size)
+                avg = price_to_float(flow.avg_buy_price_micro)
+                cost = avg * size
+                proceeds = flow.sold_proceeds / 1_000_000 / 1_000_000
+                pnl = proceeds - cost
+                pct = (pnl / cost * 100) if cost else 0.0
+                avg_sell = flow.sold_proceeds // flow.sold_size
+                opp_idx = 1 - idx if len(tokens) == 2 else idx
+                opp_token, opp_label = (
+                    tokens[opp_idx] if len(tokens) == 2 else (token_id, label)
+                )
+                out.append(
+                    PositionWire(
+                        proxyWallet=eth_address,
+                        asset=token_id,
+                        conditionId=mkt.condition_id.value,
+                        size=size,
+                        avgPrice=avg,
+                        initialValue=cost,
+                        currentValue=proceeds,
+                        cashPnl=pnl,
+                        percentPnl=pct,
+                        totalBought=cost,
+                        realizedPnl=pnl,
+                        percentRealizedPnl=pct,
+                        curPrice=price_to_float(avg_sell),
+                        redeemable=False,
+                        title=mkt.question,
+                        slug=mkt.slug or "",
+                        icon=mkt.icon_url or "",
+                        outcome=label,
+                        outcomeIndex=idx,
+                        oppositeOutcome=opp_label,
+                        oppositeAsset=opp_token,
+                        # The sale, not the market's end. This field is what the
+                        # P/L chart plots a closed position at, and an unresolved
+                        # market's end date is still in the future — it would put
+                        # today's realized profit ahead of today.
+                        endDate=str(flow.last_sell_time),
+                    )
+                )
         return out
 
     @staticmethod
     def _net_bought(conn, api_key: str, token_id: str) -> int:
         """Net outcome tokens the user bought of `token_id` (effective buys minus
         sells; a maker fills the side opposite the stored taker SIDE)."""
+        return AccountService._token_flow(conn, api_key, token_id).net_size
+
+    @staticmethod
+    def _token_flow(conn, api_key: str, token_id: str) -> "_TokenFlow":
+        """Everything the user's fills of one token add up to, in one pass.
+
+        Reconstructing a position that was closed by SELLING needs the sale
+        proceeds and the sale time, not just the net quantity `_net_bought`
+        reports, and it must not double-count a maker fill as the taker's side.
+
+        Two subtleties, both of which silently corrupt the numbers if missed:
+
+        1. A MAKER fills the side opposite the stored taker SIDE, so the user's
+           effective side is ``(SIDE == "BUY") == is_taker``.
+        2. A MINT match — taker BUY against maker BUY — stores the MAKER's
+           price against the taker's asset_id, so the taker really paid
+           ``1 - price``. The condition is BOTH sides buying: a taker SELL is
+           also matched by a maker BUY, and flipping there would book a sale at
+           0.51 as 0.49. ``_avg_fill_price`` gets away with testing only the
+           maker side because it pre-filters to ``SIDE = 'BUY'``; this method
+           sees every fill and must test the pair.
+        """
         rows = conn.execute(
-            "SELECT SIDE, TRADE_SIZE, TAKER_API_KEY, MAKER_API_KEY FROM trades "
+            "SELECT SIDE, PRICE, TRADE_SIZE, MATCH_TIME, MAKER_ORDERS, "
+            "TAKER_API_KEY, MAKER_API_KEY FROM trades "
             "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
             "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
             (token_id, api_key, api_key),
         ).fetchall()
-        net = 0
+        bought_size = bought_cost = sold_size = sold_proceeds = 0
+        last_sell_time = 0
         for r in rows:
             is_taker = r["TAKER_API_KEY"] == api_key
-            buying = (r["SIDE"] == "BUY") == is_taker
-            sz = int(r["TRADE_SIZE"])
-            net += sz if buying else -sz
-        return net
+            taker_side = r["SIDE"]
+            price = int(r["PRICE"])
+            size = int(r["TRADE_SIZE"])
+            mo = r["MAKER_ORDERS"]
+            try:
+                mo = json.loads(mo) if isinstance(mo, str) else mo
+                maker_side = mo[0].get("side", "SELL") if mo else "SELL"
+            except (TypeError, ValueError, IndexError, KeyError, AttributeError):
+                maker_side = "SELL"
+            if taker_side == "BUY" and maker_side == "BUY" and is_taker:
+                price = 1_000_000 - price  # mint: stored price is the maker's
+            if (taker_side == "BUY") == is_taker:
+                bought_size += size
+                bought_cost += price * size
+            else:
+                sold_size += size
+                sold_proceeds += price * size
+                last_sell_time = max(last_sell_time, int(r["MATCH_TIME"] or 0))
+        return _TokenFlow(
+            bought_size=bought_size,
+            bought_cost=bought_cost,
+            sold_size=sold_size,
+            sold_proceeds=sold_proceeds,
+            last_sell_time=last_sell_time,
+        )
 
     def total_value(self, eth_address: str) -> list[dict]:
         positions = self.list_positions(eth_address)
