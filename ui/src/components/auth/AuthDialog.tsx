@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -101,15 +100,16 @@ export function AuthDialog() {
   };
 
   const isLogin = dialogMode === "login";
-  const title = isLogin ? "Log in" : "Sign up";
-  const description = isLogin
-    ? "Welcome back. Sign in to keep trading."
-    : "Create an account — we'll mint your wallet and starter balance for you.";
-  const submitLabel = isLogin ? "Log in" : "Sign up";
-  const switchLabel = isLogin
-    ? "Don't have an account? Sign up"
-    : "Already have an account? Log in";
+  const title = isLogin ? "Log in" : "Create account";
+  const submitLabel = title;
+  const switchPrompt = isLogin ? "New here?" : "Already have an account?";
+  const switchAction = isLogin ? "Create an account" : "Log in";
   const switchTo = isLogin ? "signup" : "login";
+
+  // The product's own label device — mono micro-caps, the same one the market
+  // cards use for anything that labels data.
+  const fieldLabelClass =
+    "font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground";
 
   return (
     <Dialog
@@ -118,29 +118,22 @@ export function AuthDialog() {
         if (!next) closeDialog();
       }}
     >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+      {/* A dialog that touches both edges of a phone screen reads as a page
+          that failed to load, not as a panel. */}
+      <DialogContent
+        className="w-[calc(100%-2rem)] sm:max-w-md"
+        aria-describedby={undefined}
+      >
+        <DialogHeader className="pr-6 text-left">
+          <DialogTitle className="text-xl font-semibold tracking-tight">
+            {title}
+          </DialogTitle>
         </DialogHeader>
-        {GOOGLE_CLIENT_ID && (
-          <div className="space-y-4">
-            <GoogleSignInButton
-              onCredential={(credential) => void onGoogleCredential(credential)}
-              onError={setError}
-            />
-            <div className="flex items-center gap-3">
-              <span className="h-px flex-1 bg-border" />
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                or
-              </span>
-              <span className="h-px flex-1 bg-border" />
-            </div>
-          </div>
-        )}
         <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="auth-email">Email</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="auth-email" className={fieldLabelClass}>
+              Email
+            </Label>
             <Input
               id="auth-email"
               type="email"
@@ -152,11 +145,26 @@ export function AuthDialog() {
               disabled={submitting}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="auth-password">Password</Label>
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <Label htmlFor="auth-password" className={fieldLabelClass}>
+                Password
+              </Label>
+              {/* Say the rule before they break it, not after. */}
+              {!isLogin && (
+                // Full muted, not a faded variant: at 10px this is the only
+                // place the rule appears before somebody trips over it, and a
+                // dimmed version of it fails contrast for the people who most
+                // need to read it.
+                <span id="auth-password-hint" className={fieldLabelClass}>
+                  {MIN_PASSWORD_LENGTH}+ characters
+                </span>
+              )}
+            </div>
             <Input
               id="auth-password"
               type="password"
+              aria-describedby={isLogin ? undefined : "auth-password-hint"}
               autoComplete={isLogin ? "current-password" : "new-password"}
               required
               minLength={MIN_PASSWORD_LENGTH}
@@ -177,16 +185,34 @@ export function AuthDialog() {
           <Button type="submit" className="w-full" disabled={submitting}>
             {submitting ? `${submitLabel}…` : submitLabel}
           </Button>
-          <div className="text-center text-sm text-muted-foreground">
+          {/* Below the fields, not above them: email and password are the
+              primary path, and the divider reads as "or, instead of the
+              above". Both tabs get it — somebody who signed up with Google
+              needs the same button to sign back in. */}
+          {GOOGLE_CLIENT_ID && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="h-px flex-1 bg-border" />
+                <span className={fieldLabelClass}>or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <GoogleSignInButton
+                onCredential={(credential) => void onGoogleCredential(credential)}
+                onError={setError}
+              />
+            </div>
+          )}
+          <p className="pt-1 text-center text-sm text-muted-foreground">
+            {switchPrompt}{" "}
             <button
               type="button"
-              className="underline-offset-4 hover:underline"
+              className="font-medium text-blue-600 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 dark:text-blue-400"
               onClick={() => setDialogMode(switchTo)}
               disabled={submitting}
             >
-              {switchLabel}
+              {switchAction}
             </button>
-          </div>
+          </p>
         </form>
       </DialogContent>
     </Dialog>

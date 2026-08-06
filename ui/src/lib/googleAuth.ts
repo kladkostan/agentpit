@@ -75,6 +75,8 @@ type GoogleIdentityApi = {
           size?: "small" | "medium" | "large";
           text?: "signin_with" | "signup_with" | "continue_with";
           shape?: "rectangular" | "pill";
+          /** BCP-47 tag. Unset, GIS follows the browser's language. */
+          locale?: string;
           width?: number;
         },
       ): void;
