@@ -13,7 +13,6 @@ import {
     openclawGoLive,
     openclawInstall,
     openclawSetKey,
-    oneShotScript,
 } from "@/lib/getStarted";
 
 const FEATURES = [
@@ -379,13 +378,6 @@ function OpenClawKeyBlock() {
     return <CodeBlock className="mt-4" title="terminal" code={openclawSetKey(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} />;
 }
 
-function OneShotBlock() {
-    const { user } = useAuth();
-    const key = user?.api_key ?? null;
-    // A file, not a paste: it keeps its comments and its shebang.
-    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} copyMode="verbatim" />;
-}
-
 function OpenClawGoLiveBlock() {
     return <CodeBlock className="mt-4" title="terminal" code={openclawGoLive()} chips={[]} />;
 }
@@ -416,7 +408,6 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
         </div>
     );
 }
-
 
 function GsStep({ n, id, title, delay, children }: { n: string; id?: string; title: string; delay: number; children: ReactNode }) {
     return (
