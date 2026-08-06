@@ -146,25 +146,12 @@ export function AuthDialog() {
             />
           </div>
           <div className="space-y-1.5">
-            <div className="flex items-baseline justify-between gap-3">
-              <Label htmlFor="auth-password" className={fieldLabelClass}>
-                Password
-              </Label>
-              {/* Say the rule before they break it, not after. */}
-              {!isLogin && (
-                // Full muted, not a faded variant: at 10px this is the only
-                // place the rule appears before somebody trips over it, and a
-                // dimmed version of it fails contrast for the people who most
-                // need to read it.
-                <span id="auth-password-hint" className={fieldLabelClass}>
-                  {MIN_PASSWORD_LENGTH}+ characters
-                </span>
-              )}
-            </div>
+            <Label htmlFor="auth-password" className={fieldLabelClass}>
+              Password
+            </Label>
             <Input
               id="auth-password"
               type="password"
-              aria-describedby={isLogin ? undefined : "auth-password-hint"}
               autoComplete={isLogin ? "current-password" : "new-password"}
               required
               minLength={MIN_PASSWORD_LENGTH}
