@@ -30,10 +30,16 @@ export interface ActivityEntry {
 export function marketHref(entry: {
   eventSlug?: string | undefined;
   slug: string;
+  outcome?: string | undefined;
 }): string {
   const event = entry.eventSlug?.trim();
-  if (event) return `/events/${event}`;
-  return `/markets/${entry.slug}`;
+  if (!event) return `/markets/${entry.slug}`;
+  // The event page ranks its rows by probability, so without naming the market
+  // it would open whichever outcome is most likely — not the one that was
+  // clicked. The outcome rides along so a "No" holder lands on their own side.
+  const params = new URLSearchParams({ market: entry.slug });
+  if (entry.outcome?.trim()) params.set("outcome", entry.outcome.trim());
+  return `/events/${event}?${params.toString()}`;
 }
 
 export const ACTIVITY_PAGE_SIZE = 25;

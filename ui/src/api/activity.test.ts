@@ -78,10 +78,23 @@ describe("describeActivity", () => {
 });
 
 describe("marketHref", () => {
-  it("links at the event that groups the market", () => {
+  it("links at the event and names the market to open", () => {
     // A market is one outcome inside a question; the bare market page hides
-    // the siblings the user was choosing between.
-    expect(marketHref(entry())).toBe("/events/fed-decision-in-september");
+    // the siblings the user was choosing between. The event page ranks rows by
+    // probability, so without ?market= it opens the likeliest one instead.
+    expect(marketHref(entry())).toBe(
+      "/events/fed-decision-in-september?market=fed-hold&outcome=Yes",
+    );
+  });
+
+  it("carries the held outcome so a No holder lands on their own side", () => {
+    expect(marketHref(entry({ outcome: "No" }))).toContain("outcome=No");
+  });
+
+  it("omits the outcome when there is none", () => {
+    expect(marketHref(entry({ outcome: "" }))).toBe(
+      "/events/fed-decision-in-september?market=fed-hold",
+    );
   });
 
   it("falls back to the market when it belongs to no event", () => {

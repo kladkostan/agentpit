@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useEvent } from "@/api/events";
 import { EventChart } from "@/components/EventChart";
 import { EventLeaderboardRow } from "@/components/EventLeaderboardRow";
@@ -8,7 +8,11 @@ import { OrderTicket } from "@/components/orders/OrderTicket";
 import { RotatingSeriesPanel } from "@/components/RotatingSeriesPanel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { sortMarketsByYesMid, yesPriceMap } from "@/lib/eventOutcomes";
+import {
+  pickInitialSelection,
+  sortMarketsByYesMid,
+  yesPriceMap,
+} from "@/lib/eventOutcomes";
 import { detectRotatingSeries } from "@/lib/rotatingSeries";
 import { formatLongDate } from "@/lib/format";
 import type { MarketState } from "@/types/market";
@@ -29,20 +33,31 @@ function disabledReasonFor(state: MarketState): string | undefined {
 
 export function EventDetailPage() {
   const { slug } = useParams<{ slug: string }>();
+  // The profile links a position here with the market it belongs to, because
+  // the rows below are ranked by probability and would otherwise open the
+  // likeliest outcome rather than the clicked one.
+  const [searchParams] = useSearchParams();
+  const wantedMarket = searchParams.get("market");
+  const wantedOutcome = searchParams.get("outcome");
   const { data, isLoading, error, refetch } = useEvent(slug);
   const [selection, setSelection] = useState<{
     marketId: number;
     outcome: string;
   } | null>(null);
-  // Track whether we've already auto-selected for the current slug. Without
+  // Track whether we've already auto-selected for the current target. Without
   // this, toggling the auto-selected row to `null` would trigger an immediate
   // re-selection on the next render — the row would never visually collapse.
-  const autoSelectedSlugRef = useRef<string | null>(null);
+  //
+  // The key includes `?market=`, not just the slug: arriving at the same event
+  // asking for a different row must re-select, and React Router reuses this
+  // component when only the query string changes.
+  const autoSelectTarget = `${slug ?? ""}?${wantedMarket ?? ""}`;
+  const autoSelectedTargetRef = useRef<string | null>(null);
 
   useEffect(() => {
     setSelection(null);
-    autoSelectedSlugRef.current = null;
-  }, [slug]);
+    autoSelectedTargetRef.current = null;
+  }, [autoSelectTarget]);
 
   const midByMarket = useMemo(() => yesPriceMap(data?.markets ?? []), [data]);
   const ordered = useMemo(
@@ -65,14 +80,17 @@ export function EventDetailPage() {
   // rotating series, select the LIVE window (not the top-probability one, which
   // is often the just-closed window); otherwise the top-ranked outcome.
   useEffect(() => {
-    if (!slug || autoSelectedSlugRef.current === slug) return;
-    const first = series?.live ?? ordered[0];
-    if (!first) return;
-    const label = first.erc1155_tokens[0]?.[1];
-    if (!label) return;
-    autoSelectedSlugRef.current = slug;
-    setSelection({ marketId: first.market_id, outcome: label });
-  }, [ordered, series, slug]);
+    if (!slug || autoSelectedTargetRef.current === autoSelectTarget) return;
+    const picked = pickInitialSelection(
+      ordered,
+      series?.live ?? null,
+      wantedMarket,
+      wantedOutcome,
+    );
+    if (!picked) return;
+    autoSelectedTargetRef.current = autoSelectTarget;
+    setSelection(picked);
+  }, [ordered, series, slug, autoSelectTarget, wantedMarket, wantedOutcome]);
 
   if (isLoading) return <EventDetailSkeleton />;
 
