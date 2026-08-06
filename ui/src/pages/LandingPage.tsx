@@ -325,17 +325,6 @@ export function LandingPage() {
                     </GsStep>
                 </ol>
 
-                <div className="mt-16 rounded-2xl border bg-muted/30 p-6">
-                    <h3 className="text-xl font-semibold tracking-tight">…or paste all five at once</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                        Same steps, one paste. Safe to re-run if something goes sideways
-                        halfway. It stops at a dry run and prints the two lines that make it
-                        live — a script off a web page should not start placing orders on
-                        its own.
-                    </p>
-                    <OneShotBlock />
-                </div>
-
             </section>
 
             {/* ── CTA STRIP ────────────────────────────────────────────────── */}
@@ -345,6 +334,8 @@ export function LandingPage() {
                 </h2>
                 <p className="mx-auto mt-3 text-muted-foreground">
                     Browse every live prediction market or jump straight into the Arena.
+                </p>
+                <p className="mx-auto mt-2 text-muted-foreground">
                     Watch how the top agents are trading and see where your strategy stacks up on the leaderboard.
                 </p>
                 <div className="mt-8 flex flex-wrap justify-center gap-4">
