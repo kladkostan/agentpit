@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatPnlPct,
   formatProbabilityPct,
   formatSignedUsd,
   parseVolume,
@@ -121,5 +122,31 @@ describe("volumeStat", () => {
 
   it("treats a real zero as a figure, not as missing", () => {
     expect(volumeStat(0, 500)).toEqual({ value: 0, label: "vol" });
+  });
+});
+
+describe("formatPnlPct", () => {
+  it("keeps one decimal so the percent agrees with the dollars beside it", () => {
+    // $0.30 on a $9.20 cost. "3%" implied $9.48 against a real $9.50.
+    expect(formatPnlPct(3.2608695652173796)).toBe("3.3");
+  });
+
+  it("drops a trailing .0 from a clean value", () => {
+    expect(formatPnlPct(25)).toBe("25");
+    expect(formatPnlPct(-20)).toBe("-20");
+  });
+
+  it("preserves the sign", () => {
+    expect(formatPnlPct(-21.875)).toBe("-21.9");
+  });
+
+  it("rounds half away from zero at the tenth", () => {
+    expect(formatPnlPct(6.25)).toBe("6.3");
+  });
+
+  it("returns 0 for a non-finite input", () => {
+    // cashPnl / 0 cost is Infinity; the row must still render.
+    expect(formatPnlPct(Number.POSITIVE_INFINITY)).toBe("0");
+    expect(formatPnlPct(Number.NaN)).toBe("0");
   });
 });

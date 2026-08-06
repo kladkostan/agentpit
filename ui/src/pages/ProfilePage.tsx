@@ -10,10 +10,15 @@ import {
   useTopUpStatus,
   topUpButtonState,
 } from "@/api/portfolio";
+import {
+  describeActivity,
+  useActivity,
+  type ActivityEntry,
+} from "@/api/activity";
 import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
-import { formatVolume } from "@/lib/format";
+import { formatPnlPct, formatVolume } from "@/lib/format";
 import {
   Card,
   CardContent,
@@ -73,6 +78,7 @@ export function ProfilePage() {
     error: positionsError,
   } = usePositions(user?.eth_address);
   const { data: closedData } = useClosedPositions(user?.eth_address);
+  const { data: activityData } = useActivity(user?.eth_address);
   const { data: balance } = useUsdcBalance(Boolean(user));
   const { data: topUpStatus } = useTopUpStatus(Boolean(user));
   const topUp = useTopUp();
@@ -323,7 +329,7 @@ export function ProfilePage() {
               onSearchChange={setSearch}
             />
           ) : (
-            <ActivityList positions={positions} />
+            <ActivityList entries={activityData ?? []} />
           )}
         </div>
       )}
@@ -487,7 +493,7 @@ function PositionList({
                   <p className={`text-xs tabular-nums ${pnlColor}`}>
                     {pnlUp ? "+" : "−"}
                     {USD.format(Math.abs(position.cashPnl))} (
-                    {Math.round(position.percentPnl)}%)
+                    {formatPnlPct(position.percentPnl)}%)
                   </p>
                 </div>
               </div>
@@ -499,17 +505,8 @@ function PositionList({
   );
 }
 
-function ActivityList({
-  positions,
-}: {
-  positions: {
-    asset: string;
-    outcome: string;
-    size: number;
-    title: string;
-  }[];
-}) {
-  if (positions.length === 0) {
+function ActivityList({ entries }: { entries: ActivityEntry[] }) {
+  if (entries.length === 0) {
     return (
       <div className="p-10 text-center">
         <p className="text-base font-medium">No activity yet</p>
@@ -522,22 +519,36 @@ function ActivityList({
 
   return (
     <div className="divide-y">
-      {positions.slice(0, 8).map((position) => (
+      {entries.slice(0, 8).map((entry, i) => (
         <div
-          key={`activity-${position.asset}-${position.outcome}`}
-          className="flex items-center justify-between p-4"
+          // The feed has no id of its own, and one account can fill the same
+          // market twice in a second, so the index disambiguates.
+          key={`activity-${entry.timestamp}-${entry.conditionId}-${i}`}
+          className="flex items-center justify-between gap-4 p-4"
         >
           <div className="min-w-0">
             <p className="text-sm font-medium">
-              Position update: {position.outcome}
+              {describeActivity(entry)}
+              {entry.outcome ? ` ${entry.outcome}` : ""}
+              {entry.price > 0 ? (
+                <span className="text-muted-foreground">
+                  {" "}
+                  at {Math.round(entry.price * 100)}¢
+                </span>
+              ) : null}
             </p>
             <p className="mt-1 truncate text-xs text-muted-foreground">
-              {position.title}
+              {entry.title}
             </p>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {SHARES.format(position.size)} shares
-          </p>
+          <div className="shrink-0 text-right">
+            <p className="text-sm tabular-nums">
+              {SHARES.format(entry.size)} shares
+            </p>
+            <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+              {USD.format(entry.usdcSize)}
+            </p>
+          </div>
         </div>
       ))}
     </div>

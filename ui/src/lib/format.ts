@@ -133,3 +133,17 @@ export function volumeStat(
     volume24hr !== null ? { value: volume24hr, label: "24h vol" } : null;
   return prefer === "24h" ? (daily ?? total) : (total ?? daily);
 }
+
+/** "3.3" / "25" / "-21.9" — a P/L percentage at one decimal, dropping a
+ *  trailing ".0" so a clean value still reads as "25".
+ *
+ *  Rounding to a whole percent made the parenthetical contradict the dollars
+ *  beside it: a $0.30 gain on a $9.20 cost is 3.26%, and "+$0.30 (3%)" invites
+ *  the reader to compute 9.20 x 1.03 = $9.48 and wonder where the $9.50 came
+ *  from. The sign is preserved; callers that print their own sign should pass
+ *  an absolute value. */
+export function formatPnlPct(pct: number): string {
+  if (!Number.isFinite(pct)) return "0";
+  const rounded = Math.round(pct * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
