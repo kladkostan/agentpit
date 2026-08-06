@@ -17,3 +17,10 @@ def test_google_sign_in_is_off_by_default(monkeypatch):
 def test_google_client_id_is_read_from_the_environment(monkeypatch):
     s = _settings(monkeypatch, GOOGLE_CLIENT_ID="123-abc.apps.googleusercontent.com")
     assert s.google_client_id == "123-abc.apps.googleusercontent.com"
+
+
+def test_a_blank_client_id_is_off_not_half_on(monkeypatch):
+    """Compose's env_file parser does not reliably strip trailing whitespace,
+    and a verifier built with a blank audience matches nothing — it would 401
+    every sign-in while looking configured."""
+    assert _settings(monkeypatch, GOOGLE_CLIENT_ID="   ").google_client_id == ""

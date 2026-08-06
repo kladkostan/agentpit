@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -129,6 +129,16 @@ class Settings(BaseSettings):
     # by design — it appears in the page of every site that uses Google sign-in
     # — and this flow has no client secret at all.
     google_client_id: str = Field(default="", validation_alias="GOOGLE_CLIENT_ID")
+
+    @field_validator("google_client_id", mode="after")
+    @classmethod
+    def _strip_google_client_id(cls, value: str) -> str:
+        # Docker Compose's env_file parser does not reliably strip trailing
+        # whitespace. A value that is blank-but-present would otherwise build a
+        # verifier whose audience matches nothing -- 401ing every sign-in while
+        # looking configured -- instead of the intended "off".
+        return value.strip()
+
     leaderboard_interval_seconds: int = Field(
         default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"
     )

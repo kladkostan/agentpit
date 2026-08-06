@@ -126,6 +126,20 @@ def test_linking_ignores_email_case(google):
         assert linked["user"]["user_id"] == registered["user"]["user_id"]
 
 
+def test_password_signup_cannot_duplicate_a_google_account_by_case(google):
+    """One address is one account in both directions. The Google path mints the
+    canonical lowercase row, so an exact-match duplicate check would let a
+    case-variant registration open a second wallet for the same person."""
+    google({"cred-grace": GoogleIdentity(sub="sub-grace", email="grace@example.com")})
+    with TestClient(app) as client:
+        client.post("/auth/google", json={"credential": "cred-grace"})
+        resp = client.post(
+            "/register",
+            json={"email": "Grace@Example.com", "password": "hunter22hunter22"},
+        )
+        assert resp.status_code == 409
+
+
 def test_linking_retires_the_password_that_was_on_the_account(google):
     """Nobody verified the address when that password was set, so it cannot
     keep working once the address's real owner arrives with a Google token."""

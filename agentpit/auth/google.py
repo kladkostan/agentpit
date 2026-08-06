@@ -9,12 +9,15 @@ recommends for production.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import jwt
 from jwt import PyJWKClient, PyJWKClientConnectionError, PyJWTError
 
 from agentpit.domain.exceptions import InvalidCredentialsError
+
+log = logging.getLogger(__name__)
 
 GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs"
 
@@ -67,8 +70,11 @@ class GoogleTokenVerifier:
         except PyJWTError as exc:
             # Bad signature, wrong audience, expired, malformed, or a `kid`
             # Google no longer publishes -- to the caller they are one thing:
-            # this credential proves nothing. The reason stays in the
-            # traceback, not in the response.
+            # this credential proves nothing. The reason is logged here, never
+            # in the response, so a misconfigured client id (UI and API built
+            # with different ones) is debuggable from the server side without
+            # ever exposing the token itself.
+            log.warning("google credential rejected: %s", exc)
             raise InvalidCredentialsError("invalid Google credential") from exc
 
         # Checked after the signature rather than alongside it: `email_verified`

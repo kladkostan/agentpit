@@ -50,7 +50,7 @@ class AuthService:
 
     def register(self, payload: RegisterRequest) -> AuthResponse:
         with self._db.write() as conn:
-            if TableRead.get_user_by_email(conn, payload.email) is not None:
+            if TableRead.get_user_by_email_ci(conn, payload.email) is not None:
                 raise UserAlreadyExistsError(payload.email)
             password_hash = hash_password(payload.password)
             # A supplied handle is a choice and is kept; a blank one is
