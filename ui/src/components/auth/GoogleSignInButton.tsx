@@ -1,20 +1,54 @@
 import { useEffect, useRef } from "react";
 import { GOOGLE_CLIENT_ID, loadGoogleIdentity } from "@/lib/googleAuth";
-import { useTheme } from "@/lib/theme";
 
 interface GoogleSignInButtonProps {
   onCredential: (credential: string) => void;
   onError: (message: string) => void;
 }
 
-/** Google's own button, rendered by their script into a host element.
- *  Renders nothing when the build has no client id. */
+/** Google's four-colour G, from their branding assets. */
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-[18px] shrink-0" aria-hidden>
+      <path
+        fill="#4285F4"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.65l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.84 14.11a6.6 6.6 0 0 1 0-4.22V7.05H2.18a11 11 0 0 0 0 9.9l3.66-2.84z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 1.46 14.97.5 12 .5A11 11 0 0 0 2.18 7.05l3.66 2.84c.87-2.6 3.3-4.14 6.16-4.14z"
+      />
+    </svg>
+  );
+}
+
+/**
+ * "Continue with Google", in this product's button style rather than Google's.
+ *
+ * Google's script renders its button into a cross-origin iframe: none of it can
+ * be styled, and every variant of it carries the white logo tile, which reads
+ * as a foreign object next to our own buttons. The ID-token flow has no "start
+ * it yourself" call either — only One Tap, which the browser is free to
+ * suppress. So the real button is still Google's, rendered at exactly this
+ * element's size and laid over it at zero opacity: the click, the popup and the
+ * credential are all Google's, and the only thing that is ours is the surface
+ * underneath.
+ *
+ * Renders nothing when the build has no client id.
+ */
 export function GoogleSignInButton({
   onCredential,
   onError,
 }: GoogleSignInButtonProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const { theme } = useTheme();
   // GIS keeps the callback it was initialised with; the ref lets that fixed
   // callback reach the current handlers without re-initialising on every
   // render.
@@ -42,46 +76,33 @@ export function GoogleSignInButton({
             }
           },
         });
-        // Google renders into an iframe we cannot style, so the one thing we
-        // can match is its width — otherwise it sits visibly narrower than the
-        // full-width submit button above it. GIS takes a fixed pixel width
-        // (200–400) and nothing responsive, so the width has to be measured
-        // and re-applied whenever the column changes size. Measure the parent,
-        // not the host: the host's own width is a consequence of the button we
-        // are about to draw into it, which would make this observe itself.
+
+        // The invisible button has to cover ours exactly, or part of the
+        // surface a person is aiming at does nothing. GIS takes a fixed pixel
+        // width (200–400) and nothing responsive, so it is measured from the
+        // box and re-applied whenever that box changes size.
         const host = hostRef.current;
-        const column = host.parentElement;
+        const box = host.parentElement;
 
         const draw = () => {
-          const available = column ? column.clientWidth : host.offsetWidth;
+          const available = box ? box.clientWidth : host.offsetWidth;
           window.google?.accounts.id.renderButton(host, {
             type: "standard",
-            // The submit button above is `--primary`, which flips with the
-            // theme: near-black on light, near-white on dark. Google's button
-            // has to flip the other way or the two stack up as one weight and
-            // neither reads as the alternative to the other.
-            theme: theme === "dark" ? "filled_black" : "outline",
+            theme: "outline",
             size: "large",
             text: "continue_with",
             shape: "rectangular",
-            // The rest of the product is English-only, so ask for English.
-            // It arrives as `hl=en` on the iframe, but Google decides the
-            // final wording — a viewer whose Google account is set to another
-            // language gets that language, and there is no lever for it here.
             locale: "en",
             width: Math.min(400, Math.max(200, Math.round(available))),
           });
         };
 
         draw();
-        if (column && typeof ResizeObserver !== "undefined") {
-          // A phone rotated while the dialog is open would otherwise leave a
-          // 400px button inside a 327px column, pushing the whole dialog off
-          // the side of the screen.
+        if (box && typeof ResizeObserver !== "undefined") {
           observer = new ResizeObserver(() => {
             if (!cancelled) draw();
           });
-          observer.observe(column);
+          observer.observe(box);
         }
       })
       .catch(() => {
@@ -96,13 +117,26 @@ export function GoogleSignInButton({
       cancelled = true;
       observer?.disconnect();
     };
-    // Redrawn when the theme flips: the button's light/dark variant is baked
-    // into the iframe at render time, so it cannot follow a CSS class.
-  }, [theme]);
+  }, []);
 
   if (!GOOGLE_CLIENT_ID) return null;
-  // `overflow-hidden` is the backstop: between a resize and the redraw there is
-  // one frame where the old fixed-width button is still in place, and without
-  // it that frame widens the dialog.
-  return <div ref={hostRef} className="flex justify-center overflow-hidden" />;
+
+  return (
+    // `focus-within` and `hover` land on this box — the element the person is
+    // actually pointing at is Google's iframe on top, so the surface below has
+    // to take its states from the box they share.
+    <div className="group relative h-10 w-full">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2.5 rounded-md border border-input bg-background text-sm font-medium text-foreground transition-colors group-hover:bg-accent group-focus-within:ring-2 group-focus-within:ring-ring group-focus-within:ring-offset-2 group-focus-within:ring-offset-background"
+      >
+        <GoogleMark />
+        Continue with Google
+      </div>
+      <div
+        ref={hostRef}
+        className="absolute inset-0 overflow-hidden opacity-0 [&_iframe]:!m-0"
+      />
+    </div>
+  );
 }
