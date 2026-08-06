@@ -243,30 +243,44 @@ non-Politics event.
 New router `agentpit/api/routes/tags.py`.
 
 ```
-GET /tags                  → [{slug, label, count}, …]   curated order
-GET /tags?parent=<slug>    → [{slug, label, count}, …]   count-descending
+GET /tags → {"tags": [
+    {"slug": "politics", "label": "Politics", "count": 304,
+     "facets": [{"slug": "elections", "label": "Elections", "count": 161}, …]},
+    …
+]}
 ```
 
-Unknown or blank `parent` returns an empty list, not an error — a stale UI
-must degrade to "no subcategories", not to a broken page.
+One endpoint, facets nested, not a separate `?parent=` call. The sidebar
+renders a chevron for every category at once and must know which ones have
+subcategories before any of them is expanded; a per-parent endpoint would mean
+sixteen requests on mount or a chevron that appears only after expansion. The
+whole payload is roughly sixteen entries of at most twenty facets each.
+
+The service builds it with one `list_tag_nav` call plus one `list_tag_facets`
+call per surviving nav slug — about seventeen indexed queries, run at most once
+per cache TTL. A single self-joining query would do it in one round trip, but
+the loop is the version an implementer can read and unit-test one piece at a
+time, and the cache makes the difference invisible.
 
 `GET /events` gains `tag` and repeatable `subtag` query parameters. `category`
 is retained unchanged for backwards compatibility.
 
-Both `/tags` shapes are served through a TTL cache modelled on the existing
-`_events_cache`: keyed by `parent`, 30-second TTL (the data only changes when a
-sync runs, an hour apart), with the same bounded-dict flush so a caller passing
-random parents cannot grow it without limit. `_events_cache`'s key must be
-extended to include `tag` and the `subtags` tuple, or a filtered page would be
-served to an unfiltered request for up to one TTL.
+`/tags` takes no parameters, so its cache is a single slot holding
+`(timestamp, response)` with a 30-second TTL — the data only changes when a
+sync runs, an hour apart.
 
-Service methods `list_tag_nav()` and `list_tag_facets(parent)` go on the
-existing `EventService` — tags are facets over events, and the class is small
-enough that two methods do not warrant a new dependency-injected service.
+`_events_cache`'s key must be extended to include `tag` and the `subtags`
+tuple, or a filtered page would be served to an unfiltered request for up to
+one TTL. Both caches must be cleared in `tests/conftest.py` beside the existing
+`_events_route._events_cache.clear()`, or one test's page leaks into the next.
+
+A service method `list_tags()` goes on the existing `EventService` — tags are
+facets over events, and the class is small enough that one method does not
+warrant a new dependency-injected service.
 
 ## UI
 
-`ui/src/api/tags.ts` (new) exposes `useTagNav()` and `useTagFacets(parent)`.
+`ui/src/api/tags.ts` (new) exposes `useTags()`, one query against `/tags`.
 
 Deleted from `MarketsPage.tsx`: `CATEGORY_SUBCATEGORIES`, `SubcategoryOption`,
 `getSubcategories`, `eventMatchesKeywords`, and the `POLYMARKET_CATEGORY_ORDER`
@@ -319,9 +333,16 @@ never with `.env` sourced):
 **UI** (`npx vitest run && npm run typecheck && npm run lint && npm run build`
 from `ui/`, node environment, no `@testing-library/react`):
 
-- `useTagNav` / `useTagFacets` build the right URLs.
-- The events query serialises `tag` and repeated `subtag` parameters.
+- `listTags` requests `/tags` and returns the nested shape unchanged.
+- The events query serialises `tag` and repeated `subtag` parameters, and omits
+  them when blank.
 - No hardcoded subcategory map survives in the bundle.
+
+`ui/` runs vitest in the **node** environment with no `@testing-library/react`
+installed, so there is no way to render `MarketsPage` in a test. Its correctness
+rests on the pure functions it calls (which are tested), plus `npm run
+typecheck`, `npm run lint` and `npm run build`. Any new test must be a
+pure-logic `.ts` test.
 
 ## Rollout
 
@@ -345,5 +366,11 @@ Backend and UI ship together.
   "All", not under any category tab. Production has zero such events today, so
   this affects nothing now; if local markets return, seeding `market_tags` from
   their `CATEGORY` at creation is the fix.
+- **Pinned-series markets arrive without tags.** `agentpit/polymarket/pinned.py`
+  fetches `GET /events?slug=…` from Gamma with no tag parameter, so the markets
+  it hands to the shared creation path already resolve to `category=None`
+  today, and will likewise carry no tags. This is a pre-existing gap, not one
+  this change introduces, and it is out of scope here — the fix is to request
+  tags on that endpoint too, tracked separately.
 - Event counts beside labels, and dynamic promotion of trending tags into the
   top level, are both deliberately deferred (see Non-goals).
