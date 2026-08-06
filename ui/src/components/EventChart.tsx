@@ -1,7 +1,11 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { getPricesHistory } from "@/api/markets";
-import { MultiSparkline, PAD_Y } from "@/components/MultiSparkline";
+import {
+  LABEL_GUTTER_PX,
+  MultiSparkline,
+  PAD_Y,
+} from "@/components/MultiSparkline";
 import type { MultiSparklineSeries } from "@/components/MultiSparkline";
 import { niceChartScale } from "@/lib/chartGeometry";
 import { CHART_PALETTE } from "@/lib/chartPalette";
@@ -165,7 +169,10 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
                 <li key={`${l}-${i}`}>{l}</li>
               ))}
             </ol>
-            <div className="flex-1">
+            {/* The end-labels are drawn past the svg's right edge, so the
+                space for them is reserved here rather than inside the viewBox,
+                where it would come out of the plot itself. */}
+            <div className="flex-1" style={{ paddingRight: LABEL_GUTTER_PX }}>
               <MultiSparkline
                 series={series}
                 height={CHART_HEIGHT}
@@ -176,7 +183,10 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
           </div>
           <ol
             className="grid text-center font-mono text-[10px] tabular-nums text-muted-foreground"
-            style={{ gridTemplateColumns: `repeat(${xLabels.length}, 1fr)` }}
+            style={{
+              gridTemplateColumns: `repeat(${xLabels.length}, 1fr)`,
+              paddingRight: LABEL_GUTTER_PX,
+            }}
             aria-hidden
           >
             {xLabels.map((l, i) => (

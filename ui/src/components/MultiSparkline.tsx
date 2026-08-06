@@ -32,8 +32,12 @@ const DEFAULT_GRID_RATIOS = GRIDLINE_Y_PCT.map((p) => p / 100);
 /** Inner-padding around the projected data area, in viewBox units. */
 export const PAD_X = 4;
 export const PAD_Y = 6;
-/** Extra right margin (viewBox units) reserved for floating end-labels. */
-const LABEL_MARGIN = 120;
+/** CSS pixels the caller must leave to the RIGHT of the chart for the floating
+ *  end-labels. They are drawn past the viewBox (the svg is `overflow-visible`),
+ *  so the space has to come from layout — widening the viewBox instead would
+ *  take those units out of the plot, squeezing the data into a fraction of the
+ *  card while the date axis underneath still spanned all of it. */
+export const LABEL_GUTTER_PX = 64;
 
 /** Linearly interpolate the Y coordinate of a series at a given viewBox X. */
 function interpolateY(
@@ -98,21 +102,17 @@ export function MultiSparkline({
     );
   }, [hoverX, projected]);
 
-  // Total viewBox width expanded to fit right-side floating labels.
-  const totalWidth = width + LABEL_MARGIN;
-
   return (
     <svg
-      viewBox={`0 0 ${totalWidth} ${height}`}
+      viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
       style={{ height }}
       className={cn("block w-full cursor-crosshair overflow-visible", className)}
       aria-hidden
       onMouseMove={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
-        // Map from CSS pixel coords to viewBox coords (only the data region).
-        const dataW = (rect.width * width) / totalWidth;
-        const relX = ((e.clientX - rect.left) / dataW) * width;
+        // The svg box IS the data region now, so this is a straight ratio.
+        const relX = ((e.clientX - rect.left) / rect.width) * width;
         const clamped = Math.max(PAD_X, Math.min(width - PAD_X, relX));
         setHoverX(clamped);
       }}
@@ -211,7 +211,6 @@ export function MultiSparkline({
         // Clamp vertically so labels don't overflow the chart
         const labelY = Math.max(PAD_Y + 14, Math.min(height - PAD_Y - 6, y));
 
-        const name = s.label ?? "";
         const pctStr = fmtPct(prob);
 
         return (
