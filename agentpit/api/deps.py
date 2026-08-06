@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 
+from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.config import Settings
 from agentpit.datastructures.user import User
@@ -40,6 +41,10 @@ def get_onchain_admin() -> OnchainAdmin:
     raise RuntimeError("get_onchain_admin has not been overridden by the app factory")
 
 
+def get_google_verifier() -> GoogleTokenVerifier | None:
+    raise RuntimeError("get_google_verifier has not been overridden by the app factory")
+
+
 def get_current_user() -> User:
     raise RuntimeError("get_current_user has not been overridden by the app factory")
 
@@ -50,6 +55,9 @@ SessionDep = Annotated[DbSession, Depends(get_db_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 JwtCoderDep = Annotated[JwtCoder, Depends(get_jwt_coder)]
 OnchainAdminDep = Annotated[OnchainAdmin, Depends(get_onchain_admin)]
+GoogleVerifierDep = Annotated[
+    GoogleTokenVerifier | None, Depends(get_google_verifier)
+]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 
@@ -100,8 +108,9 @@ def get_auth_service(
     coder: JwtCoderDep,
     onchain: OnchainAdminDep,
     settings: SettingsDep,
+    google: GoogleVerifierDep,
 ) -> AuthService:
-    return AuthService(db, coder, onchain, settings)
+    return AuthService(db, coder, onchain, settings, google)
 
 
 def get_order_service(db: SessionDep, onchain: OnchainAdminDep) -> OrderService:

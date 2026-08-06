@@ -15,3 +15,14 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserPublic
+
+
+class GoogleAuthResponse(AuthResponse):
+    """`AuthResponse` plus whether this sign-in created the account.
+
+    The password path greets a new user with "your wallet is funded"; without
+    this flag the Google path cannot tell a first sign-in from a returning one,
+    and either every user gets the greeting or nobody does.
+    """
+
+    created: bool

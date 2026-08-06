@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     leaderboard_enabled: bool = Field(
         default=False, validation_alias="AGENTPIT_LEADERBOARD_ENABLED"
     )
+    # Google sign-in's audience check. Empty means the feature is off: no
+    # verifier is built and POST /auth/google answers 503. A client id is public
+    # by design — it appears in the page of every site that uses Google sign-in
+    # — and this flow has no client secret at all.
+    google_client_id: str = Field(default="", validation_alias="GOOGLE_CLIENT_ID")
     leaderboard_interval_seconds: int = Field(
         default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"
     )

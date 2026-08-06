@@ -1,9 +1,14 @@
 import logging
 
+from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.auth.passwords import hash_password, verify_password
 from agentpit.config import Settings
-from agentpit.datastructures.auth_response import AuthResponse, UserPublic
+from agentpit.datastructures.auth_response import (
+    AuthResponse,
+    GoogleAuthResponse,
+    UserPublic,
+)
 from agentpit.datastructures.login_request import LoginRequest
 from agentpit.datastructures.register_request import RegisterRequest
 from agentpit.datastructures.user import User
@@ -12,6 +17,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
     BusinessRuleError,
+    FeatureDisabledError,
     InvalidCredentialsError,
     OnboardingError,
     UserAlreadyExistsError,
@@ -32,11 +38,13 @@ class AuthService:
         coder: JwtCoder,
         onchain_admin: OnchainAdmin,
         settings: Settings,
+        google_verifier: GoogleTokenVerifier | None = None,
     ):
         self._db = db
         self._coder = coder
         self._onchain = onchain_admin
         self._settings = settings
+        self._google = google_verifier
 
     def register(self, payload: RegisterRequest) -> AuthResponse:
         with self._db.write() as conn:
@@ -59,61 +67,75 @@ class AuthService:
                 password_hash=password_hash,
                 handle=handle,
             )
+        return self._issue(self._onboard_new_account(user_id, acct))
 
-        # On-chain onboarding happens *outside* the DB transaction so we don't
-        # hold the write lock for ~1s of network round-trips.
-        try:
-            self._run_onboarding(acct)
-        except Exception as exc:
-            log.exception("on-chain onboarding failed for user %s", user_id)
-            raise OnboardingError(str(exc)) from exc
-        with self._db.write() as conn:
-            TableWrite.mark_user_onboarded(conn, user_id)
+    def google_sign_in(self, credential: str) -> GoogleAuthResponse:
+        """Sign in — or sign up — with a Google ID token.
 
-        # Recording the deposit is a separate transaction from marking the
-        # user onboarded above. If it fails -- whether the chain read or the
-        # UPDATE itself raises -- psycopg would otherwise issue COMMIT on an
-        # already-aborted transaction and Postgres turns that into a
-        # ROLLBACK, taking mark_user_onboarded down with it. A failure here
-        # must not turn a successful signup into a failed one (same treatment
-        # on-chain reads get elsewhere in this service -- see
-        # _maybe_reonboard), and TOTAL_DEPOSITED staying NULL is fine: it
-        # reads back as the grant via get_total_deposited's default.
-        try:
-            # Read the granted amount off the chain rather than from config:
-            # the grant is baked into an immutable contract by
-            # scripts/deploy_exchange.sh, while paper_balance_target_raw is a
-            # separate Settings field. They are documented to agree and today
-            # they do, but they are two sources and either can move.
-            #
-            # Read before opening the transaction, for the same reason the
-            # onboarding above sits outside one: no DB write lock should be
-            # held across a network round-trip.
-            granted = self._onchain.usd_balance(acct.address)
-            with self._db.write() as conn:
-                TableWrite.set_total_deposited(conn, user_id, granted)
-                TableWrite.set_deployment_id(
-                    conn, user_id, self._onchain.deployment_id
-                )
-        except Exception:
-            log.exception("reading granted balance failed for user %s", user_id)
+        Lookup order is `sub` first, then the verified email. `sub` is Google's
+        stable identifier; the address on a Google account can change, and an
+        email-only lookup would then treat a returning user as a stranger and
+        mint them a second wallet.
+        """
+        if self._google is None:
+            raise FeatureDisabledError("Google sign-in is not configured")
+        identity = self._google.verify(credential)
 
         with self._db.read() as conn:
-            user = TableRead.get_user_by_userid(conn, user_id)
-        if user is None:
-            raise RuntimeError("user disappeared between insert and read")
-        return self._issue(user)
+            user = TableRead.get_user_by_google_sub(conn, identity.sub)
+            by_email = (
+                TableRead.get_user_by_email_ci(conn, identity.email)
+                if user is None
+                else None
+            )
+
+        if user is not None:
+            self._maybe_reonboard(user)
+            return self._google_response(user, created=False)
+
+        if by_email is not None:
+            # The same person arriving by a new door. Splitting them across two
+            # accounts is not cosmetic: each one holds its own paper balance,
+            # its own positions and its own standing on the board, so the second
+            # would put their money somewhere they cannot see from where they
+            # are standing. The email is verified -- that check is what makes
+            # this safe.
+            with self._db.write() as conn:
+                TableWrite.set_google_sub(conn, by_email.user_id, identity.sub)
+            self._maybe_reonboard(by_email)
+            return self._google_response(by_email, created=False)
+
+        with self._db.write() as conn:
+            handle = pick_handle(
+                taken=lambda candidate: TableRead.handle_taken(conn, candidate)
+            )
+            user_id, acct, _api_key = TableWrite.create_user(
+                conn,
+                email=identity.email,
+                password_hash=None,
+                handle=handle,
+                google_sub=identity.sub,
+            )
+        return self._google_response(
+            self._onboard_new_account(user_id, acct), created=True
+        )
 
     def login(self, payload: LoginRequest) -> AuthResponse:
         with self._db.read() as conn:
-            password_hash = TableRead.get_password_hash_by_email(conn, payload.email)
-            user = (
-                TableRead.get_user_by_email(conn, payload.email)
-                if password_hash is not None
+            user = TableRead.get_user_by_email(conn, payload.email)
+            password_hash = (
+                TableRead.get_password_hash_by_userid(conn, user.user_id)
+                if user is not None
                 else None
             )
-        if password_hash is None or user is None:
+        if user is None:
             raise InvalidCredentialsError("invalid email or password")
+        if password_hash is None:
+            # This account arrived through Google and has no password. Saying
+            # "invalid email or password" would send somebody who has forgotten
+            # which door they used around in a circle. It tells an attacker the
+            # address is registered, which registration's 409 already does.
+            raise InvalidCredentialsError("this account signs in with Google")
         if not verify_password(payload.password, password_hash):
             raise InvalidCredentialsError("invalid email or password")
         self._maybe_reonboard(user)
@@ -127,9 +149,15 @@ class AuthService:
         new_password: str,
     ) -> None:
         with self._db.write() as conn:
+            if TableRead.get_user_by_userid(conn, user_id) is None:
+                raise UserNotFoundError()
             current_hash = TableRead.get_password_hash_by_userid(conn, user_id)
             if current_hash is None:
-                raise UserNotFoundError()
+                # A Google account has no password to change, and 404 "User not
+                # found" would be a lie told to somebody who is signed in.
+                # Setting one is deliberately out of scope: there is no password
+                # reset flow in the product at all.
+                raise BusinessRuleError("this account signs in with Google")
             if not verify_password(current_password, current_hash):
                 raise InvalidCredentialsError("invalid current password")
             if verify_password(new_password, current_hash):
@@ -221,6 +249,66 @@ class AuthService:
             log.exception(
                 "resetting deposited balance failed for %s", user.user_id
             )
+
+    def _onboard_new_account(self, user_id: str, acct) -> User:
+        """Everything a new account needs once its row exists.
+
+        Both signup paths call this and neither does the work inline. Two copies
+        would drift -- one gains a step the other does not -- and the difference
+        surfaces months later as an account that cannot trade.
+        """
+        # On-chain onboarding happens *outside* the DB transaction so we don't
+        # hold the write lock for ~1s of network round-trips.
+        try:
+            self._run_onboarding(acct)
+        except Exception as exc:
+            log.exception("on-chain onboarding failed for user %s", user_id)
+            raise OnboardingError(str(exc)) from exc
+        with self._db.write() as conn:
+            TableWrite.mark_user_onboarded(conn, user_id)
+
+        # Recording the deposit is a separate transaction from marking the
+        # user onboarded above. If it fails -- whether the chain read or the
+        # UPDATE itself raises -- psycopg would otherwise issue COMMIT on an
+        # already-aborted transaction and Postgres turns that into a
+        # ROLLBACK, taking mark_user_onboarded down with it. A failure here
+        # must not turn a successful signup into a failed one (same treatment
+        # on-chain reads get elsewhere in this service -- see
+        # _maybe_reonboard), and TOTAL_DEPOSITED staying NULL is fine: it
+        # reads back as the grant via get_total_deposited's default.
+        try:
+            # Read the granted amount off the chain rather than from config:
+            # the grant is baked into an immutable contract by
+            # scripts/deploy_exchange.sh, while paper_balance_target_raw is a
+            # separate Settings field. They are documented to agree and today
+            # they do, but they are two sources and either can move.
+            #
+            # Read before opening the transaction, for the same reason the
+            # onboarding above sits outside one: no DB write lock should be
+            # held across a network round-trip.
+            granted = self._onchain.usd_balance(acct.address)
+            with self._db.write() as conn:
+                TableWrite.set_total_deposited(conn, user_id, granted)
+                TableWrite.set_deployment_id(
+                    conn, user_id, self._onchain.deployment_id
+                )
+        except Exception:
+            log.exception("reading granted balance failed for user %s", user_id)
+
+        with self._db.read() as conn:
+            user = TableRead.get_user_by_userid(conn, user_id)
+        if user is None:
+            raise RuntimeError("user disappeared between insert and read")
+        return user
+
+    def _google_response(self, user: User, *, created: bool) -> GoogleAuthResponse:
+        issued = self._issue(user)
+        return GoogleAuthResponse(
+            access_token=issued.access_token,
+            token_type=issued.token_type,
+            user=issued.user,
+            created=created,
+        )
 
     def _issue(self, user: User) -> AuthResponse:
         token = self._coder.encode(user_id=user.user_id, email=user.email)

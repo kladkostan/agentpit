@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentpit.api.deps import (
     get_current_user,
     get_db_session,
+    get_google_verifier,
     get_jwt_coder,
     get_onchain_admin,
     get_settings,
@@ -32,6 +33,7 @@ from agentpit.api.routes import (
     users,
 )
 from agentpit.auth.dependencies import make_current_user_dep
+from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
@@ -412,6 +414,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     coder = JwtCoder(settings)
     onchain_admin = _build_onchain_admin(settings)
     current_user_fn = make_current_user_dep(coder)
+    # One verifier per app: it caches Google's signing keys, and a per-request
+    # instance would re-fetch them on every sign-in.
+    google_verifier = (
+        GoogleTokenVerifier(settings.google_client_id)
+        if settings.google_client_id
+        else None
+    )
+    if google_verifier is None:
+        # Said out loud because the failure is otherwise invisible: with no
+        # client id the button is absent and the endpoint 503s, which looks
+        # exactly like a deploy that forgot the variable. It is one.
+        log.info("Google sign-in disabled (set GOOGLE_CLIENT_ID to enable)")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -607,6 +621,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_jwt_coder] = lambda: coder
     app.dependency_overrides[get_onchain_admin] = lambda: onchain_admin
+    app.dependency_overrides[get_google_verifier] = lambda: google_verifier
     app.dependency_overrides[get_current_user] = current_user_fn
 
     app.add_middleware(

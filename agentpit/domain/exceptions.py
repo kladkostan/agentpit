@@ -53,6 +53,10 @@ class InvalidCredentialsError(BusinessRuleError):
     pass
 
 
+class FeatureDisabledError(DomainError):
+    """Raised when a feature is switched off by configuration rather than broken."""
+
+
 class OnboardingError(BusinessRuleError):
     """Raised when on-chain onboarding fails after the DB row is created."""
 
