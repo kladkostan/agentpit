@@ -462,31 +462,18 @@ class AccountService:
     @staticmethod
     def _avg_fill_price(conn, api_key: str, token_id: str) -> float:
         """Size-weighted price the user PAID per share of this asset, in dollars;
-        0.0 if none. Cost basis counts only BUY fills — exit SELLs reduce the
-        quantity, not the per-share entry price, so including them corrupts it.
-        And a MINT match (taker BUY vs maker BUY) records the maker's complement
-        price (1-p) against the taker's asset_id, so the taker truly paid
-        ONE - price — flip those, else the basis drifts toward $0.50."""
-        rows = conn.execute(
-            "SELECT PRICE, TRADE_SIZE, MAKER_ORDERS FROM trades "
-            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' AND SIDE = 'BUY' "
-            "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
-            (token_id, api_key, api_key),
-        ).fetchall()
-        num = den = 0
-        for r in rows:
-            price = int(r["PRICE"])
-            mo = r["MAKER_ORDERS"]
-            try:
-                mo = json.loads(mo) if isinstance(mo, str) else mo
-                maker_side = mo[0].get("side", "SELL") if mo else "SELL"
-            except (TypeError, ValueError, IndexError, KeyError, AttributeError):
-                maker_side = "SELL"
-            if maker_side == "BUY":          # MINT: recorded price is the complement
-                price = 1_000_000 - price
-            num += price * int(r["TRADE_SIZE"])
-            den += int(r["TRADE_SIZE"])
-        return price_to_float(num // den) if den else 0.0
+        0.0 if none.
+
+        Delegates to `_token_flow`, which is the only place that resolves the
+        user's effective side correctly. Filtering `SIDE = 'BUY'` here directly
+        would not do it: SIDE is the TAKER's side while the row is reachable
+        from either counterparty, so a resting ask of ours that got hit --
+        our SELL -- reads as a taker BUY and would be folded into the price we
+        supposedly paid.
+        """
+        return price_to_float(
+            AccountService._token_flow(conn, api_key, token_id).avg_buy_price_micro
+        )
 
     @staticmethod
     def _cur_price(conn, token_id: str) -> float:

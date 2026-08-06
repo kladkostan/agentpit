@@ -56,3 +56,32 @@ def test_avg_fill_price_normal_fills_unchanged():
     with db.read() as conn:
         avg = AccountService._avg_fill_price(conn, "bot", tok)
     assert abs(avg - 0.61) < 1e-6   # plain size-weighted average, no flip
+
+
+def test_avg_fill_price_excludes_the_users_own_maker_side_sells():
+    """A resting ask that gets hit is a SELL by the account that placed it.
+
+    The stored SIDE is the TAKER's, and the row is reachable from either
+    counterparty, so filtering `SIDE = 'BUY'` alone folds the account's own
+    maker-side sells into the price it supposedly PAID. Every other case here
+    leaves MAKER_API_KEY null, which is exactly why this went unnoticed: it is
+    the only shape that exercises the maker branch.
+    """
+    db = DbSession(Settings().database_url)
+    tok = "costbasis-maker-sell"
+    with db.write() as conn:
+        # Bought 100 @ 0.30 as the taker.
+        _trade(conn, token=tok, price=300_000, size=100, maker_side="SELL")
+        # Then its resting ask @ 0.60 was hit for 40: the taker bought, WE sold.
+        conn.execute(
+            "INSERT INTO trades (TRADE_ID, ASSET_ID, PRICE, TRADE_SIZE, SIDE, "
+            "STATUS, TAKER_API_KEY, MAKER_API_KEY, MAKER_ORDERS) "
+            "VALUES (%s,%s,%s,%s,'BUY','matched',%s,%s,%s)",
+            (uuid.uuid4().hex, tok, 600_000, 40, "someone-else", "bot",
+             json.dumps([{"side": "SELL", "price": 600_000}])),
+        )
+    with db.read() as conn:
+        avg = AccountService._avg_fill_price(conn, "bot", tok)
+    assert abs(avg - 0.30) < 1e-6, (
+        f"expected 0.30, got {avg} — the account's own sell was counted as a buy"
+    )

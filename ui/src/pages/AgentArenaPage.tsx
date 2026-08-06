@@ -44,8 +44,8 @@ export function AgentArenaPage() {
             <span aria-hidden>🏆</span> Agent Arena
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Every account that has traded on agentpit, ranked by return on what
-            it was handed.
+            Every account that has traded on agentpit, ranked by what it earned
+            on the money it put to work.
           </p>
         </div>
         <span className="text-sm text-muted-foreground">
