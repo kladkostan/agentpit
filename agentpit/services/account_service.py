@@ -53,6 +53,9 @@ class AccountService:
             # Scanning every market on-chain is O(market count) reads (~24s at
             # 1000 markets); scope to the handful the user actually touched.
             markets = TableRead.list_markets_with_user_activity(conn, user.api_key)
+            event_slugs = TableRead.event_slugs_by_id(
+                conn, [m.event_id for m in markets if m.event_id is not None]
+            )
         out: list[PositionWire] = []
         for mkt in markets:
             if market and mkt.condition_id.value not in market:
@@ -99,6 +102,7 @@ class AccountService:
                         outcomeIndex=idx,
                         oppositeOutcome=opp_label,
                         oppositeAsset=opp_token,
+                        eventSlug=event_slugs.get(mkt.event_id or -1, ""),
                         endDate=str(mkt.end_date) if mkt.end_date else "",
                     )
                 )
@@ -135,8 +139,16 @@ class AccountService:
                 )
 
             out: list[PositionWire] = []
+            redeemed = {
+                mid: mkt
+                for mid in payout_micro
+                if (mkt := TableRead.read_market(conn, mid)) is not None
+            }
+            event_slugs = TableRead.event_slugs_by_id(
+                conn, [m.event_id for m in redeemed.values() if m.event_id is not None]
+            )
             for market_id, payout in payout_micro.items():
-                mkt = TableRead.read_market(conn, market_id)
+                mkt = redeemed.get(market_id)
                 if mkt is None or mkt.resolved_outcome is None:
                     continue
                 tokens = mkt.erc1155_tokens
@@ -184,6 +196,7 @@ class AccountService:
                         outcomeIndex=pos_idx,
                         oppositeOutcome=tokens[opp_idx][1],
                         oppositeAsset=tokens[opp_idx][0],
+                        eventSlug=event_slugs.get(mkt.event_id or -1, ""),
                         endDate=str(mkt.end_date) if mkt.end_date else "",
                     )
                 )
@@ -209,9 +222,15 @@ class AccountService:
         and a market whose fills net to zero has none left.
         """
         out: list[PositionWire] = []
-        for mkt in TableRead.list_markets_with_user_activity(conn, api_key):
-            if mkt.market_id in skip_market_ids:
-                continue
+        candidates = [
+            m
+            for m in TableRead.list_markets_with_user_activity(conn, api_key)
+            if m.market_id not in skip_market_ids
+        ]
+        event_slugs = TableRead.event_slugs_by_id(
+            conn, [m.event_id for m in candidates if m.event_id is not None]
+        )
+        for mkt in candidates:
             tokens = mkt.erc1155_tokens
             for idx, (token_id, label) in enumerate(tokens):
                 flow = self._token_flow(conn, api_key, token_id)
@@ -254,6 +273,7 @@ class AccountService:
                         outcomeIndex=idx,
                         oppositeOutcome=opp_label,
                         oppositeAsset=opp_token,
+                        eventSlug=event_slugs.get(mkt.event_id or -1, ""),
                         # The sale, not the market's end. This field is what the
                         # P/L chart plots a closed position at, and an unresolved
                         # market's end date is still in the future — it would put
@@ -358,6 +378,18 @@ class AccountService:
             ).fetchall()
 
             acts: list[ActivityWire] = []
+            # One account fills the same handful of markets repeatedly, so the
+            # slug of an event is looked up once and reused across its rows.
+            slug_cache: dict[int, str] = {}
+
+            def event_slug_of(mkt) -> str:
+                if mkt is None or mkt.event_id is None:
+                    return ""
+                if mkt.event_id not in slug_cache:
+                    found = TableRead.event_slugs_by_id(conn, [mkt.event_id])
+                    slug_cache[mkt.event_id] = found.get(mkt.event_id, "")
+                return slug_cache[mkt.event_id]
+
             for r in trade_rows:
                 resolved = resolve_by_token_id(conn, r["ASSET_ID"])
                 mkt = resolved.market if resolved else None
@@ -382,6 +414,7 @@ class AccountService:
                     title=mkt.question if mkt else "",
                     slug=(mkt.slug or "") if mkt else "",
                     icon=(mkt.icon_url or "") if mkt else "",
+                    eventSlug=event_slug_of(mkt),
                     outcome=outcome,
                 ))
             for r in tx_rows:
@@ -402,6 +435,7 @@ class AccountService:
                     title=mkt.question if mkt else "",
                     slug=(mkt.slug or "") if mkt else "",
                     icon=(mkt.icon_url or "") if mkt else "",
+                    eventSlug=event_slug_of(mkt),
                 ))
 
         if type_filter:

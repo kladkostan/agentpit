@@ -18,6 +18,8 @@ export interface Position {
   oppositeAsset: string;
   title: string;
   slug: string;
+  /** Slug of the event grouping this market; "" when it belongs to none. */
+  eventSlug: string;
   icon: string;
   redeemable: boolean;
   endDate: string;        // market end/resolution time, unix seconds (string)

@@ -14,8 +14,26 @@ export interface ActivityEntry {
   side: string;
   title: string;
   slug: string;
+  /** Slug of the event grouping this market; "" when it belongs to none. */
+  eventSlug: string;
   icon: string;
   outcome: string;
+}
+
+/** Where a row's title should link.
+ *
+ *  The event page is the destination: a market is one outcome inside a
+ *  question, and landing on the bare market hides the siblings the user was
+ *  choosing between. Markets with no event fall back to their own page rather
+ *  than to a broken `/events/` URL.
+ */
+export function marketHref(entry: {
+  eventSlug?: string | undefined;
+  slug: string;
+}): string {
+  const event = entry.eventSlug?.trim();
+  if (event) return `/events/${event}`;
+  return `/markets/${entry.slug}`;
 }
 
 export const ACTIVITY_PAGE_SIZE = 25;

@@ -298,3 +298,34 @@ def test_sold_out_market_is_not_duplicated_by_the_redeem_path():
         )
     out = AccountService(db, onchain=None).list_closed_positions(address)  # type: ignore[arg-type]
     assert len(out) == 1
+
+
+def test_sold_out_position_carries_the_event_slug():
+    """The profile links a position at the EVENT that groups it, not at the bare
+    market — a Fed market lives inside "Fed Decision in September?" alongside its
+    sibling outcomes, and that page is what the user means to open."""
+    db, address, m = _sell_closed_fixture(
+        "eventslug@x.com", "s9", "st9",
+        buys=[(480_000, 20_000_000, 100)],
+        sells=[(510_000, 20_000_000, 300)],
+    )
+    with db.write() as conn:
+        event = TableWrite.upsert_event(
+            conn, slug="fed-decision-in-september", title="Fed Decision in September?"
+        )
+        TableWrite.attach_market_to_event(
+            conn, market_id=m.market_id, event_id=event.event_id
+        )
+    p = AccountService(db, onchain=None).list_closed_positions(address)[0]  # type: ignore[arg-type]
+    assert p.eventSlug == "fed-decision-in-september"
+
+
+def test_sold_out_position_without_an_event_leaves_the_slug_empty():
+    """An unattached market must yield "" rather than a broken /events/ link."""
+    db, address, _m = _sell_closed_fixture(
+        "noevent@x.com", "s10", "st10",
+        buys=[(480_000, 20_000_000, 100)],
+        sells=[(510_000, 20_000_000, 300)],
+    )
+    p = AccountService(db, onchain=None).list_closed_positions(address)[0]  # type: ignore[arg-type]
+    assert p.eventSlug == ""

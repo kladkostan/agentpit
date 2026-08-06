@@ -12,6 +12,7 @@ import {
 } from "@/api/portfolio";
 import {
   describeActivity,
+  marketHref,
   useActivity,
   type ActivityEntry,
 } from "@/api/activity";
@@ -468,7 +469,7 @@ function PositionList({
                 )}
                 <div className="min-w-0 flex-1">
                   <Link
-                    to={`/markets/${position.slug}`}
+                    to={marketHref(position)}
                     className="line-clamp-1 font-medium hover:underline"
                   >
                     {position.title}
@@ -537,9 +538,12 @@ function ActivityList({ entries }: { entries: ActivityEntry[] }) {
                 </span>
               ) : null}
             </p>
-            <p className="mt-1 truncate text-xs text-muted-foreground">
+            <Link
+              to={marketHref(entry)}
+              className="mt-1 block truncate text-xs text-muted-foreground hover:underline"
+            >
               {entry.title}
-            </p>
+            </Link>
           </div>
           <div className="shrink-0 text-right">
             <p className="text-sm tabular-nums">

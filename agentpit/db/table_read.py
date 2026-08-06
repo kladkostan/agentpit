@@ -573,6 +573,24 @@ class TableRead:
         return TableRead._row_to_event(row) if row else None
 
     @staticmethod
+    def event_slugs_by_id(
+        db: psycopg.Connection, event_ids: "list[int]"
+    ) -> "dict[int, str]":
+        """``{event_id: slug}`` for the ids that exist, in one query.
+
+        The account reads need an event slug per market so the profile can link
+        a position at the event that groups it rather than at the bare market.
+        Fetching each one through ``get_event_by_id`` would be a query per row.
+        """
+        wanted = sorted({int(e) for e in event_ids if e is not None})
+        if not wanted:
+            return {}
+        cur = db.execute(
+            "SELECT EVENT_ID, SLUG FROM events WHERE EVENT_ID = ANY(%s)", (wanted,)
+        )
+        return {int(r["EVENT_ID"]): str(r["SLUG"]) for r in cur.fetchall()}
+
+    @staticmethod
     def get_event_by_slug(db: psycopg.Connection, slug: str) -> "Event | None":
         row = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events WHERE SLUG = %s LIMIT 1",
