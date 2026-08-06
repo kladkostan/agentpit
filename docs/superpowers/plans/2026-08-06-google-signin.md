@@ -1523,7 +1523,7 @@ knows a client id.
     `loadGoogleIdentity(doc?: Document): Promise<void>`
   - `googleSignInRequest(credential: string): Promise<GoogleAuthResponse>`
   - `AuthValue.signInWithGoogle(credential: string): Promise<void>`
-  - `<GoogleSignInButton onCredential onError disabled />`
+  - `<GoogleSignInButton onCredential onError />`
 
 - [ ] **Step 1: Write the failing test**
 
