@@ -10,6 +10,9 @@ RUN yarn install --immutable
 COPY ui/ .
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# Optional: absent means the "Continue with Google" button does not render.
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN test -n "$VITE_API_BASE_URL" && yarn build
 
 FROM caddy:2
