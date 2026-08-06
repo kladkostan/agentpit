@@ -82,6 +82,22 @@ describe("relativeTime", () => {
 });
 
 describe("volumeStat", () => {
+  it("shows the 24h figure when the list is ranked by it", () => {
+    // Under "24hr Volume" the all-time number contradicts the order the card
+    // sits in: $16.2M above $12.0M above $1.4M, in a list sorted by the day.
+    expect(volumeStat(16_234_630, 1_566_477, "24h")).toEqual({
+      value: 1_566_477,
+      label: "24h vol",
+    });
+  });
+
+  it("falls back to all-time when a 24h figure is asked for and missing", () => {
+    expect(volumeStat(8_068_246, null, "24h")).toEqual({
+      value: 8_068_246,
+      label: "vol",
+    });
+  });
+
   it("prefers the all-time figure", () => {
     expect(volumeStat(8_068_246, 3_341_364)).toEqual({
       value: 8_068_246,

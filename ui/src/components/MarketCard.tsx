@@ -17,10 +17,13 @@ interface MarketCardProps {
   /** When provided, the card links to /events/:slug instead of /markets/:id.
    * Used for singleton-market events so the URL surface stays event-centric. */
   eventSlug?: string;
-  /** Parent event's upstream volumes (USD). All-time is preferred; the 24h
-   *  figure is the fallback for events no longer in the synced set. */
+  /** Parent event's upstream volumes (USD). Either is the fallback for the
+   *  other: events no longer in the synced set carry only the 24h figure. */
   volume?: number | null;
   volume24hr?: number | null;
+  /** Which of the two to show — set from the list's sort so the number on the
+   *  card explains the order it is in. */
+  volumePrefer?: "total" | "24h";
 }
 
 export function MarketCard({
@@ -28,6 +31,7 @@ export function MarketCard({
   eventSlug,
   volume,
   volume24hr,
+  volumePrefer = "total",
 }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
   const yesPrice = market.outcome_prices[0];
@@ -35,7 +39,7 @@ export function MarketCard({
   const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
   const closes = formatShortDate(market.end_date);
-  const vol = volumeStat(volume ?? null, volume24hr ?? null);
+  const vol = volumeStat(volume ?? null, volume24hr ?? null, volumePrefer);
   const href = eventSlug
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;

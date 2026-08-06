@@ -15,6 +15,9 @@ import type { Market } from "@/types/market";
 interface MultiMarketEventCardProps {
   event: Event;
   markets: Market[];
+  /** Which volume figure to show — set from the list's sort so the number on
+   *  the card explains the order it is in. */
+  volumePrefer?: "total" | "24h";
 }
 
 const PREVIEW_COUNT = 2;
@@ -70,6 +73,7 @@ function PreviewRow({
 export function MultiMarketEventCard({
   event,
   markets,
+  volumePrefer = "total",
 }: MultiMarketEventCardProps) {
   const midByMarket = useMemo(() => yesPriceMap(markets), [markets]);
   const ranked = useMemo(
@@ -79,7 +83,7 @@ export function MultiMarketEventCard({
   const previewMarkets = ranked.slice(0, PREVIEW_COUNT);
   const extra = ranked.length - previewMarkets.length;
   const closes = formatShortDate(event.end_date);
-  const vol = volumeStat(event.volume, event.volume_24hr);
+  const vol = volumeStat(event.volume, event.volume_24hr, volumePrefer);
   // Same badge as a single-market card: the two card shapes describe the same
   // thing, so they must not label it differently. The outcome count is still on
   // the card, in the "+N more outcomes" line below the preview.

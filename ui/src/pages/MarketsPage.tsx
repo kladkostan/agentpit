@@ -780,6 +780,9 @@ export function MarketsPage() {
               onLoadMore={() => {
                 void fetchNextPage();
               }}
+              // Show the figure the list is ranked by. Under "24hr Volume" an
+              // all-time number on the card contradicts the order it sits in.
+              volumePrefer={sortMode === "volume24h" ? "24h" : "total"}
             />
           )}
         </div>

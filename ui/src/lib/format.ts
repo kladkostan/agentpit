@@ -113,16 +113,23 @@ export function relativeTime(secsAgo: number): string {
 
 /** Which volume figure a card should show, and what to call it.
  *
- *  All-time is preferred, but only events touched by a recent sync carry it: an
- *  event that has dropped out of the synced top-N keeps its last-captured 24h
- *  figure and never gets an all-time one. Falling back to that figure — labelled
- *  as what it is — beats dropping the line, which would have blanked 545 of 962
- *  production events. */
+ *  `prefer` follows the list's sort, so the number on a card explains the order
+ *  it is in. Under "24hr Volume" a card showing its all-time figure reads as a
+ *  contradiction — $16.2M sitting above $12.0M above $1.4M, in a list that says
+ *  it is ranked by the last day.
+ *
+ *  Either figure falls back to the other, because only events touched by a
+ *  recent sync carry both: one that has dropped out of the synced top-N keeps
+ *  its last-captured 24h figure and never gets an all-time one. Showing that —
+ *  labelled as what it is — beats dropping the line, which would have blanked
+ *  545 of 962 production events. */
 export function volumeStat(
   volume: number | null,
   volume24hr: number | null,
+  prefer: "total" | "24h" = "total",
 ): { value: number; label: string } | null {
-  if (volume !== null) return { value: volume, label: "vol" };
-  if (volume24hr !== null) return { value: volume24hr, label: "24h vol" };
-  return null;
+  const total = volume !== null ? { value: volume, label: "vol" } : null;
+  const daily =
+    volume24hr !== null ? { value: volume24hr, label: "24h vol" } : null;
+  return prefer === "24h" ? (daily ?? total) : (total ?? daily);
 }
