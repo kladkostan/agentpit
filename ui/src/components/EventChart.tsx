@@ -1,15 +1,11 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { getPricesHistory } from "@/api/markets";
-import {
-  LABEL_GUTTER_PX,
-  MultiSparkline,
-  PAD_Y,
-} from "@/components/MultiSparkline";
+import { MultiSparkline, PAD_Y } from "@/components/MultiSparkline";
 import type { MultiSparklineSeries } from "@/components/MultiSparkline";
 import { niceChartScale } from "@/lib/chartGeometry";
 import { CHART_PALETTE } from "@/lib/chartPalette";
-import { carryLastPriceForward, pickChartSeries } from "@/lib/eventChartSeries";
+import { pickChartSeries } from "@/lib/eventChartSeries";
 import { formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
@@ -82,27 +78,14 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
   // recompute when the actual points payload changes.
   const queryData = queries.map((q) => q.data);
   const series = useMemo<MultiSparklineSeries[]>(
-    () => {
-      // A price holds until the next trade, so every line runs to today. A
-      // market that traded once would otherwise be a single coordinate, which
-      // draws nothing at all.
-      const now = Math.floor(Date.now() / 1000);
-      return picked.map((s, i) => ({
+    () =>
+      picked.map((s, i) => ({
         id: s.market.market_id,
         color: s.color,
-        label: s.label,
-        points: carryLastPriceForward(queryData[i]?.history ?? [], now),
-      }));
-    },
+        points: queryData[i]?.history ?? [],
+      })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [picked, ...queryData],
-  );
-
-  // An outcome with no trades draws no line. Listing it anyway sends the
-  // reader hunting for a colour that is not on the chart.
-  const traded = useMemo(
-    () => picked.filter((_, i) => (series[i]?.points.length ?? 0) > 0),
-    [picked, series],
   );
 
   const totalPoints = series.reduce((n, s) => n + s.points.length, 0);
@@ -139,7 +122,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
         </span>
         {hasData ? (
           <ol className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px]">
-            {traded.map((s, i) => {
+            {picked.map((s, i) => {
               const mid = midByMarket.get(s.market.market_id);
               const cents = mid !== undefined ? Math.round(mid * 100) : null;
               return (
@@ -159,7 +142,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
                       {cents}%
                     </span>
                   ) : null}
-                  {i < traded.length - 1 ? (
+                  {i < picked.length - 1 ? (
                     <span aria-hidden className="text-foreground/15">·</span>
                   ) : null}
                 </li>
@@ -181,10 +164,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
                 <li key={`${l}-${i}`}>{l}</li>
               ))}
             </ol>
-            {/* The end-labels are drawn past the svg's right edge, so the
-                space for them is reserved here rather than inside the viewBox,
-                where it would come out of the plot itself. */}
-            <div className="flex-1" style={{ paddingRight: LABEL_GUTTER_PX }}>
+            <div className="flex-1">
               <MultiSparkline
                 series={series}
                 height={CHART_HEIGHT}
@@ -195,10 +175,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
           </div>
           <ol
             className="grid text-center font-mono text-[10px] tabular-nums text-muted-foreground"
-            style={{
-              gridTemplateColumns: `repeat(${xLabels.length}, 1fr)`,
-              paddingRight: LABEL_GUTTER_PX,
-            }}
+            style={{ gridTemplateColumns: `repeat(${xLabels.length}, 1fr)` }}
             aria-hidden
           >
             {xLabels.map((l, i) => (

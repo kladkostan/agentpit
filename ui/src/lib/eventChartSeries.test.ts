@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Market } from "@/types/market";
-import { carryLastPriceForward, pickChartSeries } from "./eventChartSeries";
+import { pickChartSeries } from "./eventChartSeries";
 
 function fakeMarket(id: number, label: string): Market {
   // Minimal cast — only the fields pickChartSeries reads matter.
@@ -97,48 +97,5 @@ describe("pickChartSeries", () => {
       4,
     );
     expect(series[0]!.label).toBe("Will GTA VI release before June 2026?");
-  });
-});
-
-describe("carryLastPriceForward", () => {
-  const NOW = 1_800_000_000;
-
-  it("closes a one-trade series so it has a line to draw", () => {
-    // The bug this exists for: one coordinate makes smoothPath emit a bare
-    // `M x y`, which paints nothing, so the outcome vanished from the chart
-    // while the legend still listed it.
-    expect(carryLastPriceForward([{ t: NOW - 3600, p: 0.14 }], NOW)).toEqual([
-      { t: NOW - 3600, p: 0.14 },
-      { t: NOW, p: 0.14 },
-    ]);
-  });
-
-  it("carries the LAST price, not the first", () => {
-    const out = carryLastPriceForward(
-      [
-        { t: NOW - 7200, p: 0.4 },
-        { t: NOW - 3600, p: 0.62 },
-      ],
-      NOW,
-    );
-    expect(out[out.length - 1]).toEqual({ t: NOW, p: 0.62 });
-    expect(out).toHaveLength(3);
-  });
-
-  it("leaves a market that never traded empty", () => {
-    // There is no price to carry. A flat line at today's mid would draw a
-    // month of history that never happened.
-    expect(carryLastPriceForward([], NOW)).toEqual([]);
-  });
-
-  it("adds nothing when the last trade is already current", () => {
-    const points = [{ t: NOW, p: 0.5 }];
-    expect(carryLastPriceForward(points, NOW)).toBe(points);
-  });
-
-  it("does not rewrite the samples it was given", () => {
-    const points = [{ t: NOW - 60, p: 0.3 }];
-    carryLastPriceForward(points, NOW);
-    expect(points).toHaveLength(1);
   });
 });
