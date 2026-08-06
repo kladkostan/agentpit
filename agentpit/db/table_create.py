@@ -337,6 +337,14 @@ class TableCreate:
             "ALTER TABLE account_snapshots ADD COLUMN IF NOT EXISTS "
             "INVESTED_RAW BIGINT"
         )
+        # Mark-to-market gain on those still-open positions. Stored rather than
+        # derived because the realized half is the residual: banked profit is
+        # (capital - deposited) - this, and there is no other record of where
+        # the line between the two falls at snapshot time.
+        conn.execute(
+            "ALTER TABLE account_snapshots ADD COLUMN IF NOT EXISTS "
+            "UNREALIZED_RAW BIGINT"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_account_snapshots_user_t "
             "ON account_snapshots(USER_ID, T DESC)"

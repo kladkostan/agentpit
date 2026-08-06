@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_BOARD_SORT,
+  nextBoardSort,
+  sortBoard,
   boardTrendPoints,
   boardViewState,
   DEFAULT_IDENTITY,
   equityPoints,
   formatBoardAmount,
-  LEADERBOARD_SORTS,
   lastHold,
   lastTrade,
   rankAgents,
@@ -312,20 +314,6 @@ describe("lastHold", () => {
 });
 
 describe("leaderboard board data", () => {
-  it("offers the three sorts, earned first", () => {
-    // Return is gone: with the same $100k grant behind every account, it was
-    // Earned divided by a constant — the same ranking, rendered as 0.0%.
-    expect(LEADERBOARD_SORTS.map((s) => s.key)).toEqual([
-      "earned",
-      "capital",
-      "trades",
-    ]);
-  });
-
-  it("no longer offers a return sort", () => {
-    expect(LEADERBOARD_SORTS.map((s) => s.key)).not.toContain("return");
-  });
-
   it("renders base-unit strings as dollars", () => {
     expect(formatBoardAmount("100000000000")).toBe("$100,000.00");
     expect(formatBoardAmount("-2500000")).toBe("-$2.50");
@@ -415,5 +403,79 @@ describe("trendTone", () => {
     expect(trendTone(12.5)).toBe("up");
     expect(trendTone(-4)).toBe("down");
     expect(trendTone(0)).toBe("neutral");
+  });
+});
+
+describe("board sorting", () => {
+  const rows = [
+    boardEntry({ address: "0xa", unrealized: "300", trades: 1 }),
+    boardEntry({ address: "0xb", unrealized: "100", trades: 9 }),
+    boardEntry({ address: "0xc", unrealized: "200", trades: 5 }),
+  ];
+
+  it("opens on the biggest paper gain", () => {
+    expect(DEFAULT_BOARD_SORT).toEqual({ column: "unrealized", dir: "desc" });
+  });
+
+  it("sorts descending by the chosen column", () => {
+    expect(
+      sortBoard(rows, { column: "unrealized", dir: "desc" }).map((r) => r.address),
+    ).toEqual(["0xa", "0xc", "0xb"]);
+  });
+
+  it("sorts ascending when asked", () => {
+    expect(
+      sortBoard(rows, { column: "trades", dir: "asc" }).map((r) => r.address),
+    ).toEqual(["0xa", "0xc", "0xb"]);
+  });
+
+  it("breaks ties on address so rows do not swap between polls", () => {
+    const tied = [
+      boardEntry({ address: "0xz", unrealized: "5" }),
+      boardEntry({ address: "0xa", unrealized: "5" }),
+    ];
+    const order = { column: "unrealized", dir: "desc" } as const;
+    expect(sortBoard(tied, order).map((r) => r.address)).toEqual(["0xa", "0xz"]);
+    expect(sortBoard(sortBoard(tied, order), order).map((r) => r.address)).toEqual(
+      ["0xa", "0xz"],
+    );
+  });
+
+  it("leaves the input array untouched", () => {
+    const before = rows.map((r) => r.address);
+    sortBoard(rows, { column: "trades", dir: "asc" });
+    expect(rows.map((r) => r.address)).toEqual(before);
+  });
+
+  it("handles negative amounts, which paper losses are", () => {
+    const withLoss = [
+      boardEntry({ address: "0xa", unrealized: "-500" }),
+      boardEntry({ address: "0xb", unrealized: "100" }),
+    ];
+    expect(
+      sortBoard(withLoss, { column: "unrealized", dir: "desc" }).map((r) => r.address),
+    ).toEqual(["0xb", "0xa"]);
+  });
+});
+
+describe("nextBoardSort", () => {
+  it("starts a new column descending — nobody opens a board to see who is last", () => {
+    expect(nextBoardSort({ column: "trades", dir: "asc" }, "realized")).toEqual({
+      column: "realized",
+      dir: "desc",
+    });
+  });
+
+  it("flips direction when the same column is clicked again", () => {
+    const first = nextBoardSort(DEFAULT_BOARD_SORT, "capital");
+    expect(first).toEqual({ column: "capital", dir: "desc" });
+    expect(nextBoardSort(first, "capital")).toEqual({
+      column: "capital",
+      dir: "asc",
+    });
+    expect(nextBoardSort(nextBoardSort(first, "capital"), "capital")).toEqual({
+      column: "capital",
+      dir: "desc",
+    });
   });
 });

@@ -431,17 +431,19 @@ class TableRead:
     @staticmethod
     def latest_account_snapshots(
         db: psycopg.Connection,
-    ) -> "dict[str, tuple[int, int, int]]":
-        """user_id -> (capital_raw, deposited_raw, invested_raw), newest row.
+    ) -> "dict[str, tuple[int, int, int, int]]":
+        """user_id -> (capital, deposited, invested, unrealized), newest row.
 
-        INVESTED_RAW is NULL on rows written before the column existed; those
-        read as 0 rather than being backfilled, because the positions they
-        valued have moved since and any backfill would be a guess.
+        INVESTED_RAW and UNREALIZED_RAW are NULL on rows written before those
+        columns existed; both read as 0 rather than being backfilled, because
+        the positions they valued have moved since and any backfill would be a
+        guess.
         """
         rows = db.execute(
             """
             SELECT DISTINCT ON (USER_ID)
-                   USER_ID, CAPITAL_RAW, DEPOSITED_RAW, INVESTED_RAW
+                   USER_ID, CAPITAL_RAW, DEPOSITED_RAW, INVESTED_RAW,
+                   UNREALIZED_RAW
             FROM account_snapshots
             ORDER BY USER_ID, T DESC, SNAPSHOT_ID DESC
             """
@@ -451,6 +453,7 @@ class TableRead:
                 int(r["CAPITAL_RAW"]),
                 int(r["DEPOSITED_RAW"]),
                 int(r["INVESTED_RAW"] or 0),
+                int(r["UNREALIZED_RAW"] or 0),
             )
             for r in rows
         }

@@ -30,6 +30,10 @@ class LeaderboardEntry(BaseModel):
     earned: str
     #: Cost basis of the open positions -- what the account put to work.
     invested: str
+    #: Mark-to-market gain on those open positions -- profit only on paper.
+    unrealized: str
+    #: Profit actually banked: total minus whatever is still riding.
+    realized: str
     returnPct: float
     trades: int
 
@@ -65,6 +69,8 @@ def get_leaderboard(
             capital=str(row.capital_raw),
             earned=str(row.earned_raw),
             invested=str(row.invested_raw),
+            unrealized=str(row.unrealized_raw),
+            realized=str(row.realized_raw),
             returnPct=round(row.return_pct, 2),
             trades=row.trades,
         ).model_dump()

@@ -220,6 +220,10 @@ export interface BoardEntry {
   earned: string;
   /** Cost basis of the open positions — what the agent put to work. */
   invested: string;
+  /** Mark-to-market gain on those positions — profit only on paper. */
+  unrealized: string;
+  /** Profit actually banked: total minus whatever is still riding. */
+  realized: string;
   returnPct: number;
   trades: number;
 }
@@ -229,13 +233,57 @@ export interface BoardResponse {
   entries: BoardEntry[];
 }
 
-export const LEADERBOARD_SORTS = [
-  { key: "earned", label: "Earned" },
-  { key: "capital", label: "Capital" },
-  { key: "trades", label: "Trades" },
-] as const;
+/** A sortable board column. Sorting is client-side: `/leaderboard` returns
+ *  every account in one payload, so re-ordering needs no round trip and can
+ *  cover columns the API has no sort key for. */
+export type BoardColumn =
+  | "capital"
+  | "invested"
+  | "unrealized"
+  | "realized"
+  | "trades";
 
-export type LeaderboardSortKey = (typeof LEADERBOARD_SORTS)[number]["key"];
+export interface BoardSort {
+  column: BoardColumn;
+  dir: "desc" | "asc";
+}
+
+/** The board's opening order: biggest paper gain first. */
+export const DEFAULT_BOARD_SORT: BoardSort = {
+  column: "unrealized",
+  dir: "desc",
+};
+
+function columnValue(entry: BoardEntry, column: BoardColumn): number {
+  if (column === "trades") return entry.trades;
+  return Number(entry[column]);
+}
+
+/** Clicking a column sorts by it, biggest first; clicking the SAME column
+ *  again flips the direction. Starting descending is the useful default —
+ *  nobody opens a leaderboard to see who is last. */
+export function nextBoardSort(
+  current: BoardSort,
+  column: BoardColumn,
+): BoardSort {
+  if (current.column !== column) return { column, dir: "desc" };
+  return { column, dir: current.dir === "desc" ? "asc" : "desc" };
+}
+
+/** A new array, ordered by `sort`. Ties break on address so the rows keep a
+ *  fixed order across polls instead of swapping places on every refetch. */
+export function sortBoard(
+  entries: ReadonlyArray<BoardEntry>,
+  sort: BoardSort,
+): BoardEntry[] {
+  const sign = sort.dir === "desc" ? -1 : 1;
+  return [...entries].sort((a, b) => {
+    const av = columnValue(a, sort.column);
+    const bv = columnValue(b, sort.column);
+    if (av !== bv) return sign * (av - bv);
+    return a.address.localeCompare(b.address);
+  });
+}
 
 const BOARD_USD = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -249,14 +297,13 @@ export function formatBoardAmount(raw: string): string {
   return BOARD_USD.format(Number(raw) / 1e6);
 }
 
-export function useLeaderboard(sort: string) {
+export function useLeaderboard() {
   return useQuery({
-    queryKey: ["leaderboard", sort],
-    queryFn: () =>
-      apiFetch<BoardResponse>(`/leaderboard?sort=${encodeURIComponent(sort)}`),
+    // One fetch, whatever the column: the response carries every account, and
+    // the board re-orders it locally. Sorting no longer costs a round trip.
+    queryKey: ["leaderboard"],
+    queryFn: () => apiFetch<BoardResponse>("/leaderboard?sort=earned"),
     refetchInterval: 30_000,
-    // Keep the previous sort's rows on screen while the new order loads,
-    // instead of replacing them with a loading state on every click.
     placeholderData: keepPreviousData,
   });
 }

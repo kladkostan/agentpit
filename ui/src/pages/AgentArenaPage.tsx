@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   boardTrendPoints,
   boardViewState,
+  DEFAULT_BOARD_SORT,
   formatBoardAmount,
-  LEADERBOARD_SORTS,
+  nextBoardSort,
+  sortBoard,
   trendTone,
   useBoardHistory,
   useLeaderboard,
+  type BoardColumn,
   type BoardEntry,
-  type LeaderboardSortKey,
+  type BoardSort,
 } from "@/api/leaderboard";
 import { Sparkline } from "@/components/Sparkline";
 import { cn } from "@/lib/utils";
@@ -22,15 +25,43 @@ const pnlText = (n: number) =>
       ? "text-rose-600 dark:text-rose-400"
       : "text-muted-foreground";
 
+/** The money columns, in render order. `hideBelow` is the breakpoint each one
+ *  appears at — the board sheds columns on narrow screens rather than
+ *  scrolling, and Open P/L is the one that always survives. */
+const COLUMNS: {
+  key: BoardColumn;
+  label: string;
+  /** Tailwind visibility prefix, or "" for always-on. */
+  show: string;
+  /** Colour the value by sign, the way a P/L figure reads. */
+  signed?: boolean;
+}[] = [
+  { key: "capital", label: "Capital", show: "hidden lg:block" },
+  { key: "invested", label: "Invested", show: "hidden sm:block" },
+  { key: "unrealized", label: "Open P/L", show: "", signed: true },
+  { key: "realized", label: "Realized", show: "hidden sm:block", signed: true },
+  { key: "trades", label: "Trades", show: "hidden sm:block" },
+];
+
+const GRID =
+  "grid grid-cols-[3rem_minmax(0,1fr)_7rem] items-center gap-3 " +
+  "sm:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_4rem] " +
+  "lg:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_7rem_4rem]";
+
 /** "0x7aD8…e9a2" for a raw address; short strings pass through unchanged. */
 function shortAddr(a: string): string {
   return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
 export function AgentArenaPage() {
-  const [sort, setSort] = useState<LeaderboardSortKey>("earned");
-  const { data, error } = useLeaderboard(sort);
-  const entries = data?.entries ?? [];
+  const [sort, setSort] = useState<BoardSort>(DEFAULT_BOARD_SORT);
+  const { data, error } = useLeaderboard();
+  // Ranks follow the CURRENT order, so the medals always sit on the rows the
+  // reader is actually looking at rather than on a server-side ordering.
+  const entries = useMemo(
+    () => sortBoard(data?.entries ?? [], sort),
+    [data?.entries, sort],
+  );
   const state = boardViewState(data, error, entries);
   // Data survived a failed background refetch (see boardViewState) — say so
   // quietly instead of silently pretending the poll didn't fail.
@@ -53,44 +84,49 @@ export function AgentArenaPage() {
         </span>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div
-          className="flex w-fit items-center gap-1 rounded-full bg-muted p-1"
-          aria-label="Leaderboard sort"
-        >
-          {LEADERBOARD_SORTS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              aria-pressed={s.key === sort}
-              onClick={() => setSort(s.key)}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
-                s.key === sort
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        {showStaleNote ? (
-          <span className="text-xs text-muted-foreground">
-            Couldn't refresh — showing the last successful update.
-          </span>
-        ) : null}
-      </div>
+      {showStaleNote ? (
+        <span className="text-xs text-muted-foreground">
+          Couldn't refresh — showing the last successful update.
+        </span>
+      ) : null}
 
       <div className="overflow-hidden rounded-2xl border bg-card">
-        <div className="hidden grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
+        <div
+          className={cn(
+            GRID,
+            "border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground",
+          )}
+        >
           <span>#</span>
           <span>Agent</span>
-          <span>Trend</span>
-          <span className="text-right">Capital</span>
-          <span className="text-right">Invested</span>
-          <span className="text-right">Earned</span>
-          <span className="text-right">Trades</span>
+          <span className="hidden sm:block">Trend</span>
+          {COLUMNS.map((col) => {
+            const active = sort.column === col.key;
+            return (
+              <button
+                key={col.key}
+                type="button"
+                onClick={() => setSort(nextBoardSort(sort, col.key))}
+                aria-sort={
+                  active
+                    ? sort.dir === "desc"
+                      ? "descending"
+                      : "ascending"
+                    : "none"
+                }
+                className={cn(
+                  col.show,
+                  "text-right uppercase tracking-wide transition-colors hover:text-foreground",
+                  active && "text-foreground",
+                )}
+              >
+                {col.label}
+                <span aria-hidden className="ml-1">
+                  {active ? (sort.dir === "desc" ? "↓" : "↑") : ""}
+                </span>
+              </button>
+            );
+          })}
         </div>
         <ul className="divide-y">
           {state === "loading" ? (
@@ -109,7 +145,9 @@ export function AgentArenaPage() {
               </span>
             </li>
           ) : (
-            entries.map((e) => <BoardRow key={e.address} entry={e} />)
+            entries.map((e, i) => (
+              <BoardRow key={e.address} entry={e} rank={i + 1} />
+            ))
           )}
         </ul>
       </div>
@@ -117,18 +155,19 @@ export function AgentArenaPage() {
   );
 }
 
-function BoardRow({ entry }: { entry: BoardEntry }) {
+function BoardRow({ entry, rank }: { entry: BoardEntry; rank: number }) {
   const addr = shortAddr(entry.address);
   const nameIsAddress = entry.name.toLowerCase().startsWith("0x");
   const { data: history } = useBoardHistory(entry.address);
   const trend = boardTrendPoints(history);
 
   return (
-    <li className="grid grid-cols-[3rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_4rem]">
+    <li className={cn(GRID, "px-4 py-3")}>
+      {/* Rank comes from the row's position in the CURRENT order, not from the
+          server's ranking — otherwise the medals would stay pinned to one
+          column while the reader sorts by another. */}
       <span className="text-lg tabular-nums">
-        {MEDALS[entry.rank - 1] ?? (
-          <span className="text-muted-foreground">{entry.rank}</span>
-        )}
+        {MEDALS[rank - 1] ?? <span className="text-muted-foreground">{rank}</span>}
       </span>
       <span className="min-w-0">
         <span className="block truncate font-semibold">{entry.name}</span>
@@ -146,25 +185,28 @@ function BoardRow({ entry }: { entry: BoardEntry }) {
           tone={trendTone(Number(entry.earned))}
         />
       </span>
-      <span className="hidden text-right text-sm tabular-nums sm:block">
-        {formatBoardAmount(entry.capital)}
-      </span>
-      <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
-        {formatBoardAmount(entry.invested)}
-      </span>
-      {/* The only figure that survives to mobile: capital is $100k for
-          everyone and invested explains this number rather than replacing it. */}
-      <span
-        className={cn(
-          "text-right text-sm font-semibold tabular-nums",
-          pnlText(Number(entry.earned)),
-        )}
-      >
-        {formatBoardAmount(entry.earned)}
-      </span>
-      <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
-        {entry.trades}
-      </span>
+      {COLUMNS.map((col) => {
+        const raw = col.key === "trades" ? entry.trades : Number(entry[col.key]);
+        const text =
+          col.key === "trades"
+            ? String(entry.trades)
+            : formatBoardAmount(entry[col.key]);
+        return (
+          <span
+            key={col.key}
+            className={cn(
+              col.show,
+              "text-right text-sm tabular-nums",
+              col.signed
+                ? cn("font-semibold", pnlText(raw))
+                : "text-muted-foreground",
+            )}
+          >
+            {text}
+          </span>
+        );
+      })}
     </li>
   );
 }
+
