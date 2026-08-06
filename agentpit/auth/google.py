@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import jwt
-from jwt import PyJWKClient
+from jwt import PyJWKClient, PyJWKClientConnectionError, PyJWTError
 
 from agentpit.domain.exceptions import InvalidCredentialsError
 
@@ -58,10 +58,17 @@ class GoogleTokenVerifier:
                 issuer=GOOGLE_ISSUERS,
                 options={"require": ["exp", "iss", "aud", "sub", "email"]},
             )
-        except Exception as exc:
-            # Bad signature, wrong audience, expired, malformed — to the caller
-            # they are one thing: this credential proves nothing. The reason
-            # stays in the traceback, not in the response.
+        except PyJWKClientConnectionError:
+            # We could not reach Google to fetch its signing keys. That is our
+            # outage, not a bad credential, and it must not be reported to the
+            # person signing in as "your credential is invalid" -- let it
+            # surface as the server error it is.
+            raise
+        except PyJWTError as exc:
+            # Bad signature, wrong audience, expired, malformed, or a `kid`
+            # Google no longer publishes -- to the caller they are one thing:
+            # this credential proves nothing. The reason stays in the
+            # traceback, not in the response.
             raise InvalidCredentialsError("invalid Google credential") from exc
 
         # Checked after the signature rather than alongside it: `email_verified`

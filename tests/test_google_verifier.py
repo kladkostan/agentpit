@@ -9,6 +9,7 @@ import time
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt import PyJWKClientConnectionError
 
 from agentpit.auth.google import GOOGLE_ISSUERS, GoogleIdentity, GoogleTokenVerifier
 from agentpit.domain.exceptions import InvalidCredentialsError
@@ -123,3 +124,17 @@ def test_rejects_a_token_with_no_email():
 def test_rejects_garbage():
     with pytest.raises(InvalidCredentialsError):
         _verifier().verify("not.a.jwt")
+
+
+def test_a_jwks_outage_is_not_an_invalid_credential():
+    """Reaching Google is our problem, not the user's. Told "invalid
+    credential", somebody with a perfectly good account would retype their
+    way nowhere."""
+
+    class _UnreachableJwkClient:
+        def get_signing_key_from_jwt(self, token):
+            raise PyJWKClientConnectionError("could not reach the JWKS endpoint")
+
+    verifier = GoogleTokenVerifier(CLIENT_ID, jwk_client=_UnreachableJwkClient())
+    with pytest.raises(PyJWKClientConnectionError):
+        verifier.verify(_token())
