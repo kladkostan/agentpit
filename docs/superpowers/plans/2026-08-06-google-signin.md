@@ -281,7 +281,24 @@ def test_rejects_a_token_with_no_email():
 def test_rejects_garbage():
     with pytest.raises(InvalidCredentialsError):
         _verifier().verify("not.a.jwt")
+
+
+def test_a_jwks_outage_is_not_an_invalid_credential():
+    """Reaching Google is our problem, not the user's. Told "invalid
+    credential", somebody with a perfectly good account would retype their way
+    nowhere."""
+
+    class _UnreachableJwkClient:
+        def get_signing_key_from_jwt(self, token):
+            raise PyJWKClientConnectionError("could not reach the JWKS endpoint")
+
+    verifier = GoogleTokenVerifier(CLIENT_ID, jwk_client=_UnreachableJwkClient())
+    with pytest.raises(PyJWKClientConnectionError):
+        verifier.verify(_token())
 ```
+
+The test file imports `PyJWKClientConnectionError` from `jwt` alongside `jwt`
+itself.
 
 - [ ] **Step 3: Run the test to verify it fails**
 
@@ -313,7 +330,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import jwt
-from jwt import PyJWKClient
+from jwt import PyJWKClient, PyJWKClientConnectionError, PyJWTError
 
 from agentpit.domain.exceptions import InvalidCredentialsError
 
@@ -359,10 +376,18 @@ class GoogleTokenVerifier:
                 issuer=GOOGLE_ISSUERS,
                 options={"require": ["exp", "iss", "aud", "sub", "email"]},
             )
-        except Exception as exc:
-            # Bad signature, wrong audience, expired, malformed — to the caller
-            # they are one thing: this credential proves nothing. The reason
-            # stays in the traceback, not in the response.
+        except PyJWKClientConnectionError:
+            # We could not reach Google to fetch its signing keys. That is our
+            # outage, not a bad credential, and it must not be reported to the
+            # person signing in as "your credential is invalid" — let it
+            # surface as the server error it is. (PyJWKClientConnectionError
+            # is a subclass of PyJWTError, so this clause must come first.)
+            raise
+        except PyJWTError as exc:
+            # Bad signature, wrong audience, expired, malformed, or a `kid`
+            # Google no longer publishes — to the caller they are one thing:
+            # this credential proves nothing. The reason stays in the
+            # traceback, not in the response.
             raise InvalidCredentialsError("invalid Google credential") from exc
 
         # Checked after the signature rather than alongside it: `email_verified`
