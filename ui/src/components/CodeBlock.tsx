@@ -6,26 +6,22 @@ import { cn } from "@/lib/utils";
 /** Dark-canvas code card (dark in BOTH themes — code reads best on ink).
  *
  *  `code` is the single source of truth for what is DISPLAYED. What gets
- *  copied is deliberately not identical: `copyMode="commands"` (the default,
- *  for anything pasted into a prompt) drops the explanatory comments, because
- *  interactive zsh runs a pasted `#` line rather than ignoring it and answers
- *  `command not found: #`. Use `copyMode="verbatim"` for a block that is a
- *  file rather than a paste — a script keeps its comments. */
+ *  copied is deliberately not identical: the explanatory comments are dropped,
+ *  because interactive zsh runs a pasted `#` line rather than ignoring it and
+ *  answers `command not found: #` once per line. */
 export function CodeBlock({
   title,
   code,
   chips = [],
   className,
-  copyMode = "commands",
 }: {
   title: string;
   code: string;
   chips?: string[];
   className?: string;
-  copyMode?: "commands" | "verbatim";
 }) {
   const { copied, copy } = useCopyFeedback();
-  const onCopy = () => copy(copyMode === "verbatim" ? code : commandsOnly(code));
+  const onCopy = () => copy(commandsOnly(code));
 
   return (
     <div

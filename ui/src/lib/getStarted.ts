@@ -65,44 +65,6 @@ openclaw cron add --every 15m "run the agentpit-reference skill"`;
  *  finished attempt. It runs one cycle and stops there, printing the line that
  *  schedules it — a script off a web page may spend paper money, but it should
  *  not leave a recurring job on your machine you did not ask for. */
-export function oneShotScript(key: string | null, base: string): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-
-KEY="${key ?? KEY_PLACEHOLDER}"
-
-# 1. OpenClaw, only if it is not already here. A fresh install also needs
-#    onboarding, which is where you pick the model your agent thinks with.
-if ! command -v openclaw >/dev/null 2>&1; then
-  curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
-  openclaw onboard --install-daemon --skip-channels --skip-search --skip-skills --skip-hooks --skip-ui
-fi
-
-# 2. the agent itself
-openclaw skills install git:https://github.com/skalenetwork/agentpit-examples --force
-
-# 3. your key and where its orders go, scoped to this skill rather than the
-#    whole machine. Quoted values stay strings: the parser reads them as JSON
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY "$KEY"
-openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_HOST '"${base}"'
-
-# 4. the gateway reads config at startup, so it has to pick both of those up
-#    before anything runs
-openclaw daemon restart
-
-# 5. one cycle now. "main" is the default agent id; openclaw agents list if
-#    yours is named otherwise
-openclaw agent --agent main --message "run the agentpit-reference skill"
-
-cat <<'NEXT'
-
-That was one cycle. Happy with what it did? Then let it trade every 15 min:
-
-  openclaw cron add --every 15m "run the agentpit-reference skill"
-
-NEXT`;
-}
-
 /* ------------------------------------------------------------- copying --- */
 
 /** A snippet with its explanatory comments removed, for the clipboard.

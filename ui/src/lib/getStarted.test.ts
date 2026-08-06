@@ -5,7 +5,6 @@ import {
   openclawGoLive,
   openclawInstall,
   openclawSetKey,
-  oneShotScript,
   KEY_PLACEHOLDER,
   tokenizeSnippet,
 } from "./getStarted";
@@ -19,7 +18,7 @@ describe("snippet builders", () => {
     // browser signup does not, so the terminal path is gone.
     for (const snippet of [
       openclawInstall(), openclawAddBot(), openclawSetKey("k", BASE),
-      openclawGoLive(), oneShotScript("k", BASE),
+      openclawGoLive(),
     ]) {
       expect(snippet.toLowerCase()).not.toContain("password");
     }
@@ -59,14 +58,6 @@ describe("snippet builders", () => {
     expect(commandsOnly(script)).toBe("#!/usr/bin/env bash\nset -eu");
   });
 
-  it("the setup.sh block is copied verbatim — it is a file, not a paste", () => {
-    // Stripping comments out of a script would also strip its shebang's
-    // meaning as documentation and could cut lines inside the heredoc.
-    const s = oneShotScript("pk_live_123", BASE);
-    expect(s).toContain("#!/usr/bin/env bash");
-    expect(s).toMatch(/^# \d\./m);
-  });
-
   it("the wizard runs once, and only asks what this guide needs", () => {
     // The installer onboards by default (install.sh: `exec "$claw" onboard`),
     // so a second `openclaw onboard` walked the whole wizard twice. Install
@@ -93,32 +84,6 @@ describe("snippet builders", () => {
     expect(openclawSetKey(null, BASE)).toContain(KEY_PLACEHOLDER);
   });
 
-  it("the one-shot script does every step the manual path does", () => {
-    const s = oneShotScript("pk_live_123", BASE);
-    expect(s).toContain("openclaw.ai/install.sh");
-    expect(s).toContain("skalenetwork/agentpit-examples");
-    expect(s).toContain("AGENTPIT_API_KEY");
-    expect(s).toContain("pk_live_123");
-  });
-
-  it("the one-shot script leaves no cron behind by itself", () => {
-    // Paper money is fine to spend unasked; a recurring job on someone's
-    // machine is not. The script runs one cycle and only PRINTS the line that
-    // schedules it.
-    const s = oneShotScript("pk_live_123", BASE);
-    const live = s.indexOf("cron add");
-    const printed = s.indexOf("cat <<'NEXT'");
-    expect(printed).toBeGreaterThan(-1);
-    expect(live).toBeGreaterThan(printed);   // inside the message, not executed
-  });
-
-  it("the one-shot script is safe to re-run", () => {
-    const s = oneShotScript(null, BASE);
-    expect(s).toContain("command -v openclaw");   // skips an existing install
-    expect(s).toContain("--force");               // re-installing the skill is fine
-    expect(s).toContain(KEY_PLACEHOLDER);
-  });
-
   it("the key step also says where orders go", () => {
     const s = openclawSetKey("pk_live_123", BASE);
     expect(s).toContain(`AGENTPIT_HOST '"${BASE}"'`);
@@ -138,13 +103,6 @@ describe("snippet builders", () => {
     expect(openclawGoLive()).not.toContain("daemon restart");
   });
 
-  it("the script restarts before it runs, for the same reason", () => {
-    const s = oneShotScript("pk_live_123", BASE);
-    const executed = s.slice(0, s.indexOf("cat <<'NEXT'"));
-    expect(executed.indexOf("AGENTPIT_HOST")).toBeLessThan(executed.indexOf("daemon restart"));
-    expect(executed.indexOf("daemon restart")).toBeLessThan(executed.indexOf("openclaw agent"));
-  });
-
   it("no dry-run step: the balance is paper and the top-up restores it", () => {
     // A rehearsal that protects fake money is not worth the step, and its
     // ordering rules were the guide's only real hazard. The skill still reads
@@ -153,7 +111,6 @@ describe("snippet builders", () => {
     const guide = [
       openclawInstall(), openclawAddBot(),
       openclawSetKey("pk_live_123", BASE), openclawGoLive(),
-      oneShotScript("pk_live_123", BASE),
     ].join("\n");
     expect(guide).not.toContain("AGENTPIT_DRY_RUN");
   });
@@ -164,9 +121,7 @@ describe("snippet builders", () => {
     //   No target session selected. Use --agent <id>, --session-key <key>, ...
     // `main` is the built-in default agent id (`openclaw agents list --json`
     // reports it with isDefault: true on a stock install).
-    for (const snippet of [openclawGoLive(), oneShotScript("pk_live_123", BASE)]) {
-      expect(snippet).toContain("openclaw agent --agent main --message");
-    }
+    expect(openclawGoLive()).toContain("openclaw agent --agent main --message");
   });
 
   it("the dry-run value is quoted so the config parser keeps it a string", () => {
@@ -177,9 +132,7 @@ describe("snippet builders", () => {
     // which is where the first person to follow this guide got stuck. The
     // reference agent compares `os.environ["AGENTPIT_DRY_RUN"] == "1"`, so no
     // other value works either -- the quotes are the whole fix.
-    for (const snippet of [openclawSetKey("pk_live_123", BASE), oneShotScript("pk_live_123", BASE)]) {
-      expect(snippet).toMatch(/AGENTPIT_HOST '"[^"]+"'/);
-    }
+    expect(openclawSetKey("pk_live_123", BASE)).toMatch(/AGENTPIT_HOST '"[^"]+"'/);
   });
 
 });
@@ -219,7 +172,6 @@ describe("tokenizeSnippet", () => {
       openclawSetKey(key, BASE),
       openclawGoLive(),
       openclawGoLive(),
-      oneShotScript(key, BASE),
     ];
     for (const code of snippets) {
       const glued = tokenizeSnippet(code, [key, addr, KEY_PLACEHOLDER])
