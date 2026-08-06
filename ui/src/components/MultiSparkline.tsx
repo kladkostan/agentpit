@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { projectToViewBox, smoothPath } from "@/lib/chartGeometry";
 import type { SparklineSample, ChartCoord } from "@/lib/chartGeometry";
 import { cn } from "@/lib/utils";
@@ -65,6 +65,33 @@ function fmtPct(p: number): string {
   return `${Math.round(p * 100)}%`;
 }
 
+/** How many CSS pixels one viewBox unit is worth horizontally.
+ *
+ *  `preserveAspectRatio="none"` lets the chart stretch to its container, which
+ *  is what keeps the plot full-width — but it stretches everything drawn in it
+ *  by the same factor, so a circle comes out an ellipse. Y is exact (the
+ *  viewBox height and the CSS height are the same number), so only X needs
+ *  undoing. */
+function useHorizontalScale(
+  ref: React.RefObject<SVGSVGElement | null>,
+  viewBoxWidth: number,
+): number {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const px = el.getBoundingClientRect().width;
+      if (px > 0) setScale(px / viewBoxWidth);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, viewBoxWidth]);
+  return scale;
+}
+
 export function MultiSparkline({
   series,
   width = 600,
@@ -74,6 +101,11 @@ export function MultiSparkline({
   className,
 }: MultiSparklineProps) {
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  // Squash every dot horizontally by exactly what the viewBox stretch adds, so
+  // it lands on screen as a circle.
+  const xScale = useHorizontalScale(svgRef, width);
+  const round = (r: number) => ({ rx: r / xScale, ry: r });
 
   const projected = useMemo(
     () =>
@@ -104,6 +136,7 @@ export function MultiSparkline({
 
   return (
     <svg
+      ref={svgRef}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
       style={{ height }}
@@ -174,11 +207,11 @@ export function MultiSparkline({
             if (!pt) return null;
             const s = projected[i]!;
             return (
-              <circle
+              <ellipse
                 key={s.id}
                 cx={pt[0]}
                 cy={pt[1]}
-                r={3.5}
+                {...round(3.5)}
                 fill={s.color}
                 stroke="hsl(var(--background))"
                 strokeWidth={2}
@@ -249,11 +282,11 @@ export function MultiSparkline({
           if (s.coords.length === 0) return null;
           const last = s.coords[s.coords.length - 1]!;
           return (
-            <circle
+            <ellipse
               key={s.id}
               cx={last[0]}
               cy={last[1]}
-              r={2.5}
+              {...round(2.5)}
               fill={s.color}
               stroke="hsl(var(--background))"
               strokeWidth={1.25}
