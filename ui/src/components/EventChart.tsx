@@ -1,12 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { getPricesHistory } from "@/api/markets";
 import { MultiSparkline, PAD_Y } from "@/components/MultiSparkline";
-import type { MultiSparklineSeries } from "@/components/MultiSparkline";
+import type {
+  MultiSparklineHoverState,
+  MultiSparklineSeries,
+} from "@/components/MultiSparkline";
 import { niceChartScale } from "@/lib/chartGeometry";
 import { CHART_PALETTE } from "@/lib/chartPalette";
 import { pickChartSeries } from "@/lib/eventChartSeries";
-import { formatShortDate } from "@/lib/format";
+import { formatClock, formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
 
@@ -20,6 +23,11 @@ interface EventChartProps {
 function formatAxisPct(fraction: number): string {
   const pct = Math.round(fraction * 1000) / 10;
   return `${Number.isInteger(pct) ? pct : pct.toFixed(1)}%`;
+}
+
+function formatLegendPct(fraction: number): string {
+  const pct = Math.round(fraction * 1000) / 10;
+  return Number.isInteger(pct) ? `${pct}` : pct.toFixed(1);
 }
 
 /** Prices-history window for the event trend chart: "1m" ≈ 720h (30 days),
@@ -51,6 +59,8 @@ function pickXAxisLabels(series: ReadonlyArray<MultiSparklineSeries>): string[] 
 }
 
 export function EventChart({ markets, midByMarket }: EventChartProps) {
+  const [hover, setHover] = useState<MultiSparklineHoverState | null>(null);
+
   const picked = useMemo(
     () => pickChartSeries(markets, midByMarket, CHART_PALETTE, 4),
     [markets, midByMarket],
@@ -82,6 +92,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
       picked.map((s, i) => ({
         id: s.market.market_id,
         color: s.color,
+        label: s.label,
         points: queryData[i]?.history ?? [],
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,17 +125,41 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
     .map((t) => t / scale.max);
   const yLabels = [...scale.ticks].reverse().map(formatAxisPct);
 
+  const hoverPctBySeriesId = useMemo(() => {
+    if (!hover) return new Map<number, number>();
+    return new Map(
+      hover.points
+        .map((p) => [Number(p.id), p.sample.p] as const)
+        .filter(([id]) => Number.isFinite(id)),
+    );
+  }, [hover]);
+
+  const hoverTimeLabel = useMemo(() => {
+    if (!hover || hover.points.length === 0) return null;
+    const firstTs = hover.points[0]!.sample.t;
+    const date = formatShortDate(firstTs);
+    const clock = formatClock(firstTs);
+    if (!date || !clock) return null;
+    return `${date}, ${clock}`;
+  }, [hover]);
+
   return (
     <section className="rounded-2xl border bg-card/40 px-5 py-5">
       <header className="mb-4 flex items-baseline justify-between gap-4">
         <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          30d trend
+          {hoverTimeLabel ?? "30d trend"}
         </span>
         {hasData ? (
           <ol className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px]">
             {picked.map((s, i) => {
+              const hoverPct = hoverPctBySeriesId.get(s.market.market_id);
               const mid = midByMarket.get(s.market.market_id);
-              const cents = mid !== undefined ? Math.round(mid * 100) : null;
+              const cents =
+                hoverPct !== undefined
+                  ? formatLegendPct(hoverPct)
+                  : mid !== undefined
+                    ? String(Math.round(mid * 100))
+                    : null;
               return (
                 <li
                   key={s.market.market_id}
@@ -170,6 +205,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
                 height={CHART_HEIGHT}
                 maxP={maxP}
                 gridRatios={gridRatios}
+                onHoverChange={setHover}
               />
             </div>
           </div>
