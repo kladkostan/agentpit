@@ -68,8 +68,18 @@ email-only lookup would then treat them as a stranger and mint a second wallet.
 
 - **`google_sub` matches a row** — that is the account.
 - **No `google_sub`, but the verified email matches a row** — the same person
-  arriving by a new door. Stamp `google_sub` on that row and sign them in. One
-  address is one account, one wallet, one leaderboard record.
+  arriving by a new door. Stamp `google_sub` on that row, **clear its password**,
+  and sign them in. One address is one account, one wallet, one leaderboard
+  record.
+
+  The password goes because we never checked that whoever set it owns the
+  address: registration takes an address on trust, so anybody could have
+  claimed a stranger's before its owner ever arrived, and leaving the password
+  in place would let them keep a working credential on the account its real
+  owner just walked into. Google's `email_verified` is the only proof of
+  ownership in play, so it takes the account whole. The cost is that somebody
+  who deliberately used both doors loses password login — section 6's message
+  is what tells them so.
 - **Neither matches** — a new account, created exactly the way section 5
   describes.
 
@@ -151,6 +161,8 @@ itself:
 - A Google sign-in whose verified email matches a password account signs into
   that account and stamps `google_sub` on it — the wallet address before and
   after is the same one.
+- **That account's old password stops working**, and says why. This is the
+  test that closes the pre-registration hole in section 4.
 - **A password signup and a Google signup leave an account in the same state**:
   same fields populated, handle generated, deposit recorded, onboarding run.
   This is the test that keeps the two paths from drifting.

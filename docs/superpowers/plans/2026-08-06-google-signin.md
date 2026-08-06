@@ -27,6 +27,8 @@ extracted from `AuthService.register` so the two paths cannot drift.
   `tokeninfo` endpoint.
 - **One verified email is one account.** A Google identity whose verified email
   matches an existing row links to that row; it never creates a second.
+  **Linking clears that row's password** — registration never verified who owns
+  the address, so a password already on it is not evidence of ownership.
 - Lookup order on sign-in: **`google_sub` first, then email.**
 - `users.PASSWORD_HASH` becomes **nullable**; `users.GOOGLE_SUB TEXT` is new and
   **unique**.
@@ -438,7 +440,8 @@ two lookups the service needs.
   - `TableRead.get_user_by_email_ci(db, email: str) -> User | None`
   - `TableWrite.create_user(db, email, password_hash: str | None, handle=None,
     google_sub: str | None = None) -> tuple[str, LocalAccount, str]`
-  - `TableWrite.set_google_sub(db, user_id: str, google_sub: str) -> bool`
+  - `TableWrite.link_google_identity(db, user_id: str, google_sub: str) -> bool`
+    — stamps the sub and nulls `PASSWORD_HASH` in one statement
 
 - [ ] **Step 1: Write the failing test**
 
@@ -510,14 +513,18 @@ def test_many_accounts_may_have_no_google_sub():
     conn.close()
 
 
-def test_stamps_a_google_sub_on_an_existing_account():
+def test_linking_stamps_the_sub_and_drops_the_password():
+    """Linking hands the account to the Google identity. The password that was
+    on it was never proof of anything -- nobody verified the address when it
+    was set."""
     conn = fresh_test_conn()
     user_id, _acct, _key = TableWrite.create_user(
         conn, email="link@example.com", password_hash="x", handle="Link"
     )
-    assert TableWrite.set_google_sub(conn, user_id, "sub-linked") is True
+    assert TableWrite.link_google_identity(conn, user_id, "sub-linked") is True
     found = TableRead.get_user_by_google_sub(conn, "sub-linked")
     assert found is not None and found.user_id == user_id
+    assert TableRead.get_password_hash_by_userid(conn, user_id) is None
     conn.close()
 
 
@@ -702,11 +709,20 @@ And after `update_user_password_hash`:
 
 ```python
     @staticmethod
-    def set_google_sub(
+    def link_google_identity(
         db: psycopg.Connection, user_id: str, google_sub: str
     ) -> bool:
+        """Hand an existing account to a Google identity.
+
+        The password goes with the stamp, in one statement. We never verified
+        that whoever set that password owns the address -- registration has no
+        email confirmation -- so anybody could have claimed a stranger's
+        address before its owner ever arrived. The Google token is the only
+        proof of ownership in play, so it takes the account whole.
+        """
         cur = db.execute(
-            "UPDATE users SET GOOGLE_SUB = %s WHERE USER_ID = %s",
+            "UPDATE users SET GOOGLE_SUB = %s, PASSWORD_HASH = NULL "
+            "WHERE USER_ID = %s",
             (google_sub, user_id),
         )
         return cur.rowcount > 0
@@ -753,6 +769,8 @@ wrong, and the risk is not the Google part.
 - Create: `agentpit/datastructures/google_auth_request.py`
 - Modify: `agentpit/datastructures/auth_response.py`
 - Modify: `agentpit/services/auth_service.py`
+- Modify: `agentpit/db/table_read.py` — delete `get_password_hash_by_email`; the
+  rewritten `login` was its only caller
 - Modify: `agentpit/api/deps.py:38-52, 98-105`
 - Modify: `agentpit/api/app.py:397-415, 605-624`
 - Modify: `agentpit/api/routes/auth.py`
@@ -878,6 +896,41 @@ def test_google_sign_in_links_to_a_matching_password_account(google):
     found = TableRead.get_user_by_google_sub(conn, "google-sub-bob")
     assert found is not None and found.email == "bob@example.com"
     conn.close()
+
+
+def test_linking_retires_the_password_that_was_on_the_account(google):
+    """Nobody verified the address when that password was set, so it cannot
+    keep working once the address's real owner arrives with a Google token."""
+    google({"cred-heidi": GoogleIdentity(sub="sub-heidi", email="heidi@example.com")})
+    with TestClient(app) as client:
+        client.post(
+            "/register",
+            json={"email": "heidi@example.com", "password": "hunter22hunter22"},
+        )
+        client.post("/auth/google", json={"credential": "cred-heidi"})
+
+        resp = client.post(
+            "/login",
+            json={"email": "heidi@example.com", "password": "hunter22hunter22"},
+        )
+        assert resp.status_code == 401
+        assert "google" in resp.json()["detail"].lower()
+
+
+def test_a_changed_google_email_still_finds_the_same_account(google):
+    """`sub` is looked up first for a reason: the address on a Google account
+    can change, and an email-first lookup would treat a returning user as a
+    stranger and mint them a second wallet."""
+    google({"cred-first": GoogleIdentity(sub="sub-ivan", email="ivan@example.com")})
+    with TestClient(app) as client:
+        first = client.post("/auth/google", json={"credential": "cred-first"}).json()
+
+    google({"cred-renamed": GoogleIdentity(sub="sub-ivan", email="ivan.new@example.com")})
+    with TestClient(app) as client:
+        again = client.post("/auth/google", json={"credential": "cred-renamed"}).json()
+        assert again["created"] is False
+        assert again["user"]["user_id"] == first["user"]["user_id"]
+        assert again["user"]["eth_address"] == first["user"]["eth_address"]
 
 
 def test_linking_ignores_email_case(google):
@@ -1190,12 +1243,28 @@ Add `google_sign_in` immediately after `login`:
         if by_email is not None:
             # The same person arriving by a new door. Splitting them across two
             # accounts is not cosmetic: each one holds its own paper balance,
-            # its own positions and its own standing on the board, so the second
-            # would put their money somewhere they cannot see from where they
-            # are standing. The email is verified -- that check is what makes
-            # this safe.
+            # its own positions and its own standing on the board, so the
+            # second would put their money somewhere they cannot see from where
+            # they are standing.
+            #
+            # The password on that row goes with the link. Google verified this
+            # address; we never did -- registration takes any address on trust
+            # -- so a password already sitting on it is not evidence that
+            # whoever set it owns the address. Leaving it would let somebody
+            # who registered a stranger's address keep a working credential on
+            # the account its real owner just walked into.
             with self._db.write() as conn:
-                TableWrite.set_google_sub(conn, by_email.user_id, identity.sub)
+                linked = TableWrite.link_google_identity(
+                    conn, by_email.user_id, identity.sub
+                )
+            if not linked:
+                # The row went away between the read above and this write.
+                # Issuing a token for it would hand back credentials for an
+                # account that no longer exists.
+                log.warning(
+                    "google link found no row for user %s", by_email.user_id
+                )
+                raise InvalidCredentialsError("invalid Google credential")
             self._maybe_reonboard(by_email)
             return self._google_response(by_email, created=False)
 
