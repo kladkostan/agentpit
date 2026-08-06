@@ -36,6 +36,20 @@ export function registerRequest(
   });
 }
 
+export type GoogleAuthResponse = AuthResponse & {
+  /** True when this sign-in created the account. */
+  created: boolean;
+};
+
+export function googleSignInRequest(
+  credential: string,
+): Promise<GoogleAuthResponse> {
+  return apiFetch<GoogleAuthResponse>("/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ credential }),
+  });
+}
+
 export function meRequest(): Promise<UserPublic> {
   return apiFetch<UserPublic>("/me");
 }

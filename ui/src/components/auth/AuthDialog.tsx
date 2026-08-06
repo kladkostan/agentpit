@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/useAuth";
 import { ApiError } from "@/api/client";
+import { GOOGLE_CLIENT_ID } from "@/lib/googleAuth";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
 const EMAIL_RE = /.+@.+\..+/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -41,6 +43,7 @@ export function AuthDialog() {
     setDialogMode,
     login,
     register,
+    signInWithGoogle,
   } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -57,6 +60,18 @@ export function AuthDialog() {
       setSubmitting(false);
     }
   }, [dialogOpen, dialogMode]);
+
+  const onGoogleCredential = async (credential: string) => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await signInWithGoogle(credential);
+    } catch (err) {
+      setError(extractDetail(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -108,6 +123,21 @@ export function AuthDialog() {
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+        {GOOGLE_CLIENT_ID && (
+          <div className="space-y-4">
+            <GoogleSignInButton
+              onCredential={(credential) => void onGoogleCredential(credential)}
+              onError={setError}
+            />
+            <div className="flex items-center gap-3">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                or
+              </span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+          </div>
+        )}
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="auth-email">Email</Label>

@@ -16,6 +16,7 @@ export type AuthValue = {
   setDialogMode: (mode: DialogMode) => void;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (credential: string) => Promise<void>;
   logout: () => void;
 };
 
