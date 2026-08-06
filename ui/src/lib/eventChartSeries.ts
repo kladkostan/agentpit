@@ -1,4 +1,5 @@
 import { sortMarketsByYesMid } from "@/lib/eventOutcomes";
+import type { SparklineSample } from "@/lib/chartGeometry";
 import type { Market } from "@/types/market";
 
 export interface ChartSeries {
@@ -27,4 +28,26 @@ export function pickChartSeries(
     label: market.outcome_label ?? market.question,
     color: palette[i]!,
   }));
+}
+
+/**
+ * Carry a series' last traded price forward to `now`.
+ *
+ * `/prices-history` returns one point per trade, and a price holds until the
+ * next one — an outcome that traded once at 14% is still 14% today. Without
+ * the closing point a one-trade market has a single coordinate, and a path
+ * with one coordinate is a lone `M x y`: a move with nothing to draw, so the
+ * line is simply absent while the legend still lists the outcome at 14%.
+ *
+ * Markets that never traded are left empty: there is no price to carry, and
+ * inventing a flat line at today's mid would draw a month of history that
+ * never happened.
+ */
+export function carryLastPriceForward(
+  points: ReadonlyArray<SparklineSample>,
+  now: number,
+): ReadonlyArray<SparklineSample> {
+  const last = points[points.length - 1];
+  if (!last || last.t >= now) return points;
+  return [...points, { t: now, p: last.p }];
 }
