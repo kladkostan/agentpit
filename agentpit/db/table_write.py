@@ -19,14 +19,19 @@ class TableWrite:
     def create_user(
         db: psycopg.Connection,
         email: str,
-        password_hash: str,
+        password_hash: str | None,
         handle: str | None = None,
+        google_sub: str | None = None,
     ) -> tuple[str, LocalAccount, str]:
         """Create a new user with an auto-generated eth keypair.
 
         Returns (user_id, eth_account, api_key). The caller is responsible for
         running on-chain onboarding (faucet drip + approvals) and then calling
         :func:`mark_user_onboarded` once those txns confirm.
+
+        `password_hash` is None for an account that arrived through Google, and
+        `google_sub` is None for one that arrived with a password. Every account
+        has at least one of them.
         """
         acct: LocalAccount = Account.create()
         key_hex: str = Web3.to_hex(acct.key)
@@ -39,8 +44,8 @@ class TableWrite:
             INSERT INTO users (
                 USER_ID, EMAIL, PASSWORD_HASH, HANDLE,
                 ETH_ADDRESS, ETH_PRIVATE_KEY, API_KEY,
-                ONBOARDED_AT, CREATED_AT
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s)
+                ONBOARDED_AT, CREATED_AT, GOOGLE_SUB
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
             """,
             (
                 user_id,
@@ -51,6 +56,7 @@ class TableWrite:
                 key_hex,
                 api_key,
                 created_at,
+                google_sub,
             ),
         )
         return user_id, acct, api_key
@@ -77,6 +83,16 @@ class TableWrite:
         cur = db.execute(
             "UPDATE users SET PASSWORD_HASH = %s WHERE USER_ID = %s",
             (password_hash, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def set_google_sub(
+        db: psycopg.Connection, user_id: str, google_sub: str
+    ) -> bool:
+        cur = db.execute(
+            "UPDATE users SET GOOGLE_SUB = %s WHERE USER_ID = %s",
+            (google_sub, user_id),
         )
         return cur.rowcount > 0
 

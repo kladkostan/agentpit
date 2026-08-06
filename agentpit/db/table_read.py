@@ -234,6 +234,33 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
+    def get_user_by_google_sub(
+        db: psycopg.Connection, google_sub: str
+    ) -> "User | None":
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE GOOGLE_SUB = %s LIMIT 1",
+            (google_sub,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
+    def get_user_by_email_ci(db: psycopg.Connection, email: str) -> "User | None":
+        """Case-insensitive email lookup, used only for linking a Google identity.
+
+        Registration stores the address as typed, so `Alice@Example.com` and the
+        `alice@example.com` Google reports are the same person to everyone
+        except `=`. Linking is the one place that difference would mint a second
+        wallet, so it is the one place that compares case-insensitively. Login
+        keeps the exact-match reader above.
+        """
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users "
+            "WHERE LOWER(EMAIL) = LOWER(%s) ORDER BY CREATED_AT LIMIT 1",
+            (email,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
     def handle_taken(db: psycopg.Connection, handle: str) -> bool:
         """Whether a handle is already claimed.
 

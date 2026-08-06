@@ -101,14 +101,15 @@ class TableCreate:
             CREATE TABLE IF NOT EXISTS users (
                 USER_ID         TEXT PRIMARY KEY,
                 EMAIL           TEXT NOT NULL UNIQUE,
-                PASSWORD_HASH   TEXT NOT NULL,
+                PASSWORD_HASH   TEXT,
                 HANDLE          TEXT UNIQUE,
                 ETH_ADDRESS     TEXT NOT NULL UNIQUE,
                 ETH_PRIVATE_KEY TEXT NOT NULL UNIQUE,
                 API_KEY         TEXT NOT NULL UNIQUE,
                 ONBOARDED_AT    BIGINT,
                 CREATED_AT      BIGINT NOT NULL,
-                IS_BOT          INTEGER NOT NULL DEFAULT 0
+                IS_BOT          INTEGER NOT NULL DEFAULT 0,
+                GOOGLE_SUB      TEXT
             )
             """
         )
@@ -133,11 +134,23 @@ class TableCreate:
             ("LAST_TOPUP_AT", "BIGINT"),
             ("TOTAL_DEPOSITED", "BIGINT"),
             ("DEPLOYMENT_ID", "TEXT"),
+            ("GOOGLE_SUB", "TEXT"),
         ]
         for col, col_type in additions:
             conn.execute(
                 f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {col_type}"
             )
+        # An account that arrived through Google has no password. Databases
+        # created before this line have PASSWORD_HASH NOT NULL; dropping it is
+        # idempotent, so this is safe on every run.
+        conn.execute("ALTER TABLE users ALTER COLUMN PASSWORD_HASH DROP NOT NULL")
+        # `sub` is Google's stable id for an account — one of them is one of
+        # ours. NULLs do not collide in Postgres, so password-only accounts are
+        # unaffected.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub "
+            "ON users(GOOGLE_SUB)"
+        )
 
     @staticmethod
     def create_markets_table(conn: psycopg.Connection) -> None:
