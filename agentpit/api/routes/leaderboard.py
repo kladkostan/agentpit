@@ -28,6 +28,8 @@ class LeaderboardEntry(BaseModel):
     address: str
     capital: str
     earned: str
+    #: Cost basis of the open positions -- what the account put to work.
+    invested: str
     returnPct: float
     trades: int
 
@@ -62,6 +64,7 @@ def get_leaderboard(
             address=row.address,
             capital=str(row.capital_raw),
             earned=str(row.earned_raw),
+            invested=str(row.invested_raw),
             returnPct=round(row.return_pct, 2),
             trades=row.trades,
         ).model_dump()

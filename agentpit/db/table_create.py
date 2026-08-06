@@ -329,6 +329,14 @@ class TableCreate:
             )
             """
         )
+        # Cost basis of the open positions at snapshot time -- what the
+        # account actually put to work, as opposed to the grant it was handed.
+        # Nullable: rows written before this column existed cannot be
+        # reconstructed (the positions have moved since), and they read as 0.
+        conn.execute(
+            "ALTER TABLE account_snapshots ADD COLUMN IF NOT EXISTS "
+            "INVESTED_RAW BIGINT"
+        )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_account_snapshots_user_t "
             "ON account_snapshots(USER_ID, T DESC)"

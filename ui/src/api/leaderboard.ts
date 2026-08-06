@@ -218,6 +218,8 @@ export interface BoardEntry {
   address: string;
   capital: string;
   earned: string;
+  /** Cost basis of the open positions — what the agent put to work. */
+  invested: string;
   returnPct: number;
   trades: number;
 }
@@ -228,7 +230,6 @@ export interface BoardResponse {
 }
 
 export const LEADERBOARD_SORTS = [
-  { key: "return", label: "Return" },
   { key: "earned", label: "Earned" },
   { key: "capital", label: "Capital" },
   { key: "trades", label: "Trades" },
@@ -306,15 +307,20 @@ export function useBoardHistory(address: string) {
   });
 }
 
-/** History to sparkline samples, plotting **return** rather than capital —
- *  the figure the board ranks on by default, so the curve and the Return
- *  column beside it tell the same story. `equityPoints` pads a single point to
- *  two so a fresh account renders a flat line instead of a lone dot. */
+/** History to sparkline samples, plotting **earned** rather than capital —
+ *  the figure the board ranks on by default, so the curve and the Earned
+ *  column beside it tell the same story. Capital would be a flat line at
+ *  \$100k with the whole story buried in its last two digits.
+ *
+ *  `equityPoints` pads a single point to two so a fresh account renders a flat
+ *  line instead of a lone dot. */
 export function boardTrendPoints(
   history: BoardHistory | undefined,
 ): SparklineSample[] {
   if (!history || history.points.length === 0) return [];
-  return equityPoints(history.points.map((d) => ({ t: d.t, p: d.returnPct })));
+  return equityPoints(
+    history.points.map((d) => ({ t: d.t, p: Number(d.earned) })),
+  );
 }
 
 /** Same sign convention as the Return column's colour. */

@@ -346,10 +346,22 @@ class AccountService:
             last_sell_time=last_sell_time,
         )
 
-    def total_value(self, eth_address: str) -> list[dict]:
+    def value_and_cost(self, eth_address: str) -> tuple[float, float]:
+        """`(market value, cost basis)` of the open positions, in dollars.
+
+        Both come from ONE walk. Valuing an account reads every touched market
+        on chain, so a caller that needs both -- the leaderboard does -- must
+        not ask twice.
+        """
         positions = self.list_positions(eth_address)
-        total = sum(p.currentValue for p in positions)
-        return [{"user": eth_address, "value": total}]
+        return (
+            sum(p.currentValue for p in positions),
+            sum(p.initialValue for p in positions),
+        )
+
+    def total_value(self, eth_address: str) -> list[dict]:
+        value, _cost = self.value_and_cost(eth_address)
+        return [{"user": eth_address, "value": value}]
 
     def list_activity(
         self,

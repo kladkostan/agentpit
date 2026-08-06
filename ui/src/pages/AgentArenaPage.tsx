@@ -22,20 +22,13 @@ const pnlText = (n: number) =>
       ? "text-rose-600 dark:text-rose-400"
       : "text-muted-foreground";
 
-/** "+12.3%" / "-4.0%" / "0.0%" — same explicit-sign convention as the
- *  dollar figures, so a gain reads unambiguously at a glance. */
-function formatReturnPct(pct: number): string {
-  const sign = pct > 0 ? "+" : "";
-  return `${sign}${pct.toFixed(1)}%`;
-}
-
 /** "0x7aD8…e9a2" for a raw address; short strings pass through unchanged. */
 function shortAddr(a: string): string {
   return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
 export function AgentArenaPage() {
-  const [sort, setSort] = useState<LeaderboardSortKey>("return");
+  const [sort, setSort] = useState<LeaderboardSortKey>("earned");
   const { data, error } = useLeaderboard(sort);
   const entries = data?.entries ?? [];
   const state = boardViewState(data, error, entries);
@@ -90,13 +83,13 @@ export function AgentArenaPage() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border bg-card">
-        <div className="hidden grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_6rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
+        <div className="hidden grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_4rem] items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
           <span>#</span>
           <span>Agent</span>
           <span>Trend</span>
           <span className="text-right">Capital</span>
+          <span className="text-right">Invested</span>
           <span className="text-right">Earned</span>
-          <span className="text-right">Return</span>
           <span className="text-right">Trades</span>
         </div>
         <ul className="divide-y">
@@ -131,7 +124,7 @@ function BoardRow({ entry }: { entry: BoardEntry }) {
   const trend = boardTrendPoints(history);
 
   return (
-    <li className="grid grid-cols-[3rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_6rem_4rem]">
+    <li className="grid grid-cols-[3rem_minmax(0,1fr)_6rem] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_4rem]">
       <span className="text-lg tabular-nums">
         {MEDALS[entry.rank - 1] ?? (
           <span className="text-muted-foreground">{entry.rank}</span>
@@ -150,27 +143,24 @@ function BoardRow({ entry }: { entry: BoardEntry }) {
           points={trend}
           width={72}
           height={24}
-          tone={trendTone(entry.returnPct)}
+          tone={trendTone(Number(entry.earned))}
         />
       </span>
       <span className="hidden text-right text-sm tabular-nums sm:block">
         {formatBoardAmount(entry.capital)}
       </span>
+      <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
+        {formatBoardAmount(entry.invested)}
+      </span>
+      {/* The only figure that survives to mobile: capital is $100k for
+          everyone and invested explains this number rather than replacing it. */}
       <span
         className={cn(
-          "hidden text-right text-sm tabular-nums sm:block",
+          "text-right text-sm font-semibold tabular-nums",
           pnlText(Number(entry.earned)),
         )}
       >
         {formatBoardAmount(entry.earned)}
-      </span>
-      <span
-        className={cn(
-          "text-right text-sm font-semibold tabular-nums",
-          pnlText(entry.returnPct),
-        )}
-      >
-        {formatReturnPct(entry.returnPct)}
       </span>
       <span className="hidden text-right text-sm tabular-nums text-muted-foreground sm:block">
         {entry.trades}

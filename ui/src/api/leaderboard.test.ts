@@ -312,13 +312,18 @@ describe("lastHold", () => {
 });
 
 describe("leaderboard board data", () => {
-  it("offers the four sorts, return first", () => {
+  it("offers the three sorts, earned first", () => {
+    // Return is gone: with the same $100k grant behind every account, it was
+    // Earned divided by a constant — the same ranking, rendered as 0.0%.
     expect(LEADERBOARD_SORTS.map((s) => s.key)).toEqual([
-      "return",
       "earned",
       "capital",
       "trades",
     ]);
+  });
+
+  it("no longer offers a return sort", () => {
+    expect(LEADERBOARD_SORTS.map((s) => s.key)).not.toContain("return");
   });
 
   it("renders base-unit strings as dollars", () => {
@@ -334,10 +339,11 @@ function boardEntry(over: Partial<BoardEntry>): BoardEntry {
     address: "0x7aD82E9a000000000000000000000000000000",
     capital: "150000000000",
     earned: "50000000000",
+    invested: "1000000000",
     returnPct: 50,
     trades: 12,
     ...over,
-  };
+  } as BoardEntry;
 }
 
 function boardResponse(entries: BoardEntry[]): BoardResponse {
@@ -377,7 +383,9 @@ describe("boardViewState", () => {
 });
 
 describe("boardTrendPoints", () => {
-  it("plots return, not capital — the figure the board ranks on", () => {
+  it("plots earned, not capital — the figure the board ranks on", () => {
+    // Capital would be a flat line at $100k with the whole story buried in
+    // its last digits.
     const points = boardTrendPoints({
       points: [
         { t: 10, capital: "100000000000", earned: "0", returnPct: 0 },
@@ -386,7 +394,7 @@ describe("boardTrendPoints", () => {
     });
     expect(points).toEqual([
       { t: 10, p: 0 },
-      { t: 20, p: 50 },
+      { t: 20, p: 50_000_000_000 },
     ]);
   });
 

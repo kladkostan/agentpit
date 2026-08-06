@@ -208,11 +208,15 @@ class TableWrite:
         t: int,
         capital_raw: int,
         deposited_raw: int,
+        invested_raw: int = 0,
     ) -> None:
+        """One valuation of an account. `invested_raw` is the cost basis of its
+        open positions -- what it put to work, not what it was handed."""
         db.execute(
             "INSERT INTO account_snapshots "
-            "(USER_ID, T, CAPITAL_RAW, DEPOSITED_RAW) VALUES (%s, %s, %s, %s)",
-            (user_id, t, capital_raw, deposited_raw),
+            "(USER_ID, T, CAPITAL_RAW, DEPOSITED_RAW, INVESTED_RAW) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (user_id, t, capital_raw, deposited_raw, invested_raw),
         )
 
     @staticmethod
