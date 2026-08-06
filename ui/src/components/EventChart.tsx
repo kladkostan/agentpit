@@ -9,7 +9,7 @@ import {
 import type { MultiSparklineSeries } from "@/components/MultiSparkline";
 import { niceChartScale } from "@/lib/chartGeometry";
 import { CHART_PALETTE } from "@/lib/chartPalette";
-import { pickChartSeries } from "@/lib/eventChartSeries";
+import { carryLastPriceForward, pickChartSeries } from "@/lib/eventChartSeries";
 import { formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
@@ -82,15 +82,27 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
   // recompute when the actual points payload changes.
   const queryData = queries.map((q) => q.data);
   const series = useMemo<MultiSparklineSeries[]>(
-    () =>
-      picked.map((s, i) => ({
+    () => {
+      // A price holds until the next trade, so every line runs to today. A
+      // market that traded once would otherwise be a single coordinate, which
+      // draws nothing at all.
+      const now = Math.floor(Date.now() / 1000);
+      return picked.map((s, i) => ({
         id: s.market.market_id,
         color: s.color,
         label: s.label,
-        points: queryData[i]?.history ?? [],
-      })),
+        points: carryLastPriceForward(queryData[i]?.history ?? [], now),
+      }));
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [picked, ...queryData],
+  );
+
+  // An outcome with no trades draws no line. Listing it anyway sends the
+  // reader hunting for a colour that is not on the chart.
+  const traded = useMemo(
+    () => picked.filter((_, i) => (series[i]?.points.length ?? 0) > 0),
+    [picked, series],
   );
 
   const totalPoints = series.reduce((n, s) => n + s.points.length, 0);
@@ -127,7 +139,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
         </span>
         {hasData ? (
           <ol className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px]">
-            {picked.map((s, i) => {
+            {traded.map((s, i) => {
               const mid = midByMarket.get(s.market.market_id);
               const cents = mid !== undefined ? Math.round(mid * 100) : null;
               return (
@@ -147,7 +159,7 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
                       {cents}%
                     </span>
                   ) : null}
-                  {i < picked.length - 1 ? (
+                  {i < traded.length - 1 ? (
                     <span aria-hidden className="text-foreground/15">·</span>
                   ) : null}
                 </li>
