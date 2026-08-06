@@ -422,8 +422,18 @@ export function MultiSparkline({
         <g>
           {tooltip.rows.map((row) => {
             const y = row.y + row.h / 2;
+            // preserveAspectRatio="none" stretches glyphs horizontally along
+            // with the plot, so the label reads visibly wide. Squashing the
+            // whole row by the same factor puts it back: the box, the dot and
+            // the text were laid out in proportion to each other, so they only
+            // need undoing together. Anchored on the edge nearest the cursor
+            // so the row does not drift away from the point it describes.
+            const anchorX = row.x >= hover.x ? row.x : row.x + row.w;
             return (
-              <g key={`${row.id}-tooltip`}>
+              <g
+                key={`${row.id}-tooltip`}
+                transform={`translate(${anchorX} 0) scale(${circleXRadiusScale} 1) translate(${-anchorX} 0)`}
+              >
                 <rect
                   x={row.x}
                   y={row.y}
@@ -438,7 +448,9 @@ export function MultiSparkline({
                 <ellipse
                   cx={row.x + tooltip.paddingX + tooltip.dotW / 2}
                   cy={y}
-                  rx={(tooltip.dotW / 2) * circleXRadiusScale}
+                  // The row group already undoes the stretch for everything
+                  // inside it, so this one is a plain circle.
+                  rx={tooltip.dotW / 2}
                   ry={tooltip.dotW / 2}
                   fill={row.color}
                   vectorEffect="non-scaling-stroke"
