@@ -52,3 +52,37 @@ def test_run_pin_sync_syncs_then_returns_current_window_ids(monkeypatch):
     assert calls["sync"] == 1 and calls["ids"] == 1
     assert calls["sync_conn"] == "CONN"  # sync ran inside db.write()
     assert calls["ids_conn"] == "CONN"  # lookup ran inside db.read()
+
+
+class _FakeResolveSettings(_FakeSettings):
+    auto_redeem_enabled = True
+
+
+def test_run_pin_resolve_returns_only_resolved_and_redeemed(monkeypatch):
+    """Regression: the rotating-scan change gave the *general* resolution cycle
+    a cursor and a third return value, and the same edit landed on this
+    function, which has no cursor and never scans. `NameError: scan_after`
+    then fired on every pass -- invisible to the suite, because the loop logs
+    and swallows it and nothing else calls this. The caller unpacks two."""
+    seen = {}
+
+    def fake_ids(conn, pinned, now):
+        seen["ids_conn"] = conn
+        return [7]
+
+    def fake_mirror(conn, admin, *, now, market_ids):
+        seen["market_ids"] = market_ids
+        return 1
+
+    monkeypatch.setattr(app_mod, "ended_unresolved_window_ids", fake_ids)
+    monkeypatch.setattr(app_mod, "mirror_polymarket_resolutions", fake_mirror)
+    monkeypatch.setattr(app_mod, "auto_redeem_resolved_markets", lambda db, admin: 2)
+
+    result = app_mod._run_pin_resolve(
+        _FakeDb(), admin="ADMIN", settings=_FakeResolveSettings()  # type: ignore[arg-type]
+    )
+
+    assert result == (1, 2)
+    # Scoped to the just-ended windows, not a whole-table scan.
+    assert seen["market_ids"] == {7}
+    assert seen["ids_conn"] == "CONN"

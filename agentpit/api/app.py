@@ -276,7 +276,7 @@ def _run_pin_resolve(
     if settings.auto_redeem_enabled:
         with _redeem_lock:
             redeemed = auto_redeem_resolved_markets(db, admin)
-    return resolved, redeemed, scan_after
+    return resolved, redeemed
 
 
 async def _pin_resolve_loop(
