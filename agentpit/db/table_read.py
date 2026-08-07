@@ -558,7 +558,8 @@ class TableRead:
 
     _EVENT_COLS = (
         "EVENT_ID, SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY, "
-        "START_DATE, END_DATE, POLYMARKET_EVENT_ID, VOLUME_24HR, VOLUME"
+        "START_DATE, END_DATE, POLYMARKET_EVENT_ID, VOLUME_24HR, VOLUME, "
+        "LIQUIDITY, COMPETITIVE"
     )
 
     @staticmethod
@@ -575,6 +576,8 @@ class TableRead:
             polymarket_event_id=row["POLYMARKET_EVENT_ID"],
             volume_24hr=row["VOLUME_24HR"],
             volume=row["VOLUME"],
+            liquidity=row["LIQUIDITY"],
+            competitive=row["COMPETITIVE"],
         )
 
     @staticmethod

@@ -97,3 +97,103 @@ def test_order_by_is_a_bare_clause(sort: EventSort):
     clause = sort.order_by()
     assert not clause.upper().startswith("ORDER BY")
     assert ";" not in clause
+
+
+# ----- capturing the two upstream metrics -------------------------------------
+
+from typing import Any  # noqa: E402
+
+from agentpit.db.table_read import TableRead  # noqa: E402
+from agentpit.db.table_write import TableWrite  # noqa: E402
+from agentpit.polymarket.polymarket_sync import _extract_event_metadata  # noqa: E402
+from tests.db_helpers import fresh_test_conn  # noqa: E402
+
+
+@pytest.fixture()
+def db() -> Any:
+    conn = fresh_test_conn()
+    yield conn
+    conn.close()
+
+
+def test_a_fresh_event_has_no_metrics_yet(db):
+    event = TableWrite.upsert_event(db, slug="m1", title="M1")
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None
+    assert stored.liquidity is None
+    assert stored.competitive is None
+
+
+def test_update_event_metrics_stores_both(db):
+    event = TableWrite.upsert_event(db, slug="m2", title="M2")
+    TableWrite.update_event_metrics(db, event.event_id, 1976643.77, 0.9846)
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None
+    assert abs(stored.liquidity - 1976643.77) < 1e-6
+    assert abs(stored.competitive - 0.9846) < 1e-9
+
+
+def test_update_event_metrics_skips_each_figure_independently(db):
+    """A degraded pass carrying only one figure must not blank the other —
+    the same discipline update_event_volume already follows."""
+    event = TableWrite.upsert_event(db, slug="m3", title="M3")
+    TableWrite.update_event_metrics(db, event.event_id, 500.0, 0.5)
+    TableWrite.update_event_metrics(db, event.event_id, 900.0, None)
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None
+    assert abs(stored.liquidity - 900.0) < 1e-6
+    assert abs(stored.competitive - 0.5) < 1e-9, "competitive was clobbered"
+
+
+def test_update_event_metrics_with_both_none_is_a_no_op(db):
+    event = TableWrite.upsert_event(db, slug="m4", title="M4")
+    TableWrite.update_event_metrics(db, event.event_id, 7.0, 0.7)
+    TableWrite.update_event_metrics(db, event.event_id, None, None)
+    stored = TableRead.get_event_by_id(db, event.event_id)
+    assert stored is not None
+    assert abs(stored.liquidity - 7.0) < 1e-6
+
+
+def _pm_market(**event_fields) -> dict:
+    """An upstream market payload wrapping one event."""
+    return {
+        "tags": [],
+        "events": [
+            {"id": "9", "slug": "e", "title": "E", **event_fields},
+        ],
+    }
+
+
+def test_extract_event_metadata_reads_both_metrics():
+    meta = _extract_event_metadata(
+        _pm_market(liquidity=1976643.77453, competitive=0.9846153846153846)
+    )
+    assert meta is not None
+    assert abs(meta["liquidity"] - 1976643.77453) < 1e-6
+    assert abs(meta["competitive"] - 0.9846153846153846) < 1e-12
+
+
+def test_extract_event_metadata_reads_them_from_strings():
+    """Gamma stringifies numbers on some payloads — volume already arrives
+    that way, so the same coercion has to cover these."""
+    meta = _extract_event_metadata(_pm_market(liquidity="123.5", competitive="0.42"))
+    assert meta is not None
+    assert abs(meta["liquidity"] - 123.5) < 1e-6
+    assert abs(meta["competitive"] - 0.42) < 1e-9
+
+
+def test_extract_event_metadata_leaves_absent_metrics_none():
+    """None means "upstream said nothing, keep what is stored" — the same
+    signal update_event_metrics acts on."""
+    meta = _extract_event_metadata(_pm_market())
+    assert meta is not None
+    assert meta["liquidity"] is None
+    assert meta["competitive"] is None
+
+
+def test_extract_event_metadata_survives_unparseable_metrics():
+    """A raise here would permanently skip this market on every future pass."""
+    meta = _extract_event_metadata(_pm_market(liquidity="n/a", competitive={}))
+    assert meta is not None
+    assert meta["liquidity"] is None
+    assert meta["competitive"] is None

@@ -270,6 +270,18 @@ class TableCreate:
         conn.execute(
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS VOLUME DOUBLE PRECISION"
         )
+        # Order-book depth in dollars, straight from Gamma's event payload.
+        # Drives the "Liquidity" sort, which until now ranked on the number of
+        # outcomes — a different quantity entirely.
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS LIQUIDITY DOUBLE PRECISION"
+        )
+        # How contested the odds are, 0..1. A 50/50 market scores near 1, a
+        # 97/3 market near 0. Independent of liquidity: two matches can share a
+        # competitive score while their books differ by four orders of magnitude.
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS COMPETITIVE DOUBLE PRECISION"
+        )
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_slug ON events(SLUG)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_polymarket_event_id "
@@ -278,6 +290,12 @@ class TableCreate:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_volume_24hr "
             "ON events(VOLUME_24HR)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_liquidity ON events(LIQUIDITY)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_competitive ON events(COMPETITIVE)"
         )
         # Expression index matching the category filter's LOWER(CATEGORY)
         # predicate in TableRead.list_events_with_markets — a plain btree on

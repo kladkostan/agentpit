@@ -401,6 +401,36 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_event_metrics(
+        db: psycopg.Connection,
+        event_id: int,
+        liquidity: float | None,
+        competitive: float | None,
+    ) -> None:
+        """Refresh an event's captured order-book depth and contest score.
+
+        Each figure is skipped independently when None, exactly as
+        `update_event_volume` treats the volumes: a payload carrying only one
+        of the two must not blank the other, and a pass where upstream sent
+        neither must not blank both. Called on every bind pass.
+        """
+        sets = []
+        params: list[object] = []
+        if liquidity is not None:
+            sets.append("LIQUIDITY = %s")
+            params.append(liquidity)
+        if competitive is not None:
+            sets.append("COMPETITIVE = %s")
+            params.append(competitive)
+        if not sets:
+            return
+        params.append(event_id)
+        db.execute(
+            f"UPDATE events SET {', '.join(sets)} WHERE EVENT_ID = %s",
+            tuple(params),
+        )
+
+    @staticmethod
     def update_market_polymarket_tokens(
         db: psycopg.Connection,
         *,

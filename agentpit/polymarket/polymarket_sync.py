@@ -106,6 +106,22 @@ def _as_float(value: object) -> float:
     return 0.0
 
 
+def _as_optional_float(value: object) -> float | None:
+    """A number, or None when upstream sent nothing usable.
+
+    Distinct from `_as_float`, which answers 0.0: for a volume that is honest,
+    but a liquidity of 0.0 asserts an empty order book and a competitive of
+    0.0 asserts a settled market. None is the signal `update_event_metrics`
+    skips on, so an unparseable payload leaves whatever was already stored.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _to_bool(value: object) -> bool | None:
     """Coerce common bool-like values; return None if unknown."""
     if isinstance(value, bool):
@@ -406,6 +422,8 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
     end_iso = raw.get("endDate") or raw.get("endDateIso")
     volume24hr = raw.get("volume24hr")
     volume = raw.get("volume")
+    liquidity = raw.get("liquidity")
+    competitive = raw.get("competitive")
     return {
         "polymarket_event_id": str(pm_event_id) if pm_event_id is not None else None,
         "slug": str(slug),
@@ -427,6 +445,8 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         "end_date": _iso_to_unix(end_iso) if end_iso else None,
         "volume_24hr": _as_float(volume24hr) if volume24hr is not None else None,
         "volume": _as_float(volume) if volume is not None else None,
+        "liquidity": _as_optional_float(liquidity),
+        "competitive": _as_optional_float(competitive),
     }
 
 
@@ -547,6 +567,9 @@ def bind_market_to_upstream_event(
     # clobbered with null.
     TableWrite.update_event_volume(
         db, event.event_id, meta["volume_24hr"], meta.get("volume")
+    )
+    TableWrite.update_event_metrics(
+        db, event.event_id, meta["liquidity"], meta["competitive"]
     )
     outcome_label, icon_url = _extract_outcome_metadata(pm_market)
     TableWrite.attach_market_to_event(

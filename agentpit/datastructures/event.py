@@ -20,6 +20,12 @@ class Event(BaseModel):
     # Upstream all-time volume, captured at the same time. This is the figure
     # the cards display; volume_24hr stays the ranking key.
     volume: Optional[float] = None
+    # Order-book depth in dollars, captured at sync time. Drives the Liquidity
+    # sort. None when never synced from upstream.
+    liquidity: Optional[float] = None
+    # How contested the odds are, 0..1 — a 50/50 market scores near 1. Captured
+    # at the same time; independent of liquidity. None when never synced.
+    competitive: Optional[float] = None
 
     def model_post_init(self, _context):
         check_state(len(self.title) > 0, "Event title must not be empty")
