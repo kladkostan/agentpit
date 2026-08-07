@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -90,7 +92,11 @@ def test_sort_by_competitive_differs_from_liquidity(client):
 
 
 def test_sort_by_ending_soon_is_ascending(client):
-    _seed({"later": {"end_date": 9_000}, "sooner": {"end_date": 1_000}})
+    # Both in the future: ENDING_SOON excludes already-ended events (see
+    # tests/db/test_event_sort.py), so a past end_date would be dropped
+    # rather than ordered.
+    now = int(time.time())
+    _seed({"later": {"end_date": now + 9_000}, "sooner": {"end_date": now + 1_000}})
     assert _slugs(client, "sort=endingSoon") == ["sooner", "later"]
 
 

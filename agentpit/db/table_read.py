@@ -672,6 +672,13 @@ class TableRead:
         since before sorting was a choice. Every clause ends in ``EVENT_ID
         DESC`` so equal values cannot swap between pages, and puts missing
         values last so a never-captured event never leads the list.
+
+        ``EventSort.ENDING_SOON`` additionally restricts the page to events
+        that have not already ended (see the predicate below): ascending
+        order over the whole catalogue would otherwise lead with events that
+        ended months ago, since a never-ending stream of past events sorts
+        before every future one. No other sort is restricted — a stale event
+        still belongs in "Newest" or "Total Volume".
         """
         # Predicates accumulate and are joined with AND; the tag filters are
         # EXISTS subqueries because an event's tag set lives on its markets.
@@ -679,6 +686,7 @@ class TableRead:
         # `tag` — a facet like `trump` also occurs outside `politics`, and
         # dropping the parent would let a Politics > Trump selection surface a
         # non-Politics event.
+        resolved_sort = sort or EventSort.DEFAULT
         clauses: list[str] = []
         params: list[object] = []
         normalized_category = category.strip() if category else None
@@ -703,6 +711,20 @@ class TableRead:
                 "WHERE m.EVENT_ID = events.EVENT_ID AND mt.SLUG = ANY(%s))"
             )
             params.append(normalized_subtags)
+        if resolved_sort is EventSort.ENDING_SOON:
+            # Scoped to this one sort: "Ending Soon" is the only ordering an
+            # already-ended event would otherwise lead, because ASC over the
+            # whole catalogue puts every past END_DATE ahead of every future
+            # one. `EXTRACT(EPOCH FROM NOW())` runs in Postgres rather than
+            # being passed in as a parameter, so the cutoff is the database's
+            # clock and the query needs no extra binding.
+            #
+            # NULL END_DATE passes the filter (treated as "not ended", not
+            # excluded): a missing end date is not evidence the event is
+            # over, and ORDER BY's NULLS LAST already keeps it at the bottom
+            # of the page rather than the top, exactly as it did before this
+            # predicate existed.
+            clauses.append("(END_DATE IS NULL OR END_DATE >= EXTRACT(EPOCH FROM NOW()))")
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
 
         total = db.execute(
@@ -711,7 +733,7 @@ class TableRead:
         ).fetchone()["CNT"]
         events_cur = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events{where} "
-            f"ORDER BY {(sort or EventSort.DEFAULT).order_by()} "
+            f"ORDER BY {resolved_sort.order_by()} "
             "LIMIT %s OFFSET %s",
             tuple(params + [limit, offset]),
         )

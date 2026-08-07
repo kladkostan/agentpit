@@ -201,6 +201,8 @@ def test_extract_event_metadata_survives_unparseable_metrics():
 
 # ----- ordering the listing ---------------------------------------------------
 
+import time  # noqa: E402
+
 from agentpit.datastructures.condition_id import ConditionId  # noqa: E402
 from agentpit.datastructures.create_market_request import CreateMarketRequest  # noqa: E402
 from agentpit.datastructures.market_state import MarketState  # noqa: E402
@@ -293,15 +295,19 @@ def test_newest_ranks_on_start_date_descending(db):
 
 
 def test_ending_soon_ranks_on_end_date_ascending(db):
-    _event(db, "later", end_date=9_000)
-    _event(db, "sooner", end_date=1_000)
+    # Both in the future, or the new "not already ended" restriction (see
+    # below) would drop them rather than order them.
+    now = int(time.time())
+    _event(db, "later", end_date=now + 9_000)
+    _event(db, "sooner", end_date=now + 1_000)
     assert _slugs(db, EventSort.ENDING_SOON) == ["sooner", "later"]
 
 
 def test_missing_values_sort_last_even_when_ascending(db):
     """The trap: NULL sorts FIRST by default under ASC in Postgres, which
     would put every never-captured event at the top of "Ending Soon"."""
-    _event(db, "dated", end_date=5_000)
+    now = int(time.time())
+    _event(db, "dated", end_date=now + 5_000)
     _event(db, "undated")
     assert _slugs(db, EventSort.ENDING_SOON) == ["dated", "undated"]
 
@@ -341,4 +347,76 @@ def test_sort_composes_with_a_tag_filter(db):
         db, limit=50, offset=0, tag="politics", sort=EventSort.LIQUIDITY
     )
     assert [ev.slug for ev, _ in pairs] == ["keep"]
+    assert total == 1
+
+
+# ----- "Ending Soon" excludes already-ended events -----------------------------
+
+
+def test_ending_soon_excludes_events_already_ended(db):
+    """The regression this task fixes: ASC over the whole catalogue put
+    months-old events first. Under ENDING_SOON, a past END_DATE must be
+    dropped rather than lead the page."""
+    now = int(time.time())
+    _event(db, "past", end_date=now - 3600)
+    _event(db, "future", end_date=now + 3600)
+    assert _slugs(db, EventSort.ENDING_SOON) == ["future"]
+
+
+def test_ending_soon_total_matches_the_filtered_count(db):
+    """`total` shares the same `where` as the page, so it must reflect the
+    exclusion too, not the whole table."""
+    now = int(time.time())
+    _event(db, "past", end_date=now - 3600)
+    _event(db, "future", end_date=now + 3600)
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=50, offset=0, sort=EventSort.ENDING_SOON
+    )
+    assert [ev.slug for ev, _ in pairs] == ["future"]
+    assert total == 1
+
+
+@pytest.mark.parametrize(
+    "sort", [s for s in EventSort if s is not EventSort.ENDING_SOON]
+)
+def test_only_ending_soon_excludes_past_dated_events(db, sort):
+    """Every other sort must keep showing a past-dated event — the
+    restriction is scoped to ENDING_SOON alone."""
+    now = int(time.time())
+    _event(db, "past", end_date=now - 3600)
+    assert "past" in _slugs(db, sort)
+
+
+def test_ending_soon_composes_with_a_tag_filter(db):
+    now = int(time.time())
+    keep = _event(db, "keep", end_date=now + 3600)
+    _event(db, "past", end_date=now - 3600)
+    drop = _event(db, "drop", end_date=now + 7200)
+    market = _make_market(db, question="q2?", cond_id=_hex32("s2"), event_id=keep.event_id)
+    TableWrite.replace_market_tags(db, market_id=market.market_id, tags=[("politics", "Politics")])
+    _ = drop  # untagged, and future — excluded by the tag filter, not the date filter
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=50, offset=0, tag="politics", sort=EventSort.ENDING_SOON
+    )
+    assert [ev.slug for ev, _ in pairs] == ["keep"]
+    assert total == 1
+
+
+def test_ending_soon_composes_with_a_category_filter(db):
+    now = int(time.time())
+    keep = TableWrite.upsert_event(
+        db, slug="keep-cat", title="KEEP", end_date=now + 3600, category="Sports"
+    )
+    TableWrite.upsert_event(
+        db, slug="past-cat", title="PAST", end_date=now - 3600, category="Sports"
+    )
+    TableWrite.upsert_event(
+        db, slug="other-cat", title="OTHER", end_date=now + 3600, category="Politics"
+    )
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=50, offset=0, category="Sports", sort=EventSort.ENDING_SOON
+    )
+    assert [ev.slug for ev, _ in pairs] == [keep.slug]
     assert total == 1
