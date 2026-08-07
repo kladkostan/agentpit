@@ -114,5 +114,7 @@ def to_gamma_event(
         endDate=_iso(event.end_date),
         volume24hr=str(event.volume_24hr if event.volume_24hr is not None else 0),
         volume=str(event.volume if event.volume is not None else 0),
+        liquidity=str(event.liquidity if event.liquidity is not None else 0),
+        competitive=str(event.competitive if event.competitive is not None else 0),
         markets=[to_gamma_market(m, pbm.get(m.market_id)) for m in markets],
     )

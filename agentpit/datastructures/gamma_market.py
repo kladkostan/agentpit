@@ -51,4 +51,9 @@ class GammaEvent(BaseModel):
     # Upstream all-time volume, same wire convention. This is what the cards
     # show; volume24hr stays the ranking key.
     volume: str = "0"
+    #: Order-book depth, stringified (Gamma's wire convention). "0" when the
+    #: event was never synced from upstream.
+    liquidity: str = "0"
+    #: How contested the odds are, 0..1, stringified. "0" when never synced.
+    competitive: str = "0"
     markets: list[GammaMarket]
