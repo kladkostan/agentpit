@@ -288,3 +288,89 @@ def test_list_tag_facets_returns_empty_for_an_unknown_parent(db):
         limit=20,
         max_coverage=0.9,
     ) == []
+
+
+# ----- list_events_with_markets tag filtering ---------------------------------
+
+
+def _titles(result) -> set[str]:
+    rows, _total = result
+    return {ev.title for ev, _markets in rows}
+
+
+def _seed_tagged_events(db) -> None:
+    _event_with_tagged_markets(db, slug="a", tags_per_market=[["politics", "trump"]])
+    _event_with_tagged_markets(db, slug="b", tags_per_market=[["politics", "midterms"]])
+    _event_with_tagged_markets(db, slug="c", tags_per_market=[["sports", "tennis"]])
+    _event_with_tagged_markets(db, slug="d", tags_per_market=[["crypto", "trump"]])
+
+
+def test_list_events_filters_by_tag(db):
+    _seed_tagged_events(db)
+    assert _titles(
+        TableRead.list_events_with_markets(db, limit=10, offset=0, tag="politics")
+    ) == {"A", "B"}
+
+
+def test_list_events_tag_filter_reports_a_matching_total(db):
+    _seed_tagged_events(db)
+    _rows, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, tag="politics"
+    )
+    assert total == 2
+
+
+def test_list_events_subtags_are_ored_within_the_parent(db):
+    _seed_tagged_events(db)
+    assert _titles(
+        TableRead.list_events_with_markets(
+            db, limit=10, offset=0, tag="politics", subtags=["trump", "midterms"]
+        )
+    ) == {"A", "B"}
+
+
+def test_list_events_subtag_and_tag_compose_with_and(db):
+    """Event D carries `trump` but not `politics`. Selecting Politics > Trump
+    must not surface it — that is why the parent stays in the query."""
+    _seed_tagged_events(db)
+    assert _titles(
+        TableRead.list_events_with_markets(
+            db, limit=10, offset=0, tag="politics", subtags=["trump"]
+        )
+    ) == {"A"}
+
+
+def test_list_events_blank_tag_and_empty_subtags_mean_no_filter(db):
+    _seed_tagged_events(db)
+    for tag in (None, "", "   "):
+        assert len(_titles(
+            TableRead.list_events_with_markets(db, limit=10, offset=0, tag=tag)
+        )) == 4
+    assert len(_titles(
+        TableRead.list_events_with_markets(db, limit=10, offset=0, subtags=[])
+    )) == 4
+
+
+def test_list_events_tag_filter_matches_across_an_events_markets(db):
+    """Market A has `politics`, market B has `trump`; the event has both."""
+    _event_with_tagged_markets(db, slug="split", tags_per_market=[["politics"], ["trump"]])
+    assert _titles(
+        TableRead.list_events_with_markets(
+            db, limit=10, offset=0, tag="politics", subtags=["trump"]
+        )
+    ) == {"Split"}
+
+
+def test_list_events_tag_composes_with_category(db):
+    _event_with_tagged_markets(db, slug="tagged", tags_per_market=[["politics"]])
+    TableWrite.upsert_event(db, slug="tagged", title="Tagged", category="Sports")
+    assert _titles(
+        TableRead.list_events_with_markets(
+            db, limit=10, offset=0, category="Sports", tag="politics"
+        )
+    ) == {"Tagged"}
+    assert _titles(
+        TableRead.list_events_with_markets(
+            db, limit=10, offset=0, category="Crypto", tag="politics"
+        )
+    ) == set()

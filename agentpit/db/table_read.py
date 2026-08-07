@@ -637,6 +637,8 @@ class TableRead:
         limit: int = 100,
         offset: int = 0,
         category: str | None = None,
+        tag: str | None = None,
+        subtags: "list[str] | None" = None,
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ranked by upstream 24h volume, each paired with its
         child markets.
@@ -653,13 +655,44 @@ class TableRead:
         is restricted to that category case-insensitively, so a case drift
         between the label the UI sends and the label stored can't silently
         return an empty page. ``total`` reflects the same filter.
+
+        ``tag`` and ``subtags`` filter on the tag graph rather than the
+        CATEGORY column: an event matches when any of its markets carries the
+        slug. They compose with each other and with ``category`` as AND, while
+        ``subtags`` ORs within itself. Blank and whitespace-only values count
+        as absent, exactly as ``category`` does.
         """
-        where = ""
+        # Predicates accumulate and are joined with AND; the tag filters are
+        # EXISTS subqueries because an event's tag set lives on its markets.
+        # `subtags` ORs within itself via ANY() while still ANDing against
+        # `tag` — a facet like `trump` also occurs outside `politics`, and
+        # dropping the parent would let a Politics > Trump selection surface a
+        # non-Politics event.
+        clauses: list[str] = []
         params: list[object] = []
         normalized_category = category.strip() if category else None
         if normalized_category:
-            where = " WHERE LOWER(CATEGORY) = LOWER(%s)"
+            clauses.append("LOWER(CATEGORY) = LOWER(%s)")
             params.append(normalized_category)
+        normalized_tag = tag.strip().lower() if tag else None
+        if normalized_tag:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM markets m "
+                "JOIN market_tags mt ON mt.MARKET_ID = m.MARKET_ID "
+                "WHERE m.EVENT_ID = events.EVENT_ID AND mt.SLUG = %s)"
+            )
+            params.append(normalized_tag)
+        normalized_subtags = [
+            s.strip().lower() for s in (subtags or []) if s and s.strip()
+        ]
+        if normalized_subtags:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM markets m "
+                "JOIN market_tags mt ON mt.MARKET_ID = m.MARKET_ID "
+                "WHERE m.EVENT_ID = events.EVENT_ID AND mt.SLUG = ANY(%s))"
+            )
+            params.append(normalized_subtags)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
 
         total = db.execute(
             f"SELECT COUNT(*) as CNT FROM events{where}",
