@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  displayTagLabel,
   formatPnlPct,
   shortAddress,
   formatProbabilityPct,
@@ -166,5 +167,38 @@ describe("shortAddress", () => {
   it("passes through anything too short to be worth truncating", () => {
     expect(shortAddress("0x1234")).toBe("0x1234");
     expect(shortAddress("")).toBe("");
+  });
+});
+
+describe("displayTagLabel", () => {
+  it("title-cases a label upstream left entirely lowercase", () => {
+    expect(displayTagLabel("league of legends")).toBe("League of Legends");
+    expect(displayTagLabel("primary elections")).toBe("Primary Elections");
+    expect(displayTagLabel("baseball")).toBe("Baseball");
+    expect(displayTagLabel("counter strike 2")).toBe("Counter Strike 2");
+  });
+
+  it("leaves small words lowercase unless they lead", () => {
+    expect(displayTagLabel("of mice and men")).toBe("Of Mice and Men");
+  });
+
+  it("does not touch a label that already carries a capital", () => {
+    // These are the majority, and re-casing them would produce "Ai", "Atp",
+    // "Us Election" — worse than the problem being fixed.
+    for (const label of [
+      "AI",
+      "ATP Tour",
+      "A100",
+      "US Election",
+      "Argentina Primera División",
+      "U.S. x Iran",
+      "Nov 4 Elections",
+    ]) {
+      expect(displayTagLabel(label)).toBe(label);
+    }
+  });
+
+  it("handles an empty label without throwing", () => {
+    expect(displayTagLabel("")).toBe("");
   });
 });

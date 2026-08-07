@@ -157,3 +157,32 @@ export function formatPnlPct(pct: number): string {
 export function shortAddress(a: string): string {
   return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
+
+/** Small words that stay lowercase inside a title, unless they lead it. */
+const TITLE_STOPWORDS = new Set([
+  "a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs",
+]);
+
+/** A tag label, cased for display.
+ *
+ *  Upstream authors these by hand and is inconsistent: most read like titles
+ *  ("Global Elections", "ATP Tour", "Argentina Primera División") but a
+ *  handful arrive entirely lowercase ("league of legends", "primary
+ *  elections", "baseball") and look like a bug beside their neighbours.
+ *
+ *  Only the all-lowercase ones are touched. Any label carrying a capital was
+ *  cased deliberately, and re-casing it would wreck the acronyms and proper
+ *  nouns that make up most of the list — "AI", "ATP", "A100", "US Election"
+ *  would come back as "Ai", "Atp", "A100", "Us Election".
+ */
+export function displayTagLabel(label: string): string {
+  if (/[A-Z]/.test(label)) return label;
+  return label
+    .split(" ")
+    .map((word, i) =>
+      i > 0 && TITLE_STOPWORDS.has(word)
+        ? word
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}

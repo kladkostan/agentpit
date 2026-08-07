@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useEventsInfinite } from "@/api/events";
 import { useTags, type TagFacet, type TagNavEntry } from "@/api/tags";
 import { useMarketStats } from "@/api/markets";
+import { displayTagLabel } from "@/lib/format";
 import { useDismissOnOutside } from "@/lib/useDismissOnOutside";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { Button } from "@/components/ui/button";
@@ -335,7 +336,7 @@ export function MarketsPage() {
               onClick={() => handleCategorySelect(isAll ? null : entry.slug)}
             >
               <Icon className="size-4" aria-hidden />
-              {entry.label}
+              {displayTagLabel(entry.label)}
             </Button>
           );
         })}
@@ -393,7 +394,7 @@ export function MarketsPage() {
                     }
                   >
                     {isSubSelected ? <Check className="size-3.5" aria-hidden /> : null}
-                    {subcategory.label}
+                    {displayTagLabel(subcategory.label)}
                   </Button>
                 );
               })}
@@ -433,7 +434,7 @@ export function MarketsPage() {
                         onClick={() => handleCategorySelect(isAll ? null : entry.slug)}
                       >
                         <Icon className="size-4" aria-hidden />
-                        <span className="truncate">{entry.label}</span>
+                        <span className="truncate">{displayTagLabel(entry.label)}</span>
                       </Button>
 
                       {subcategories.length > 0 ? (
@@ -476,7 +477,7 @@ export function MarketsPage() {
                                 handleSubcategoryToggle(entry.slug, subcategory.slug)
                               }
                             >
-                              {subcategory.label}
+                              {displayTagLabel(subcategory.label)}
                             </Button>
                           );
                         })}

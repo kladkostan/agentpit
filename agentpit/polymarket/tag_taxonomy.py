@@ -24,9 +24,12 @@ NAV_SLUGS: tuple[str, ...] = (
     "crypto",
     "elections",
     "geopolitics",
-    "tennis",
+    # `tennis` and `soccer` are deliberately absent: they are sports, and
+    # Polymarket's own nav does not promote them either. They surface as facets
+    # under Sports (tennis 607 of 1084 events, soccer 167 — both well under
+    # MAX_FACET_COVERAGE, so the ceiling does not prune them). `esports` DOES
+    # stay top-level, because Polymarket promotes that one.
     "esports",
-    "soccer",
     "weather",
     "tech",
     "pop-culture",
