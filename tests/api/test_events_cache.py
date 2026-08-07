@@ -20,7 +20,14 @@ class _FakeService:
     def __init__(self) -> None:
         self.calls = 0
 
-    def list_events_gamma(self, limit: int, offset: int, category: str | None = None):
+    def list_events_gamma(
+        self,
+        limit: int,
+        offset: int,
+        category: str | None = None,
+        tag: str | None = None,
+        subtags: list[str] | None = None,
+    ):
         self.calls += 1
         return [f"page-{limit}-{offset}-{category}-call{self.calls}"]
 

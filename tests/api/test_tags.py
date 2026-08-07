@@ -130,3 +130,57 @@ def test_tags_response_is_cached_within_the_ttl(client):
     tags_route._tags_cache = None
     after = client.get("/tags").json()
     assert [t["slug"] for t in after["tags"]] == ["politics", "sports"]
+
+
+# ----- GET /events tag filtering ----------------------------------------------
+
+
+def _event_slugs(response) -> set[str]:
+    return {e["slug"] for e in response.json()}
+
+
+def test_events_filters_by_tag(client):
+    _seed({"a": ["politics", "trump"], "b": ["sports", "tennis"]})
+    assert _event_slugs(client.get("/events?limit=10&tag=politics")) == {"a"}
+
+
+def test_events_filters_by_repeated_subtag_ored(client):
+    _seed(
+        {
+            "a": ["politics", "trump"],
+            "b": ["politics", "midterms"],
+            "c": ["politics", "iran"],
+        }
+    )
+    got = _event_slugs(
+        client.get("/events?limit=10&tag=politics&subtag=trump&subtag=midterms")
+    )
+    assert got == {"a", "b"}
+
+
+def test_events_tag_is_case_insensitive(client):
+    _seed({"a": ["politics"]})
+    assert _event_slugs(client.get("/events?limit=10&tag=Politics")) == {"a"}
+
+
+def test_events_blank_tag_does_not_collapse_the_page(client):
+    _seed({"a": ["politics"], "b": ["sports"]})
+    assert len(_event_slugs(client.get("/events?limit=10&tag=%20"))) == 2
+
+
+def test_events_cache_does_not_serve_a_filtered_page_to_an_unfiltered_request(client):
+    """The cache key must include the tag. Without it, the filtered page below
+    would be served to the unfiltered request for up to one TTL."""
+    _seed({"a": ["politics"], "b": ["sports"]})
+    assert _event_slugs(client.get("/events?limit=10&offset=0&tag=politics")) == {"a"}
+    assert len(_event_slugs(client.get("/events?limit=10&offset=0"))) == 2
+
+
+def test_events_cache_distinguishes_subtag_sets(client):
+    _seed({"a": ["politics", "trump"], "b": ["politics", "midterms"]})
+    one = _event_slugs(client.get("/events?limit=10&offset=0&tag=politics&subtag=trump"))
+    two = _event_slugs(
+        client.get("/events?limit=10&offset=0&tag=politics&subtag=midterms")
+    )
+    assert one == {"a"}
+    assert two == {"b"}

@@ -26,7 +26,12 @@ class EventService:
         self._db = db
 
     def list_events(
-        self, limit: int, offset: int, category: str | None = None
+        self,
+        limit: int,
+        offset: int,
+        category: str | None = None,
+        tag: str | None = None,
+        subtags: list[str] | None = None,
     ) -> ListEventsResponse:
         if limit < 1 or limit > 1000:
             raise InvalidPaginationError("limit must be between 1 and 1000")
@@ -38,6 +43,8 @@ class EventService:
                 limit=limit,
                 offset=offset,
                 category=category,
+                tag=tag,
+                subtags=subtags,
             )
         events = [
             EventWithMarkets(event=event, markets=markets) for event, markets in pairs
@@ -47,7 +54,12 @@ class EventService:
         )
 
     def list_events_gamma(
-        self, limit: int, offset: int, category: str | None = None
+        self,
+        limit: int,
+        offset: int,
+        category: str | None = None,
+        tag: str | None = None,
+        subtags: list[str] | None = None,
     ) -> list[GammaEvent]:
         if limit < 1 or limit > 1000:
             raise InvalidPaginationError("limit must be between 1 and 1000")
@@ -55,7 +67,12 @@ class EventService:
             raise InvalidPaginationError("offset must be non-negative")
         with self._db.read() as conn:
             pairs, _total = TableRead.list_events_with_markets(
-                conn, limit=limit, offset=offset, category=category
+                conn,
+                limit=limit,
+                offset=offset,
+                category=category,
+                tag=tag,
+                subtags=subtags,
             )
             all_markets = [m for _event, markets in pairs for m in markets]
             prices = prices_for_markets(conn, all_markets)
