@@ -195,6 +195,25 @@ def test_backfill_gives_a_merge_maker_the_complementary_token(db):
     assert _kinds(db) == [("bfg-n", "bfg-y", "MERGE")]
 
 
+def test_backfill_leaves_maker_asset_null_when_the_complement_cant_be_resolved(db):
+    """A token no market claims can't be resolved to a complement. Leaving
+    MAKER_ASSET_ID NULL keeps `_token_flow`'s COALESCE(MAKER_ASSET_ID,
+    ASSET_ID) reading the taker's own token, instead of asserting a token
+    the maker never actually held."""
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, ASSET_ID, SIDE, PRICE, TRADE_SIZE, "
+        "STATUS, MAKER_ORDERS) VALUES (%s, 'orphan-tok', 'BUY', 400000, 100, "
+        "'matched', %s)",
+        (uuid.uuid4().hex, json.dumps([{"side": "BUY"}])),
+    )
+    backfill_trade_match_kind(db)
+    row = db.execute(
+        "SELECT MAKER_ASSET_ID, MATCH_KIND FROM trades WHERE ASSET_ID='orphan-tok'"
+    ).fetchone()
+    assert row["MATCH_KIND"] == "MINT"
+    assert row["MAKER_ASSET_ID"] is None
+
+
 def test_backfill_leaves_already_labelled_rows_alone(db):
     """Idempotent: it only fills rows the columns never reached."""
     m = _binary_market(db, "bfi")

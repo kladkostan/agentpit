@@ -22,7 +22,11 @@ The taker's side is on the row, the maker's is inside MAKER_ORDERS, and
 those two decide the match kind exactly as the matcher decided it. The
 maker's token is then the same asset for a NORMAL match, or the market's
 other outcome for a MINT/MERGE — `markets.ERC1155_TOKENS` still holds the
-pair.
+pair. When that pair can't be resolved (a non-binary market, or a token no
+market claims), MAKER_ASSET_ID is left NULL rather than guessing the taker's
+asset: `AccountService._token_flow` already reads
+`COALESCE(MAKER_ASSET_ID, ASSET_ID)`, so behaviour is unchanged — the row
+just records "unknown" instead of asserting a token the maker never held.
 
     .venv/bin/python -m scripts.backfill_trade_match_kind [--dry-run]
 """
@@ -61,10 +65,10 @@ def _complements(conn: psycopg.Connection) -> dict[str, str]:
 
 def _compute_updates(
     rows: list, complements: dict[str, str]
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str | None, str, str]]:
     """`[(maker_asset_id, match_kind, trade_id), ...]` for a batch of rows
     selected with `SELECT TRADE_ID, ASSET_ID, SIDE, MAKER_ORDERS`."""
-    updates: list[tuple[str, str, str]] = []
+    updates: list[tuple[str | None, str, str]] = []
     for r in rows:
         taker_side = r["SIDE"]
         mo = r["MAKER_ORDERS"]
@@ -81,12 +85,12 @@ def _compute_updates(
         else:
             kind = "NORMAL"
         # A complement we cannot resolve (non-binary market, or a token no
-        # market claims) falls back to the taker's asset: wrong for a mint,
-        # but no worse than the NULL it replaces, and it keeps the column
-        # total so readers need no second code path.
-        maker_asset = (
-            asset if kind == "NORMAL" else complements.get(asset, asset)
-        )
+        # market claims) is left NULL rather than falling back to the
+        # taker's asset: `AccountService._token_flow` already reads
+        # `COALESCE(MAKER_ASSET_ID, ASSET_ID)`, so behaviour is identical —
+        # but the row then records "unknown" instead of asserting a token
+        # the maker never actually held.
+        maker_asset = asset if kind == "NORMAL" else complements.get(asset)
         updates.append((maker_asset, kind, r["TRADE_ID"]))
     return updates
 
@@ -134,9 +138,10 @@ def main() -> None:
     mint = sum(1 for _, kind, _ in updates if kind == "MINT")
     merge = sum(1 for _, kind, _ in updates if kind == "MERGE")
     normal = sum(1 for _, kind, _ in updates if kind == "NORMAL")
+    unresolved = sum(1 for maker_asset, _, _ in updates if maker_asset is None)
     print(
         f"{len(updates)} unlabelled trades: {normal} NORMAL, {mint} MINT, "
-        f"{merge} MERGE"
+        f"{merge} MERGE ({unresolved} with an unresolved complement)"
         f"{' (dry run)' if args.dry_run else ''}"
     )
 
