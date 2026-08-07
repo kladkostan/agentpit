@@ -198,6 +198,24 @@ def test_list_tag_facets_orders_by_event_count_descending(db):
     assert [(s, c) for s, _, c in rows] == [("elections", 3), ("iran", 1)]
 
 
+def test_list_tag_facets_finds_cross_market_co_occurrence(db):
+    """Co-occurrence is at EVENT level, not market level: `politics` on one
+    market and `trump` on a *different* market of the same event must still
+    pair up as a facet. A regression that joined `parent_events` on
+    MARKET_ID instead of EVENT_ID would miss this and pass every other facet
+    test, since they all put parent and facet tags on the same market."""
+    _event_with_tagged_markets(db, slug="r1", tags_per_market=[["politics"], ["trump"]])
+    rows = TableRead.list_tag_facets(
+        db,
+        parent_slug="politics",
+        blocked=frozenset(),
+        deprecated_prefix="deprec-",
+        limit=20,
+        max_coverage=1.0,
+    )
+    assert [(s, c) for s, _, c in rows] == [("trump", 1)]
+
+
 def test_list_tag_facets_excludes_the_parent_itself(db):
     _event_with_tagged_markets(db, slug="q1", tags_per_market=[["politics", "iran"]])
     rows = TableRead.list_tag_facets(
