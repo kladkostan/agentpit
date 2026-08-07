@@ -13,6 +13,7 @@ change exists to fix, reintroduced one level down.
 from __future__ import annotations
 
 from enum import Enum
+from typing import ClassVar
 
 
 class EventSort(str, Enum):
@@ -24,6 +25,12 @@ class EventSort(str, Enum):
     COMPETITIVE = "competitive"
     NEWEST = "newest"
     ENDING_SOON = "endingSoon"
+
+    #: Assigned after the class body (see below) — an Enum treats a plain
+    #: class attribute as another member, so DEFAULT cannot be given a value
+    #: inside the class. An annotation with no value is not a member, so this
+    #: only declares the attribute's type for the checker.
+    DEFAULT: ClassVar["EventSort"]
 
     @classmethod
     def parse(cls, value: object) -> "EventSort":
@@ -50,9 +57,7 @@ class EventSort(str, Enum):
         return _ORDER_BY[self]
 
 
-#: Assigned after the class body — an Enum treats a plain class attribute as
-#: another member, so DEFAULT cannot be declared inside it.
-EventSort.DEFAULT = EventSort.VOLUME_24H  # type: ignore[attr-defined]
+EventSort.DEFAULT = EventSort.VOLUME_24H
 
 _ORDER_BY: "dict[EventSort, str]" = {
     # Unchanged, and pinned by tests/test_event_volume.py: this is what the
