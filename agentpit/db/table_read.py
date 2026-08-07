@@ -8,6 +8,7 @@ from web3 import Web3
 
 from agentpit.utils.parse import parse_32b_hex_private_key
 from agentpit.datastructures.event import Event
+from agentpit.datastructures.event_sort import EventSort
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.user import User
@@ -642,6 +643,7 @@ class TableRead:
         category: str | None = None,
         tag: str | None = None,
         subtags: "list[str] | None" = None,
+        sort: "EventSort | None" = None,
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ranked by upstream 24h volume, each paired with its
         child markets.
@@ -664,6 +666,12 @@ class TableRead:
         slug. They compose with each other and with ``category`` as AND, while
         ``subtags`` ORs within itself. Blank and whitespace-only values count
         as absent, exactly as ``category`` does.
+
+        ``sort`` chooses the ordering; ``None`` means
+        ``EventSort.DEFAULT`` — 24h volume, the ranking the home page has used
+        since before sorting was a choice. Every clause ends in ``EVENT_ID
+        DESC`` so equal values cannot swap between pages, and puts missing
+        values last so a never-captured event never leads the list.
         """
         # Predicates accumulate and are joined with AND; the tag filters are
         # EXISTS subqueries because an event's tag set lives on its markets.
@@ -703,7 +711,8 @@ class TableRead:
         ).fetchone()["CNT"]
         events_cur = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events{where} "
-            "ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC LIMIT %s OFFSET %s",
+            f"ORDER BY {(sort or EventSort.DEFAULT).order_by()} "
+            "LIMIT %s OFFSET %s",
             tuple(params + [limit, offset]),
         )
         events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]

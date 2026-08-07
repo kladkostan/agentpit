@@ -197,3 +197,148 @@ def test_extract_event_metadata_survives_unparseable_metrics():
     assert meta is not None
     assert meta["liquidity"] is None
     assert meta["competitive"] is None
+
+
+# ----- ordering the listing ---------------------------------------------------
+
+from agentpit.datastructures.condition_id import ConditionId  # noqa: E402
+from agentpit.datastructures.create_market_request import CreateMarketRequest  # noqa: E402
+from agentpit.datastructures.market_state import MarketState  # noqa: E402
+
+
+def _make_market(
+    db,
+    *,
+    question: str,
+    cond_id: str,
+    event_id: int | None = None,
+    outcome_label: str | None = None,
+    icon_url: str | None = None,
+):
+    """Insert a market via the write path. Returns the created Market."""
+    request = CreateMarketRequest(
+        question=question,
+        description=f"desc for {question}",
+        erc1155_tokens=[(f"{cond_id}-yes", "Yes"), (f"{cond_id}-no", "No")],
+        slug=question.lower().replace(" ", "-").replace("?", ""),
+        condition_id=ConditionId(cond_id),
+        state=MarketState.ACTIVE,
+        event_id=event_id,
+        outcome_label=outcome_label,
+        icon_url=icon_url,
+    )
+    return TableWrite.create_market(db, request, is_polygon_market=False)
+
+
+def _hex32(seed: str) -> str:
+    """Return a 32-byte hex condition_id derived from a short label."""
+    payload = seed.encode().hex().ljust(64, "0")[:64]
+    return "0x" + payload
+
+
+def _event(db, slug, **cols):
+    """An event with whatever metrics the test cares about."""
+    ev = TableWrite.upsert_event(
+        db,
+        slug=slug,
+        title=slug.upper(),
+        start_date=cols.pop("start_date", None),
+        end_date=cols.pop("end_date", None),
+    )
+    if "volume_24hr" in cols or "volume" in cols:
+        TableWrite.update_event_volume(
+            db, ev.event_id, cols.pop("volume_24hr", None), cols.pop("volume", None)
+        )
+    if "liquidity" in cols or "competitive" in cols:
+        TableWrite.update_event_metrics(
+            db, ev.event_id, cols.pop("liquidity", None), cols.pop("competitive", None)
+        )
+    assert not cols, f"unused: {cols}"
+    return ev
+
+
+def _slugs(db, sort):
+    pairs, _total = TableRead.list_events_with_markets(db, limit=50, offset=0, sort=sort)
+    return [ev.slug for ev, _ in pairs]
+
+
+def test_default_sort_is_unchanged_when_none_is_passed(db):
+    _event(db, "lo", volume_24hr=1.0)
+    _event(db, "hi", volume_24hr=99.0)
+    assert _slugs(db, None) == ["hi", "lo"]
+
+
+def test_total_volume_ranks_on_the_all_time_figure(db):
+    # Deliberately opposed to the 24h figure, so a sort that ignored the
+    # parameter would fail rather than coincidentally pass.
+    _event(db, "a", volume_24hr=100.0, volume=1.0)
+    _event(db, "b", volume_24hr=1.0, volume=100.0)
+    assert _slugs(db, EventSort.TOTAL_VOLUME) == ["b", "a"]
+    assert _slugs(db, EventSort.VOLUME_24H) == ["a", "b"]
+
+
+def test_liquidity_and_competitive_are_different_sorts(db):
+    """They ranked identically before this change, because both were computed
+    from the number of outcomes."""
+    _event(db, "deep", liquidity=1_000_000.0, competitive=0.10)
+    _event(db, "contested", liquidity=100.0, competitive=0.99)
+    assert _slugs(db, EventSort.LIQUIDITY) == ["deep", "contested"]
+    assert _slugs(db, EventSort.COMPETITIVE) == ["contested", "deep"]
+
+
+def test_newest_ranks_on_start_date_descending(db):
+    _event(db, "old", start_date=1_000)
+    _event(db, "new", start_date=9_000)
+    assert _slugs(db, EventSort.NEWEST) == ["new", "old"]
+
+
+def test_ending_soon_ranks_on_end_date_ascending(db):
+    _event(db, "later", end_date=9_000)
+    _event(db, "sooner", end_date=1_000)
+    assert _slugs(db, EventSort.ENDING_SOON) == ["sooner", "later"]
+
+
+def test_missing_values_sort_last_even_when_ascending(db):
+    """The trap: NULL sorts FIRST by default under ASC in Postgres, which
+    would put every never-captured event at the top of "Ending Soon"."""
+    _event(db, "dated", end_date=5_000)
+    _event(db, "undated")
+    assert _slugs(db, EventSort.ENDING_SOON) == ["dated", "undated"]
+
+
+def test_missing_values_sort_last_when_descending(db):
+    _event(db, "measured", liquidity=5.0)
+    _event(db, "unmeasured")
+    assert _slugs(db, EventSort.LIQUIDITY) == ["measured", "unmeasured"]
+
+
+def test_ties_break_on_event_id_so_pages_do_not_overlap(db):
+    """Equal sort values with no unique tiebreak let two events swap between
+    LIMIT/OFFSET pages — one shown twice, the other never."""
+    first = _event(db, "t1", liquidity=42.0)
+    second = _event(db, "t2", liquidity=42.0)
+    assert _slugs(db, EventSort.LIQUIDITY) == ["t2", "t1"]
+    assert second.event_id > first.event_id
+
+    page1, _ = TableRead.list_events_with_markets(
+        db, limit=1, offset=0, sort=EventSort.LIQUIDITY
+    )
+    page2, _ = TableRead.list_events_with_markets(
+        db, limit=1, offset=1, sort=EventSort.LIQUIDITY
+    )
+    assert [e.slug for e, _ in page1] + [e.slug for e, _ in page2] == ["t2", "t1"]
+
+
+def test_sort_composes_with_a_tag_filter(db):
+    """Filtering and ordering are independent: the sort must apply to the
+    filtered set, not to the whole table."""
+    keep = _event(db, "keep", liquidity=1.0)
+    _event(db, "drop", liquidity=999.0)
+    market = _make_market(db, question="q1?", cond_id=_hex32("s1"), event_id=keep.event_id)
+    TableWrite.replace_market_tags(db, market_id=market.market_id, tags=[("politics", "Politics")])
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=50, offset=0, tag="politics", sort=EventSort.LIQUIDITY
+    )
+    assert [ev.slug for ev, _ in pairs] == ["keep"]
+    assert total == 1
