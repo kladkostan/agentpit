@@ -146,7 +146,7 @@ export function MarketsPage() {
     isFetchingNextPage,
     isLoading,
     refetch,
-  } = useEventsInfinite(selectedCategory, selectedFacetSlugs);
+  } = useEventsInfinite(selectedCategory, selectedFacetSlugs, sortMode);
 
   const categoriesWithAll = useMemo<TagNavEntry[]>(
     () => [ALL_TAB, ...navTags],
@@ -168,67 +168,17 @@ export function MarketsPage() {
     "size-2.5 rounded-full bg-muted-foreground/70";
 
   const filtered = useMemo(() => {
-    const queryFiltered =
-      trimmedQuery.length === 0
-        ? events
-        : events.filter(({ event, markets }) => {
-          if (event.title.toLowerCase().includes(trimmedQuery)) return true;
-          return markets.some((m) =>
-            (m.outcome_label ?? m.question).toLowerCase().includes(trimmedQuery),
-          );
-        });
-
-    const sorted = [...queryFiltered];
-    sorted.sort((a, b) => {
-      if (sortMode === "volume24h" || sortMode === "totalVolume") {
-        // "24hr Volume" sorts on the figure the server ranks by
-        // (ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC), so the client
-        // ordering agrees with the server's instead of silently reverting the
-        // page to roughly newest-first. "Total Volume" sorts on the all-time
-        // figure — until it existed, the two menu entries were the same sort.
-        const key = sortMode === "totalVolume" ? "volume" : "volume_24hr";
-        const aVolume = a.event[key] ?? 0;
-        const bVolume = b.event[key] ?? 0;
-        if (bVolume !== aVolume) return bVolume - aVolume;
-        const aLiveCount = a.markets.filter((m) => m.market_state === "ACTIVE").length;
-        const bLiveCount = b.markets.filter((m) => m.market_state === "ACTIVE").length;
-        if (bLiveCount !== aLiveCount) return bLiveCount - aLiveCount;
-        return b.event.event_id - a.event.event_id;
-      }
-
-      if (sortMode === "liquidity") {
-        if (b.markets.length !== a.markets.length) {
-          return b.markets.length - a.markets.length;
-        }
-        return b.event.event_id - a.event.event_id;
-      }
-
-      if (sortMode === "endingSoon") {
-        const aEnd = a.event.end_date ?? Number.MAX_SAFE_INTEGER;
-        const bEnd = b.event.end_date ?? Number.MAX_SAFE_INTEGER;
-        if (aEnd !== bEnd) return aEnd - bEnd;
-        return b.event.event_id - a.event.event_id;
-      }
-
-      if (sortMode === "competitive") {
-        const aOutcomes = a.markets.length;
-        const bOutcomes = b.markets.length;
-        if (bOutcomes !== aOutcomes) return bOutcomes - aOutcomes;
-        return b.event.event_id - a.event.event_id;
-      }
-
-      const aStart = a.event.start_date ?? 0;
-      const bStart = b.event.start_date ?? 0;
-      if (bStart !== aStart) return bStart - aStart;
-      return b.event.event_id - a.event.event_id;
+    // No client-side sort: the server orders the whole catalogue, and
+    // re-sorting the pages that happen to be loaded is what put a $686M event
+    // on page two. Search still runs here, so it still needs eager paging.
+    if (trimmedQuery.length === 0) return events;
+    return events.filter(({ event, markets }) => {
+      if (event.title.toLowerCase().includes(trimmedQuery)) return true;
+      return markets.some((m) =>
+        (m.outcome_label ?? m.question).toLowerCase().includes(trimmedQuery),
+      );
     });
-
-    return sorted;
-  }, [
-    events,
-    sortMode,
-    trimmedQuery,
-  ]);
+  }, [events, trimmedQuery]);
 
   // Platform-wide, from the server. Counting the loaded pages instead reports
   // how far the user has scrolled — it read "93 live" on the first page while

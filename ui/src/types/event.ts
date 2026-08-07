@@ -15,6 +15,10 @@ export interface Event {
   /** Upstream all-time volume in USD; null when never synced from upstream.
    *  This is the figure the cards show — volume_24hr stays the ranking key. */
   volume: number | null;
+  /** Order-book depth in USD; null when never synced from upstream. */
+  liquidity: number | null;
+  /** How contested the odds are, 0..1; null when never synced. */
+  competitive: number | null;
 }
 
 export interface EventWithMarkets {
