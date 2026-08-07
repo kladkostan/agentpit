@@ -1,4 +1,7 @@
-# Assumptions : aLL database methods will be called holding a global lock
+# No global lock: DbSession.read()/write() (session.py) each check out their
+# own connection from the pool, so the methods below may run concurrently
+# across threads — every one of them operates only on the connection it is
+# given.
 import json
 
 import psycopg
