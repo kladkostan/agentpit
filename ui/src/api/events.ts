@@ -19,6 +19,10 @@ export interface ListEventsParams {
   /** Case-insensitive event category filter; omitted/blank means "all".
    *  Explicit `| undefined` because tsconfig sets exactOptionalPropertyTypes. */
   category?: string | undefined;
+  /** Top-level tag slug; omitted/blank means "all". */
+  tag?: string | undefined;
+  /** Facet slugs, OR-ed among themselves and AND-ed with `tag`. */
+  subtags?: string[] | undefined;
 }
 
 function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
@@ -48,6 +52,13 @@ export async function listEvents(
   if (params.category) {
     search.set("category", params.category);
   }
+  if (params.tag && params.tag.trim()) {
+    search.set("tag", params.tag.trim());
+  }
+  for (const subtag of params.subtags ?? []) {
+    // Repeated key, not a comma-joined value — FastAPI reads `subtag` as a list.
+    if (subtag.trim()) search.append("subtag", subtag.trim());
+  }
   const wire = await apiFetch<GammaEvent[]>(`/events?${search.toString()}`);
   // A fully-resolved event has nothing tradeable left — hide it from listings
   // (its price is frozen at the pre-resolution level and only confuses).
@@ -74,18 +85,31 @@ export async function getEvent(slug: string): Promise<EventWithMarkets> {
   return gammaToEventWithMarkets(g);
 }
 
-export function useEventsInfinite(category: string | null = null) {
-  const normalizedCategory = category?.trim() || null;
+export function useEventsInfinite(
+  tag: string | null = null,
+  subtags: string[] = [],
+) {
+  const normalizedTag = tag?.trim() || null;
+  // Sorted so the same OR set in a different click order reuses one page chain
+  // instead of refetching from scratch.
+  const normalizedSubtags = [...subtags].map((s) => s.trim()).filter(Boolean).sort();
   return useInfiniteQuery({
-    // The category is part of the key so switching categories starts a fresh
-    // page chain instead of appending onto the previous category's pages.
-    queryKey: ["events", "infinite", EVENTS_PAGE_SIZE, normalizedCategory],
+    // The filters are part of the key so switching them starts a fresh page
+    // chain instead of appending onto the previous filter's pages.
+    queryKey: [
+      "events",
+      "infinite",
+      EVENTS_PAGE_SIZE,
+      normalizedTag,
+      normalizedSubtags.join(","),
+    ],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       listEvents({
         limit: EVENTS_PAGE_SIZE,
         offset: pageParam,
-        category: normalizedCategory ?? undefined,
+        tag: normalizedTag ?? undefined,
+        subtags: normalizedSubtags,
       }),
     getNextPageParam: (lastPage) =>
       lastPage.hasMore ? lastPage.nextOffset : undefined,

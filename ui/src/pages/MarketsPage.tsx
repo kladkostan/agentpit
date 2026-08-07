@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useEventCategories, useEventsInfinite } from "@/api/events";
+import { useEventsInfinite } from "@/api/events";
+import { useTags, type TagFacet, type TagNavEntry } from "@/api/tags";
 import { useMarketStats } from "@/api/markets";
 import { useDismissOnOutside } from "@/lib/useDismissOnOutside";
 import { ScrollToTop } from "@/components/ScrollToTop";
@@ -13,9 +14,11 @@ import {
   ChevronDown,
   Clapperboard,
   Clock3,
+  CloudSun,
   Cpu,
   Droplets,
   FlaskConical,
+  Gamepad2,
   Globe2,
   Landmark,
   LayoutGrid,
@@ -31,49 +34,8 @@ import {
 import { useSearch } from "@/lib/searchContext";
 import type { EventWithMarkets } from "@/types/event";
 
-const POLYMARKET_CATEGORY_ORDER = [
-  "Politics",
-  "Sports",
-  "Crypto",
-  "Business",
-  "Science",
-  "Technology",
-  "World",
-  "Pop Culture",
-] as const;
-
 function normalizeCategoryKey(category: string): string {
   return category.trim().toLowerCase();
-}
-
-function buildCategoryList(rawCategories: string[]): string[] {
-  const normalizedToRaw = new Map<string, string>();
-  for (const category of rawCategories) {
-    const trimmed = category.trim();
-    if (!trimmed) continue;
-    const key = normalizeCategoryKey(trimmed);
-    if (!normalizedToRaw.has(key)) {
-      normalizedToRaw.set(key, trimmed);
-    }
-  }
-
-  // POLYMARKET_CATEGORY_ORDER is an ORDERING hint only, never a source of
-  // categories: rendering a canonical label the backend never reported
-  // advertises a filter that is guaranteed to yield an empty grid (and it
-  // would render all 8 even when /events/categories is empty or errors).
-  const ordered: string[] = [];
-  for (const canonical of POLYMARKET_CATEGORY_ORDER) {
-    const key = normalizeCategoryKey(canonical);
-    const existing = normalizedToRaw.get(key);
-    if (existing === undefined) continue;
-    ordered.push(existing);
-    normalizedToRaw.delete(key);
-  }
-
-  const extras = [...normalizedToRaw.values()].sort((a, b) =>
-    a.localeCompare(b),
-  );
-  return [...ordered, ...extras];
 }
 
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
@@ -81,21 +43,24 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   politics: Landmark,
   sports: Trophy,
   crypto: Bitcoin,
+  elections: Landmark,
+  geopolitics: Globe2,
+  tennis: Trophy,
+  esports: Gamepad2,
+  soccer: Trophy,
+  weather: CloudSun,
+  tech: Cpu,
+  "pop-culture": Clapperboard,
+  finance: CircleDollarSign,
+  economy: BriefcaseBusiness,
+  world: Globe2,
+  ai: Cpu,
   business: BriefcaseBusiness,
   science: FlaskConical,
-  technology: Cpu,
-  world: Globe2,
-  "pop culture": Clapperboard,
 };
 
 function getCategoryIcon(category: string): LucideIcon {
   return CATEGORY_ICONS[normalizeCategoryKey(category)] ?? Tag;
-}
-
-interface SubcategoryOption {
-  id: string;
-  label: string;
-  keywords: string[];
 }
 
 type SortMode =
@@ -125,159 +90,6 @@ const DEFAULT_SORT_OPTION = SORT_OPTIONS[0] ?? {
   icon: ArrowUpRight,
 };
 
-const CATEGORY_SUBCATEGORIES: Record<string, SubcategoryOption[]> = {
-  politics: [
-    {
-      id: "us-elections",
-      label: "US Elections",
-      keywords: ["election", "vote", "primary", "president"],
-    },
-    {
-      id: "congress",
-      label: "Congress",
-      keywords: ["senate", "house", "congress"],
-    },
-    {
-      id: "geopolitics",
-      label: "Geopolitics",
-      keywords: ["war", "conflict", "geopolitics", "diplomacy"],
-    },
-  ],
-  sports: [
-    {
-      id: "soccer",
-      label: "Soccer",
-      keywords: ["soccer", "football", "fifa", "uefa", "champions league"],
-    },
-    {
-      id: "nba",
-      label: "NBA",
-      keywords: ["nba", "basketball"],
-    },
-    {
-      id: "nfl",
-      label: "NFL",
-      keywords: ["nfl", "super bowl", "football"],
-    },
-    {
-      id: "combat",
-      label: "MMA/Boxing",
-      keywords: ["ufc", "boxing", "mma"],
-    },
-  ],
-  crypto: [
-    {
-      id: "bitcoin",
-      label: "Bitcoin",
-      keywords: ["bitcoin", "btc"],
-    },
-    {
-      id: "ethereum",
-      label: "Ethereum",
-      keywords: ["ethereum", "eth"],
-    },
-    {
-      id: "solana",
-      label: "Solana",
-      keywords: ["solana", "sol"],
-    },
-    {
-      id: "airdrops",
-      label: "Airdrops",
-      keywords: ["airdrop", "token launch"],
-    },
-  ],
-  business: [
-    {
-      id: "markets",
-      label: "Markets",
-      keywords: ["stocks", "s&p", "nasdaq", "dow"],
-    },
-    {
-      id: "earnings",
-      label: "Earnings",
-      keywords: ["earnings", "revenue", "guidance"],
-    },
-    {
-      id: "macro",
-      label: "Macro",
-      keywords: ["inflation", "fed", "rate", "recession"],
-    },
-  ],
-  science: [
-    {
-      id: "space",
-      label: "Space",
-      keywords: ["space", "mars", "nasa", "rocket"],
-    },
-    {
-      id: "health",
-      label: "Health",
-      keywords: ["health", "drug", "trial", "fda"],
-    },
-    {
-      id: "climate",
-      label: "Climate",
-      keywords: ["climate", "temperature", "emissions"],
-    },
-  ],
-  technology: [
-    {
-      id: "ai",
-      label: "AI",
-      keywords: ["ai", "artificial intelligence", "model"],
-    },
-    {
-      id: "hardware",
-      label: "Hardware",
-      keywords: ["chip", "gpu", "cpu", "semiconductor"],
-    },
-    {
-      id: "apps",
-      label: "Consumer Tech",
-      keywords: ["app", "platform", "launch", "iphone", "android"],
-    },
-  ],
-  world: [
-    {
-      id: "europe",
-      label: "Europe",
-      keywords: ["europe", "eu", "uk"],
-    },
-    {
-      id: "asia",
-      label: "Asia",
-      keywords: ["asia", "china", "japan", "india"],
-    },
-    {
-      id: "latam",
-      label: "LatAm",
-      keywords: ["latam", "latin america", "brazil", "mexico"],
-    },
-  ],
-  "pop culture": [
-    {
-      id: "movies",
-      label: "Movies",
-      keywords: ["movie", "film", "oscar"],
-    },
-    {
-      id: "music",
-      label: "Music",
-      keywords: ["music", "album", "grammy"],
-    },
-    {
-      id: "celebs",
-      label: "Celebrities",
-      keywords: ["celebrity", "celeb", "actor", "artist"],
-    },
-  ],
-};
-
-function getSubcategories(category: string): SubcategoryOption[] {
-  return CATEGORY_SUBCATEGORIES[normalizeCategoryKey(category)] ?? [];
-}
-
 function getSubcategorySelectionKey(
   category: string,
   subcategoryId: string,
@@ -285,18 +97,18 @@ function getSubcategorySelectionKey(
   return `${normalizeCategoryKey(category)}::${subcategoryId}`;
 }
 
-function eventMatchesKeywords(
-  event: EventWithMarkets["event"],
-  markets: EventWithMarkets["markets"],
-  keywords: string[],
-): boolean {
-  const text = `${event.title} ${markets
-    .map((m) => m.outcome_label ?? m.question)
-    .join(" ")}`.toLowerCase();
-  return keywords.some((keyword) => text.includes(keyword.toLowerCase()));
-}
+const ALL_TAB: TagNavEntry = {
+  slug: "all",
+  label: "All",
+  count: 0,
+  facets: [],
+};
 
 export function MarketsPage() {
+  const { data: tagsData } = useTags();
+  const navTags = useMemo<TagNavEntry[]>(() => tagsData?.tags ?? [], [tagsData]);
+
+  // Selected values are SLUGS now, not display labels.
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [expandedSubcategories, setExpandedSubcategories] = useState<
     Record<string, boolean>
@@ -308,7 +120,23 @@ export function MarketsPage() {
   const sortMenuRef = useRef<HTMLDivElement>(null);
   useDismissOnOutside(sortMenuRef, () => setShowSortMenu(false), showSortMenu);
   const [sortMode, setSortMode] = useState<SortMode>("volume24h");
-  const { data: categoriesData } = useEventCategories();
+
+  const facetsByCategory = useMemo(() => {
+    const out = new Map<string, TagFacet[]>();
+    for (const t of navTags) out.set(t.slug, t.facets);
+    return out;
+  }, [navTags]);
+
+  // Bare facet slugs for the selected category, stripped of the "parent::"
+  // scoping the selection state carries.
+  const selectedFacetSlugs = useMemo(() => {
+    if (!selectedCategory) return [];
+    const prefix = `${normalizeCategoryKey(selectedCategory)}::`;
+    return selectedSubcategories
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length));
+  }, [selectedCategory, selectedSubcategories]);
+
   const {
     data,
     error,
@@ -317,15 +145,11 @@ export function MarketsPage() {
     isFetchingNextPage,
     isLoading,
     refetch,
-  } = useEventsInfinite(selectedCategory);
+  } = useEventsInfinite(selectedCategory, selectedFacetSlugs);
 
-  const categories = useMemo(
-    () => buildCategoryList(categoriesData?.categories ?? []),
-    [categoriesData?.categories],
-  );
-  const categoriesWithAll = useMemo(
-    () => ["All", ...categories],
-    [categories],
+  const categoriesWithAll = useMemo<TagNavEntry[]>(
+    () => [ALL_TAB, ...navTags],
+    [navTags],
   );
 
   const events = useMemo<EventWithMarkets[]>(
@@ -342,16 +166,6 @@ export function MarketsPage() {
   const tabSelectedIndicatorClassName =
     "size-2.5 rounded-full bg-muted-foreground/70";
 
-  const selectedSubcategoryOptions = useMemo(() => {
-    if (!selectedCategory) return [];
-
-    return getSubcategories(selectedCategory).filter((subcategory) =>
-      selectedSubcategories.includes(
-        getSubcategorySelectionKey(selectedCategory, subcategory.id),
-      ),
-    );
-  }, [selectedCategory, selectedSubcategories]);
-
   const filtered = useMemo(() => {
     const queryFiltered =
       trimmedQuery.length === 0
@@ -363,16 +177,7 @@ export function MarketsPage() {
           );
         });
 
-    const withSubcategories =
-      selectedSubcategoryOptions.length === 0
-        ? queryFiltered
-        : queryFiltered.filter(({ event, markets }) =>
-          selectedSubcategoryOptions.some((subcategory) =>
-            eventMatchesKeywords(event, markets, subcategory.keywords),
-          ),
-        );
-
-    const sorted = [...withSubcategories];
+    const sorted = [...queryFiltered];
     sorted.sort((a, b) => {
       if (sortMode === "volume24h" || sortMode === "totalVolume") {
         // "24hr Volume" sorts on the figure the server ranks by
@@ -420,7 +225,6 @@ export function MarketsPage() {
     return sorted;
   }, [
     events,
-    selectedSubcategoryOptions,
     sortMode,
     trimmedQuery,
   ]);
@@ -432,8 +236,7 @@ export function MarketsPage() {
   const activeCount = marketStats?.active ?? null;
 
   const isSearching = trimmedQuery.length > 0;
-  const hasClientSideFilter =
-    isSearching || selectedSubcategoryOptions.length > 0;
+  const hasClientSideFilter = isSearching;
 
   // Any filter that runs client-side only sees the pages already loaded, so
   // eagerly pull the remaining pages while one is active. The
@@ -516,23 +319,23 @@ export function MarketsPage() {
     <section className="space-y-8">
       <ScrollToTop />
       <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
-        {categoriesWithAll.map((category) => {
-          const isAll = category === "All";
+        {categoriesWithAll.map((entry) => {
+          const isAll = entry.slug === "all";
           const isSelected = isAll
             ? selectedCategory === null
-            : selectedCategory === category;
-          const Icon = getCategoryIcon(category);
+            : selectedCategory === entry.slug;
+          const Icon = getCategoryIcon(entry.slug);
           return (
             <Button
-              key={category}
+              key={entry.slug}
               type="button"
               variant={isSelected ? "default" : "outline"}
               size="sm"
               className="shrink-0 gap-1.5"
-              onClick={() => handleCategorySelect(isAll ? null : category)}
+              onClick={() => handleCategorySelect(isAll ? null : entry.slug)}
             >
               <Icon className="size-4" aria-hidden />
-              {category}
+              {entry.label}
             </Button>
           );
         })}
@@ -545,7 +348,7 @@ export function MarketsPage() {
               Subcategories
             </span>
 
-            {getSubcategories(selectedCategory).length > 0 ? (
+            {(facetsByCategory.get(selectedCategory) ?? []).length > 0 ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -573,20 +376,20 @@ export function MarketsPage() {
 
           {expandedSubcategories[normalizeCategoryKey(selectedCategory)] ? (
             <div className="border-l border-border/70 pl-3 flex flex-col gap-1.5">
-              {getSubcategories(selectedCategory).map((subcategory) => {
+              {(facetsByCategory.get(selectedCategory) ?? []).map((subcategory) => {
                 const isSubSelected = selectedSubcategories.includes(
-                  getSubcategorySelectionKey(selectedCategory, subcategory.id),
+                  getSubcategorySelectionKey(selectedCategory, subcategory.slug),
                 );
 
                 return (
                   <Button
-                    key={subcategory.id}
+                    key={subcategory.slug}
                     type="button"
                     variant={isSubSelected ? "default" : "outline"}
                     size="sm"
                     className="h-9 w-full justify-start gap-1.5"
                     onClick={() =>
-                      handleSubcategoryToggle(selectedCategory, subcategory.id)
+                      handleSubcategoryToggle(selectedCategory, subcategory.slug)
                     }
                   >
                     {isSubSelected ? <Check className="size-3.5" aria-hidden /> : null}
@@ -606,31 +409,31 @@ export function MarketsPage() {
               Categories
             </p>
             <nav className="mt-3 flex flex-col gap-1">
-              {categoriesWithAll.map((category) => {
-                const isAll = category === "All";
+              {categoriesWithAll.map((entry) => {
+                const isAll = entry.slug === "all";
                 const isSelected = isAll
                   ? selectedCategory === null
-                  : selectedCategory === category;
-                const Icon = getCategoryIcon(category);
-                const subcategories = isAll ? [] : getSubcategories(category);
-                const categoryKey = normalizeCategoryKey(category);
+                  : selectedCategory === entry.slug;
+                const Icon = getCategoryIcon(entry.slug);
+                const subcategories = isAll ? [] : entry.facets;
+                const categoryKey = normalizeCategoryKey(entry.slug);
                 const isExpanded = expandedSubcategories[categoryKey];
                 const arrowColorClass = isSelected
                   ? "text-primary-foreground"
                   : "text-foreground";
 
                 return (
-                  <div key={category} className="space-y-1">
+                  <div key={entry.slug} className="space-y-1">
                     <div className="relative">
                       <Button
                         type="button"
                         variant={isSelected ? "default" : "ghost"}
                         size="sm"
                         className="min-w-0 w-full justify-start gap-1.5 pr-8"
-                        onClick={() => handleCategorySelect(isAll ? null : category)}
+                        onClick={() => handleCategorySelect(isAll ? null : entry.slug)}
                       >
                         <Icon className="size-4" aria-hidden />
-                        <span className="truncate">{category}</span>
+                        <span className="truncate">{entry.label}</span>
                       </Button>
 
                       {subcategories.length > 0 ? (
@@ -659,18 +462,18 @@ export function MarketsPage() {
                       <div className="ml-5 border-l border-border/70 pl-3 flex flex-col gap-1 pb-1">
                         {subcategories.map((subcategory) => {
                           const isSubSelected = selectedSubcategories.includes(
-                            getSubcategorySelectionKey(category, subcategory.id),
+                            getSubcategorySelectionKey(entry.slug, subcategory.slug),
                           );
 
                           return (
                             <Button
-                              key={subcategory.id}
+                              key={subcategory.slug}
                               type="button"
                               variant={isSubSelected ? "default" : "outline"}
                               size="sm"
                               className="h-8 w-full justify-start gap-1 px-2 text-xs"
                               onClick={() =>
-                                handleSubcategoryToggle(category, subcategory.id)
+                                handleSubcategoryToggle(entry.slug, subcategory.slug)
                               }
                             >
                               {subcategory.label}
