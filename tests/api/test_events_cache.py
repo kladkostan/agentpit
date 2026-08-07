@@ -1,9 +1,12 @@
 """The /events listing has a short-TTL response cache so a high client poll
 rate collapses to ~one DB read per TTL window.
 
-The cache key is `(limit, offset, category)`: once the listing gained a
-category filter, keying on `(limit, offset)` alone would serve one category's
-page to every other category.
+The cache key is `(limit, offset, category, tag, sorted_subtags)`: once the
+listing gained a category filter, keying on `(limit, offset)` alone would serve
+one category's page to every other category. Similarly, tag and subtags filters
+must be part of the key to avoid serving a filtered page to an unfiltered
+request. Subtags are sorted to ensure that `?subtag=a&subtag=b` and
+`?subtag=b&subtag=a` (the same OR set) share a single cache entry.
 """
 
 import agentpit.api.routes.events as events
