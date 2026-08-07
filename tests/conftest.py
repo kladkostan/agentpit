@@ -56,6 +56,11 @@ def _isolated_db_session():
     from agentpit.api.routes import events as _events_route
 
     _events_route._events_cache.clear()
+    # Same reason as the events cache above: /tags holds a single 30s slot, so
+    # a response built from a previous test's rows would be served to the next.
+    from agentpit.api.routes import tags as _tags_route
+
+    _tags_route._tags_cache = None
     # Same reason as the events cache above: a cached board from a previous
     # test would be served to the next one, and a test that asserts the
     # endpoint makes no chain call proves nothing if it never recomputes.

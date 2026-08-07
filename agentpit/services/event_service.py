@@ -4,12 +4,21 @@ from agentpit.datastructures.event_with_markets import (
     ListEventsResponse,
 )
 from agentpit.datastructures.gamma_market import GammaEvent
+from agentpit.datastructures.tag import ListTagsResponse, TagFacet, TagNavEntry
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import EventNotFoundError, InvalidPaginationError
 from agentpit.polymarket.gamma import to_gamma_event
 from agentpit.polymarket.pricing import prices_for_markets
+from agentpit.polymarket.tag_taxonomy import (
+    BLOCKED_SLUGS,
+    DEPRECATED_PREFIX,
+    MAX_FACET_COVERAGE,
+    MAX_FACETS,
+    MIN_NAV_EVENTS,
+    NAV_SLUGS,
+)
 
 
 class EventService:
@@ -65,6 +74,53 @@ class EventService:
         with self._db.read() as conn:
             categories = TableRead.list_event_categories(conn)
         return ListEventCategoriesResponse(categories=categories)
+
+    def list_tags(self) -> ListTagsResponse:
+        """The curated top-level list, each entry carrying its own facets.
+
+        Facets are nested rather than served from a `?parent=` endpoint because
+        the sidebar renders a chevron for every category at once and must know
+        which ones have subcategories before any is expanded.
+
+        One nav query plus one facet query per surviving slug — about
+        seventeen indexed reads, behind a TTL cache, against data that only
+        changes when an hourly sync runs. A single self-joining query would do
+        it in one round trip and be markedly harder to read.
+        """
+        with self._db.read() as conn:
+            present = {
+                slug: (label, count)
+                for slug, label, count in TableRead.list_tag_nav(
+                    conn, slugs=list(NAV_SLUGS), min_events=MIN_NAV_EVENTS
+                )
+            }
+            entries: list[TagNavEntry] = []
+            # Iterating NAV_SLUGS, not `present`, is what restores the curated
+            # order the query's GROUP BY does not preserve.
+            for slug in NAV_SLUGS:
+                found = present.get(slug)
+                if found is None:
+                    continue
+                label, count = found
+                facets = TableRead.list_tag_facets(
+                    conn,
+                    parent_slug=slug,
+                    blocked=BLOCKED_SLUGS,
+                    deprecated_prefix=DEPRECATED_PREFIX,
+                    limit=MAX_FACETS,
+                    max_coverage=MAX_FACET_COVERAGE,
+                )
+                entries.append(
+                    TagNavEntry(
+                        slug=slug,
+                        label=label,
+                        count=count,
+                        facets=[
+                            TagFacet(slug=s, label=lbl, count=c) for s, lbl, c in facets
+                        ],
+                    )
+                )
+        return ListTagsResponse(tags=entries)
 
     def get_event_by_slug(self, slug: str) -> EventWithMarkets:
         with self._db.read() as conn:
