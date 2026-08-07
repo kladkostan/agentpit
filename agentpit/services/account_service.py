@@ -297,41 +297,52 @@ class AccountService:
         proceeds and the sale time, not just the net quantity `_net_bought`
         reports, and it must not double-count a maker fill as the taker's side.
 
-        Two subtleties, both of which silently corrupt the numbers if missed:
+        A trade row's stored PRICE is always the MAKER's price. Which token
+        moved and in which direction depends on `MATCH_KIND`, recorded by the
+        matcher itself (rows written before that column existed default to
+        NORMAL, the only kind they could have been):
 
-        1. A MAKER fills the side opposite the stored taker SIDE, so the user's
-           effective side is ``(SIDE == "BUY") == is_taker``.
-        2. A MINT match — taker BUY against maker BUY — stores the MAKER's
-           price against the taker's asset_id, so the taker really paid
-           ``1 - price``. The condition is BOTH sides buying: a taker SELL is
-           also matched by a maker BUY, and flipping there would book a sale at
-           0.51 as 0.49. ``_avg_fill_price`` gets away with testing only the
-           maker side because it pre-filters to ``SIDE = 'BUY'``; this method
-           sees every fill and must test the pair.
+        | kind   | this user is taker                | this user is maker         |
+        |--------|------------------------------------|-----------------------------|
+        | NORMAL | token ASSET_ID, dir SIDE, price p   | token ASSET_ID, dir ~SIDE, price p |
+        | MINT   | token ASSET_ID, ACQUIRES, price 1-p | token MAKER_ASSET_ID, ACQUIRES, price p |
+        | MERGE  | token ASSET_ID, DISPOSES, price 1-p | token MAKER_ASSET_ID, DISPOSES, price p |
+
+        For a MINT/MERGE, both parties transact in different tokens whose
+        prices sum to the $1 the mint costs (or the merge returns), so a
+        query scoped to `token_id` must match on ASSET_ID for the taker leg
+        and on MAKER_ASSET_ID for the maker leg.
         """
         rows = conn.execute(
-            "SELECT SIDE, PRICE, TRADE_SIZE, MATCH_TIME, MAKER_ORDERS, "
-            "TAKER_API_KEY, MAKER_API_KEY FROM trades "
-            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-            "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
-            (token_id, api_key, api_key),
+            "SELECT SIDE, PRICE, TRADE_SIZE, MATCH_TIME, MATCH_KIND, "
+            "ASSET_ID, MAKER_ASSET_ID, TAKER_API_KEY, MAKER_API_KEY "
+            "FROM trades WHERE STATUS != 'FAILED' "
+            "AND ((TAKER_API_KEY = %s AND ASSET_ID = %s) "
+            "  OR (MAKER_API_KEY = %s AND COALESCE(MAKER_ASSET_ID, ASSET_ID) = %s))",
+            (api_key, token_id, api_key, token_id),
         ).fetchall()
         bought_size = bought_cost = sold_size = sold_proceeds = 0
         last_sell_time = 0
         for r in rows:
             is_taker = r["TAKER_API_KEY"] == api_key
-            taker_side = r["SIDE"]
-            price = int(r["PRICE"])
+            kind = r["MATCH_KIND"] or "NORMAL"
+            price = int(r["PRICE"])  # always the MAKER's price
             size = int(r["TRADE_SIZE"])
-            mo = r["MAKER_ORDERS"]
-            try:
-                mo = json.loads(mo) if isinstance(mo, str) else mo
-                maker_side = mo[0].get("side", "SELL") if mo else "SELL"
-            except (TypeError, ValueError, IndexError, KeyError, AttributeError):
-                maker_side = "SELL"
-            if taker_side == "BUY" and maker_side == "BUY" and is_taker:
-                price = 1_000_000 - price  # mint: stored price is the maker's
-            if (taker_side == "BUY") == is_taker:
+            if kind == "MINT":
+                # Both sides acquire, of different tokens, and their prices
+                # sum to the $1 the mint costs.
+                acquiring = True
+                if is_taker:
+                    price = 1_000_000 - price
+            elif kind == "MERGE":
+                # Both sides dispose; their proceeds sum to the $1 returned.
+                acquiring = False
+                if is_taker:
+                    price = 1_000_000 - price
+            else:
+                # One token, opposite directions, one price.
+                acquiring = (r["SIDE"] == "BUY") == is_taker
+            if acquiring:
                 bought_size += size
                 bought_cost += price * size
             else:

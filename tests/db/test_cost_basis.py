@@ -10,12 +10,14 @@ from agentpit.db.session import DbSession
 from agentpit.services.account_service import AccountService
 
 
-def _trade(conn, *, token, price, size, maker_side, side="BUY", taker="bot"):
+def _trade(conn, *, token, price, size, maker_side, side="BUY", taker="bot",
+           match_kind=None):
     conn.execute(
         "INSERT INTO trades (TRADE_ID, ASSET_ID, PRICE, TRADE_SIZE, SIDE, STATUS, "
-        "TAKER_API_KEY, MAKER_ORDERS) VALUES (%s,%s,%s,%s,%s,'matched',%s,%s)",
+        "TAKER_API_KEY, MAKER_ORDERS, MATCH_KIND) "
+        "VALUES (%s,%s,%s,%s,%s,'matched',%s,%s,%s)",
         (uuid.uuid4().hex, token, price, size, side, taker,
-         json.dumps([{"side": maker_side, "price": price}])),
+         json.dumps([{"side": maker_side, "price": price}]), match_kind),
     )
 
 
@@ -25,8 +27,11 @@ def test_avg_fill_price_flips_mint_complement():
     with db.write() as conn:
         # Bot bought YES ~2¢: a normal fill (maker SELL @ 0.02) and a MINT fill
         # (maker BUY, recorded at the 0.98 complement). True cost ≈ 0.02 both.
+        # MATCH_KIND is what `_token_flow` now keys off (not the maker-side
+        # heuristic), so the mint leg must declare it explicitly.
         _trade(conn, token=tok, price=20_000, size=100, maker_side="SELL")   # 0.02
-        _trade(conn, token=tok, price=980_000, size=100, maker_side="BUY")   # records 0.98, paid 0.02
+        _trade(conn, token=tok, price=980_000, size=100, maker_side="BUY",
+               match_kind="MINT")   # records 0.98, paid 0.02
     with db.read() as conn:
         avg = AccountService._avg_fill_price(conn, "bot", tok)
     assert abs(avg - 0.02) < 1e-6, f"expected ~0.02, got {avg} (averaged the 0.98 complement?)"

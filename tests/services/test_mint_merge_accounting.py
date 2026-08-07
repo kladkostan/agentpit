@@ -184,3 +184,77 @@ def test_the_unlabelled_index_exists_with_the_match_kind_predicate(db):
     ).fetchone()
     assert row is not None
     assert "match_kind" in row["indexdef"].lower()
+
+
+# ----- flows across every match kind -----------------------------------------
+
+from agentpit.services.account_service import AccountService  # noqa: E402
+
+
+def _trade(db, *, market, asset, maker_asset, kind, taker_side, price,
+           size, taker="taker-key", maker="maker-key"):
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, MARKET, ASSET_ID, MAKER_ASSET_ID, "
+        "MATCH_KIND, SIDE, PRICE, TRADE_SIZE, STATUS, TAKER_API_KEY, "
+        "MAKER_API_KEY) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'matched',%s,%s)",
+        (uuid.uuid4().hex, market.condition_id.value, asset, maker_asset,
+         kind, taker_side, price, size, taker, maker),
+    )
+
+
+def test_a_mint_maker_acquires_the_complement_at_the_stored_price(db):
+    """The bug in one test: the maker of a mint receives the OTHER token, and
+    before this its holdings had no row at all."""
+    m = _binary_market(db, "fm1")
+    _trade(db, market=m, asset="fm1-y", maker_asset="fm1-n", kind="MINT",
+           taker_side="BUY", price=300_000, size=100)
+    flow = AccountService._token_flow(db, "maker-key", "fm1-n")
+    assert flow.bought_size == 100
+    assert flow.avg_buy_price_micro == 300_000
+    assert flow.sold_size == 0
+    # And nothing landed on the taker's token for this user.
+    assert AccountService._token_flow(db, "maker-key", "fm1-y").bought_size == 0
+
+
+def test_a_mint_taker_pays_the_complement_of_the_stored_price(db):
+    m = _binary_market(db, "fm2")
+    _trade(db, market=m, asset="fm2-y", maker_asset="fm2-n", kind="MINT",
+           taker_side="BUY", price=300_000, size=100)
+    flow = AccountService._token_flow(db, "taker-key", "fm2-y")
+    assert flow.bought_size == 100
+    # The pair costs $1: the maker put up 0.30, so the taker put up 0.70.
+    assert flow.avg_buy_price_micro == 700_000
+
+
+def test_a_merge_disposes_on_both_sides(db):
+    m = _binary_market(db, "fg1")
+    _trade(db, market=m, asset="fg1-y", maker_asset="fg1-n", kind="MERGE",
+           taker_side="SELL", price=400_000, size=100)
+    taker = AccountService._token_flow(db, "taker-key", "fg1-y")
+    maker = AccountService._token_flow(db, "maker-key", "fg1-n")
+    assert taker.sold_size == 100 and maker.sold_size == 100
+    assert taker.bought_size == 0 and maker.bought_size == 0
+    # Proceeds sum to the $1 the merge returns.
+    assert taker.sold_proceeds + maker.sold_proceeds == 1_000_000 * 100
+
+
+def test_a_normal_match_still_moves_one_token_in_two_directions(db):
+    m = _binary_market(db, "fn1")
+    _trade(db, market=m, asset="fn1-y", maker_asset="fn1-y", kind="NORMAL",
+           taker_side="BUY", price=250_000, size=100)
+    assert AccountService._token_flow(db, "taker-key", "fn1-y").bought_size == 100
+    assert AccountService._token_flow(db, "maker-key", "fn1-y").sold_size == 100
+
+
+def test_net_size_can_no_longer_go_negative_on_a_mint_heavy_account(db):
+    """The production symptom: trade nets reading -55,142 shares, which is
+    impossible for real holdings and meant the maker's leg was landing on the
+    wrong token."""
+    m = _binary_market(db, "fn2")
+    for _ in range(3):
+        _trade(db, market=m, asset="fn2-y", maker_asset="fn2-n", kind="MINT",
+               taker_side="BUY", price=300_000, size=100)
+    for key, tok in (("taker-key", "fn2-y"), ("maker-key", "fn2-n")):
+        assert AccountService._token_flow(db, key, tok).net_size == 300
+    for key, tok in (("taker-key", "fn2-n"), ("maker-key", "fn2-y")):
+        assert AccountService._token_flow(db, key, tok).net_size == 0
