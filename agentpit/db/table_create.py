@@ -37,6 +37,18 @@ class TableCreate:
             "CREATE INDEX IF NOT EXISTS idx_trades_maker_api_key "
             "ON trades(MAKER_API_KEY)"
         )
+        # The token the MAKER moved. Equal to ASSET_ID for a NORMAL match, but
+        # for a MINT the maker receives the market's other outcome and for a
+        # MERGE it burns one — and with only the taker's id recorded, an
+        # account's holdings could not be rebuilt from its own trades.
+        conn.execute(
+            "ALTER TABLE trades ADD COLUMN IF NOT EXISTS MAKER_ASSET_ID TEXT"
+        )
+        # NORMAL | MINT | MERGE. Derivable from the two sides, but stored so a
+        # reader never has to re-derive the matcher's own decision.
+        conn.execute(
+            "ALTER TABLE trades ADD COLUMN IF NOT EXISTS MATCH_KIND TEXT"
+        )
 
     @staticmethod
     def create_orders_table(conn: psycopg.Connection) -> None:
