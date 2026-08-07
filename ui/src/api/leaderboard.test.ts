@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_BOARD_SORT,
+  findMyRank,
+  isSameAddress,
   nextBoardSort,
   sortBoard,
   boardTrendPoints,
@@ -477,5 +479,40 @@ describe("nextBoardSort", () => {
       column: "capital",
       dir: "desc",
     });
+  });
+});
+
+describe("finding yourself on the board", () => {
+  const rows = [
+    boardEntry({ address: "0xAAA1", unrealized: "300" }),
+    boardEntry({ address: "0xBbB2", unrealized: "200" }),
+    boardEntry({ address: "0xCcC3", unrealized: "100" }),
+  ];
+
+  it("matches addresses regardless of case", () => {
+    // The board sends checksummed addresses; the session may hold either form.
+    // A raw === would leave the reader unable to find themselves.
+    expect(isSameAddress("0xAbC", "0xabc")).toBe(true);
+    expect(isSameAddress("0xAbC", "0xdef")).toBe(false);
+  });
+
+  it("treats a missing address as no match rather than a false one", () => {
+    expect(isSameAddress(undefined, "0xabc")).toBe(false);
+    expect(isSameAddress("0xabc", undefined)).toBe(false);
+    expect(isSameAddress(undefined, undefined)).toBe(false);
+  });
+
+  it("reports the position in the CURRENT order, not the server rank", () => {
+    expect(findMyRank(rows, "0xbbb2")).toBe(2);
+    expect(findMyRank(sortBoard(rows, { column: "unrealized", dir: "asc" }), "0xbbb2")).toBe(2);
+    expect(findMyRank(sortBoard(rows, { column: "unrealized", dir: "asc" }), "0xaaa1")).toBe(3);
+  });
+
+  it("returns null when signed out", () => {
+    expect(findMyRank(rows, undefined)).toBeNull();
+  });
+
+  it("returns null for an account that has never traded", () => {
+    expect(findMyRank(rows, "0xnothere")).toBeNull();
   });
 });

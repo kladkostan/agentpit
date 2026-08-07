@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   boardTrendPoints,
   boardViewState,
   DEFAULT_BOARD_SORT,
+  findMyRank,
   formatBoardAmount,
+  isSameAddress,
   nextBoardSort,
   sortBoard,
   trendTone,
@@ -13,6 +15,7 @@ import {
   type BoardEntry,
   type BoardSort,
 } from "@/api/leaderboard";
+import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +59,9 @@ function shortAddr(a: string): string {
 export function AgentArenaPage() {
   const [sort, setSort] = useState<BoardSort>(DEFAULT_BOARD_SORT);
   const { data, error } = useLeaderboard();
+  const { user } = useAuth();
+  const myAddress = user?.eth_address;
+  const myRow = useRef<HTMLLIElement>(null);
   // Ranks follow the CURRENT order, so the medals always sit on the rows the
   // reader is actually looking at rather than on a server-side ordering.
   const entries = useMemo(
@@ -63,6 +69,7 @@ export function AgentArenaPage() {
     [data?.entries, sort],
   );
   const state = boardViewState(data, error, entries);
+  const myRank = findMyRank(entries, myAddress);
   // Data survived a failed background refetch (see boardViewState) — say so
   // quietly instead of silently pretending the poll didn't fail.
   const showStaleNote = Boolean(error) && (state === "rows" || state === "empty");
@@ -83,6 +90,25 @@ export function AgentArenaPage() {
           {data ? `${entries.length} ${entries.length === 1 ? "trader" : "traders"}` : "—"}
         </span>
       </header>
+
+      {myRank !== null ? (
+        <button
+          type="button"
+          onClick={() =>
+            myRow.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+          }
+          className="w-fit rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          You're <span className="font-semibold text-foreground">#{myRank}</span>{" "}
+          of {entries.length} — jump to your row
+        </button>
+      ) : myAddress && state === "rows" ? (
+        // Signed in but absent: say why rather than leaving them hunting for a
+        // highlight that will never appear.
+        <span className="text-xs text-muted-foreground">
+          You're not on the board yet — trade a market to appear.
+        </span>
+      ) : null}
 
       {showStaleNote ? (
         <span className="text-xs text-muted-foreground">
@@ -145,9 +171,18 @@ export function AgentArenaPage() {
               </span>
             </li>
           ) : (
-            entries.map((e, i) => (
-              <BoardRow key={e.address} entry={e} rank={i + 1} />
-            ))
+            entries.map((e, i) => {
+              const isYou = isSameAddress(e.address, myAddress);
+              return (
+                <BoardRow
+                  key={e.address}
+                  entry={e}
+                  rank={i + 1}
+                  isYou={isYou}
+                  rowRef={isYou ? myRow : undefined}
+                />
+              );
+            })
           )}
         </ul>
       </div>
@@ -155,14 +190,36 @@ export function AgentArenaPage() {
   );
 }
 
-function BoardRow({ entry, rank }: { entry: BoardEntry; rank: number }) {
+function BoardRow({
+  entry,
+  rank,
+  isYou,
+  rowRef,
+}: {
+  entry: BoardEntry;
+  rank: number;
+  isYou: boolean;
+  /** Explicit `| undefined`: tsconfig sets exactOptionalPropertyTypes, so an
+   *  optional prop that is sometimes passed as undefined must say so. */
+  rowRef?: React.Ref<HTMLLIElement> | undefined;
+}) {
   const addr = shortAddr(entry.address);
   const nameIsAddress = entry.name.toLowerCase().startsWith("0x");
   const { data: history } = useBoardHistory(entry.address);
   const trend = boardTrendPoints(history);
 
   return (
-    <li className={cn(GRID, "px-4 py-3")}>
+    <li
+      ref={rowRef}
+      className={cn(
+        GRID,
+        "px-4 py-3",
+        // Tint plus an edge marker: colour alone would be invisible to a
+        // reader who cannot distinguish it, and the badge below carries the
+        // meaning in words.
+        isYou && "bg-primary/5 shadow-[inset_3px_0_0_0_hsl(var(--primary))]",
+      )}
+    >
       {/* Rank comes from the row's position in the CURRENT order, not from the
           server's ranking — otherwise the medals would stay pinned to one
           column while the reader sorts by another. */}
@@ -170,7 +227,14 @@ function BoardRow({ entry, rank }: { entry: BoardEntry; rank: number }) {
         {MEDALS[rank - 1] ?? <span className="text-muted-foreground">{rank}</span>}
       </span>
       <span className="min-w-0">
-        <span className="block truncate font-semibold">{entry.name}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-semibold">{entry.name}</span>
+          {isYou ? (
+            <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              You
+            </span>
+          ) : null}
+        </span>
         {!nameIsAddress ? (
           <span className="block truncate font-mono text-xs text-muted-foreground">
             {addr}

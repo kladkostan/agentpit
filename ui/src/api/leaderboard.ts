@@ -374,3 +374,24 @@ export function boardTrendPoints(
 export function trendTone(pct: number): "up" | "down" | "neutral" {
   return pct > 0 ? "up" : pct < 0 ? "down" : "neutral";
 }
+
+/** Case-insensitive address match. Addresses arrive checksummed from the
+ *  board and can be stored either way on the session, so comparing raw
+ *  strings silently fails to find the reader on their own leaderboard. */
+export function isSameAddress(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/** The reader's 1-based position in `entries` as currently ordered, or null
+ *  when they are signed out or have never traded. Derived from the array
+ *  rather than from `entry.rank`, so it follows whatever column the board is
+ *  sorted by instead of the server's ordering. */
+export function findMyRank(
+  entries: ReadonlyArray<BoardEntry>,
+  address: string | undefined,
+): number | null {
+  if (!address) return null;
+  const i = entries.findIndex((e) => isSameAddress(e.address, address));
+  return i === -1 ? null : i + 1;
+}
