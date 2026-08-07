@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatPnlPct,
+  shortAddress,
   formatProbabilityPct,
   formatSignedUsd,
   parseVolume,
@@ -148,5 +149,22 @@ describe("formatPnlPct", () => {
     // cashPnl / 0 cost is Infinity; the row must still render.
     expect(formatPnlPct(Number.POSITIVE_INFINITY)).toBe("0");
     expect(formatPnlPct(Number.NaN)).toBe("0");
+  });
+});
+
+describe("shortAddress", () => {
+  it("keeps both ends so the account stays recognisable", () => {
+    expect(shortAddress("0x933B442e9A78e3C3a567B86ee595Eb9BcEb15215")).toBe(
+      "0x933B…5215",
+    );
+  });
+
+  it("preserves case — addresses are checksummed, and lowercasing loses that", () => {
+    expect(shortAddress("0xAbCdEf1234567890aaaa")).toBe("0xAbCd…aaaa");
+  });
+
+  it("passes through anything too short to be worth truncating", () => {
+    expect(shortAddress("0x1234")).toBe("0x1234");
+    expect(shortAddress("")).toBe("");
   });
 });

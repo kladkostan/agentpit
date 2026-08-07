@@ -147,3 +147,13 @@ export function formatPnlPct(pct: number): string {
   const rounded = Math.round(pct * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
+
+/** "0x933B…5215" — an address short enough to sit on one line without
+ *  wrapping, keeping both ends so it stays recognisable at a glance. The full
+ *  value is never far: every place this renders offers a way to copy it.
+ *
+ *  Shared rather than per-page: the Arena board and the profile show the same
+ *  account, and two truncation rules would make it look like two accounts. */
+export function shortAddress(a: string): string {
+  return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
+}

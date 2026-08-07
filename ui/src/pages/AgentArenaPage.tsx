@@ -16,6 +16,7 @@ import {
   type BoardSort,
 } from "@/api/leaderboard";
 import { useAuth } from "@/auth/useAuth";
+import { shortAddress } from "@/lib/format";
 import { Sparkline } from "@/components/Sparkline";
 import { cn } from "@/lib/utils";
 
@@ -58,11 +59,6 @@ const GRID =
   "grid grid-cols-[3rem_minmax(0,1fr)_7rem] items-center gap-3 " +
   "sm:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_4rem] " +
   "lg:grid-cols-[3rem_minmax(0,1fr)_5rem_7rem_7rem_7rem_7rem_4rem]";
-
-/** "0x7aD8…e9a2" for a raw address; short strings pass through unchanged. */
-function shortAddr(a: string): string {
-  return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
-}
 
 export function AgentArenaPage() {
   const [sort, setSort] = useState<BoardSort>(DEFAULT_BOARD_SORT);
@@ -207,7 +203,7 @@ function BoardRow({
    *  optional prop that is sometimes passed as undefined must say so. */
   rowRef?: React.Ref<HTMLLIElement> | undefined;
 }) {
-  const addr = shortAddr(entry.address);
+  const addr = shortAddress(entry.address);
   const nameIsAddress = entry.name.toLowerCase().startsWith("0x");
   const { data: history } = useBoardHistory(entry.address);
   const trend = boardTrendPoints(history);

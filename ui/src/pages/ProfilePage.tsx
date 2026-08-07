@@ -1,6 +1,13 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { AlertCircle, CheckCircle2, Search, XCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Copy,
+  Search,
+  XCircle,
+} from "lucide-react";
 import type { Position } from "@/api/portfolio";
 import {
   usePositions,
@@ -19,7 +26,7 @@ import {
 import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
-import { formatPnlPct, formatVolume } from "@/lib/format";
+import { formatPnlPct, formatVolume, shortAddress } from "@/lib/format";
 import {
   Card,
   CardContent,
@@ -177,12 +184,18 @@ export function ProfilePage() {
                 {displayName(user.email, user.handle).slice(0, 1).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <h2 className="break-all font-mono text-sm font-semibold leading-tight tracking-tight">
-                  {user.eth_address}
+                {/* The handle leads: it is the name this account carries on the
+                    public board, and the one a person would say out loud. The
+                    address stays directly beneath because it is what the
+                    account actually IS -- set in mono so the two read as
+                    different kinds of thing rather than as a heading and a
+                    subheading. */}
+                <h2 className="truncate text-xl font-semibold leading-tight tracking-tight">
+                  {displayName(user.email, user.handle)}
                 </h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Joined {DATE.format(new Date(user.created_at * 1000))} • 0
-                  views
+                <CopyAddress address={user.eth_address} />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Joined {DATE.format(new Date(user.created_at * 1000))}
                 </p>
               </div>
             </div>
@@ -556,6 +569,57 @@ function ActivityList({ entries }: { entries: ActivityEntry[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** The address, short enough to sit on one line, and one click from the
+ *  clipboard. It is the account's real identity -- worth handing to someone --
+ *  and 42 characters of `break-all` made a card about a person read as a hash.
+ *
+ *  The label never changes on success, only the icon: swapping the text would
+ *  shift the line under the reader's cursor, and the live region carries the
+ *  confirmation for anyone not watching the icon. */
+function CopyAddress({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(address);
+    } catch {
+      // Clipboard blocked (insecure origin, denied permission). Say nothing
+      // rather than claiming a copy that did not happen.
+      return;
+    }
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        title={address}
+        aria-label={`Copy address ${address}`}
+        className="mt-1 flex items-center gap-1.5 rounded font-mono text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        {shortAddress(address)}
+        {copied ? (
+          <Check className="size-3 text-emerald-500" aria-hidden />
+        ) : (
+          <Copy className="size-3 opacity-60" aria-hidden />
+        )}
+      </button>
+      <span aria-live="polite" className="sr-only">
+        {copied ? "Address copied" : ""}
+      </span>
+    </>
   );
 }
 
