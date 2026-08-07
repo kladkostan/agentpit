@@ -171,3 +171,16 @@ def test_backfill_is_a_no_op_on_a_second_run(db):
     first = _kinds(db)
     TableCreate.backfill_trade_match_kind(db)
     assert _kinds(db) == first
+
+
+def test_the_unlabelled_index_exists_with_the_match_kind_predicate(db):
+    """idx_trades_unlabelled is what keeps the backfill's "is there anything
+    to do" probe an index scan instead of a full sequential scan once every
+    row is labelled — assert it actually exists with that predicate, not
+    just that the probe returns the right rows."""
+    row = db.execute(
+        "SELECT indexdef FROM pg_indexes "
+        "WHERE tablename = 'trades' AND indexname = 'idx_trades_unlabelled'"
+    ).fetchone()
+    assert row is not None
+    assert "match_kind" in row["indexdef"].lower()

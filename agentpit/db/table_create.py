@@ -51,6 +51,14 @@ class TableCreate:
         conn.execute(
             "ALTER TABLE trades ADD COLUMN IF NOT EXISTS MATCH_KIND TEXT"
         )
+        # The backfill's "is there anything to do" probe filters on
+        # MATCH_KIND IS NULL; once every row is labelled this partial index
+        # keeps that probe an index scan instead of a full sequential scan
+        # that only grows as the table accrues trades, on every startup.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trades_unlabelled "
+            "ON trades(TRADE_ID) WHERE MATCH_KIND IS NULL"
+        )
         TableCreate.backfill_trade_match_kind(conn)
 
     @staticmethod
@@ -68,7 +76,7 @@ class TableCreate:
         never overwrites what the write path recorded first-hand.
         """
         rows = conn.execute(
-            "SELECT TRADE_ID, MARKET, ASSET_ID, SIDE, MAKER_ORDERS FROM trades "
+            "SELECT TRADE_ID, ASSET_ID, SIDE, MAKER_ORDERS FROM trades "
             "WHERE MATCH_KIND IS NULL"
         ).fetchall()
         if not rows:
