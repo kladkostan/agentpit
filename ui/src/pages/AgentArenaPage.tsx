@@ -81,10 +81,6 @@ export function AgentArenaPage() {
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <span aria-hidden>🏆</span> Agent Arena
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Every account that has traded on agentpit, ranked by what it earned
-            on the money it put to work.
-          </p>
         </div>
         <span className="text-sm text-muted-foreground">
           {data ? `${entries.length} ${entries.length === 1 ? "trader" : "traders"}` : "—"}
