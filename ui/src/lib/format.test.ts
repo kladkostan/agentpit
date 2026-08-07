@@ -202,3 +202,24 @@ describe("displayTagLabel", () => {
     expect(displayTagLabel("")).toBe("");
   });
 });
+
+describe("displayTagLabel acronyms", () => {
+  it("uppercases the acronyms title-casing would mangle", () => {
+    // Observed arriving lowercase from upstream; "Fomc" and "Lol" read as
+    // typos beside their correctly-cased neighbours.
+    expect(displayTagLabel("fomc")).toBe("FOMC");
+    expect(displayTagLabel("lol")).toBe("LoL");
+    expect(displayTagLabel("val")).toBe("VAL");
+  });
+
+  it("still title-cases ordinary lowercase labels", () => {
+    expect(displayTagLabel("baseball")).toBe("Baseball");
+    expect(displayTagLabel("league of legends")).toBe("League of Legends");
+  });
+
+  it("leaves an already-cased label alone even if it is in the map", () => {
+    // Upstream mostly sends these correctly; the map is only for the strays.
+    expect(displayTagLabel("MLB")).toBe("MLB");
+    expect(displayTagLabel("AI")).toBe("AI");
+  });
+});

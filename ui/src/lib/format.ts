@@ -158,6 +158,33 @@ export function shortAddress(a: string): string {
   return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+/** Labels title-casing gets wrong because they are acronyms, not words.
+ *
+ *  Only entries actually observed arriving lowercase from upstream, plus the
+ *  league abbreviations that would land here the same way — a speculative list
+ *  would rot, since upstream mints new tags constantly and most already arrive
+ *  correctly cased ("ATP Tour", "MLB", "AI"). Keyed on the full lowercase
+ *  label, so a multi-word label can map too. */
+const TAG_ACRONYMS = new Map<string, string>([
+  ["fomc", "FOMC"],
+  ["lol", "LoL"],
+  ["val", "VAL"],
+  ["nba", "NBA"],
+  ["nfl", "NFL"],
+  ["mlb", "MLB"],
+  ["nhl", "NHL"],
+  ["ufc", "UFC"],
+  ["mma", "MMA"],
+  ["ai", "AI"],
+  ["etf", "ETF"],
+  ["ipo", "IPO"],
+  ["gdp", "GDP"],
+  ["cpi", "CPI"],
+  ["btc", "BTC"],
+  ["eth", "ETH"],
+  ["xrp", "XRP"],
+]);
+
 /** Small words that stay lowercase inside a title, unless they lead it. */
 const TITLE_STOPWORDS = new Set([
   "a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs",
@@ -177,6 +204,8 @@ const TITLE_STOPWORDS = new Set([
  */
 export function displayTagLabel(label: string): string {
   if (/[A-Z]/.test(label)) return label;
+  const acronym = TAG_ACRONYMS.get(label);
+  if (acronym) return acronym;
   return label
     .split(" ")
     .map((word, i) =>

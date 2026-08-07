@@ -1022,18 +1022,3 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
     return request
 
 
-@staticmethod
-def update_market_outcomes(db) -> None:
-    markets = TableRead.list_markets()
-    for market in markets:
-        if market.market_id == market_id:
-            market.market_state = state
-            db.execute(
-                """
-                UPDATE markets
-                SET MARKET_STATE = %s
-                WHERE MARKET_ID = %s
-                """,
-                (state.value, market_id),
-            )
-            return

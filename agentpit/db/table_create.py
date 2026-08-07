@@ -291,12 +291,12 @@ class TableCreate:
             "CREATE INDEX IF NOT EXISTS idx_events_volume_24hr "
             "ON events(VOLUME_24HR)"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_events_liquidity ON events(LIQUIDITY)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_events_competitive ON events(COMPETITIVE)"
-        )
+        # Dropped, not merely un-created: a plain btree on the column cannot
+        # serve `ORDER BY <col> DESC NULLS LAST, EVENT_ID DESC`, so Postgres
+        # sorted anyway while every sync UPDATE paid to maintain them. At a
+        # couple of thousand events the sort is sub-millisecond regardless.
+        conn.execute("DROP INDEX IF EXISTS idx_events_liquidity")
+        conn.execute("DROP INDEX IF EXISTS idx_events_competitive")
         # Expression index matching the category filter's LOWER(CATEGORY)
         # predicate in TableRead.list_events_with_markets — a plain btree on
         # CATEGORY would not be usable there.

@@ -355,7 +355,11 @@ export function MarketsPage() {
 
       <div className="grid gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <div className="sticky top-20 rounded-2xl border bg-card/40 p-3">
+          {/* Scrolls within itself rather than growing past the viewport.
+              Sixteen categories already overflow a laptop screen, and a
+              sticky element taller than the window simply loses its bottom —
+              there is no scroll position that reveals it. */}
+          <div className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border bg-card/40 p-3">
             <p className="px-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
               Categories
             </p>

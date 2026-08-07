@@ -111,8 +111,10 @@ def main() -> None:
         for pm_id in batch:
             payload = fetched.get(pm_id)
             if payload is None:
-                # Either upstream dropped the event, or it errored out of this
-                # batch. Leave the row as-is rather than inventing a figure.
+                # Upstream dropped the event, or returned it without figures.
+                # NOT a failed request — a batch that raises is caught above
+                # and skipped whole, so its events never reach this loop.
+                # Leave the row as-is rather than inventing a figure.
                 missing_upstream += 1
                 continue
             liquidity = _as_float(payload.get("liquidity"))

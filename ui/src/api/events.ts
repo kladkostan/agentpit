@@ -4,7 +4,6 @@ import type { GammaEvent } from "@/types/gamma";
 import type {
   Event,
   EventWithMarkets,
-  ListEventCategoriesResponse,
   ListEventsResponse,
 } from "@/types/event";
 import { gammaToMarket } from "@/api/markets";
@@ -83,10 +82,6 @@ export async function listEvents(
   };
 }
 
-export async function listEventCategories(): Promise<ListEventCategoriesResponse> {
-  return apiFetch<ListEventCategoriesResponse>("/events/categories");
-}
-
 export async function getEvent(slug: string): Promise<EventWithMarkets> {
   const g = await apiFetch<GammaEvent>(`/events/${encodeURIComponent(slug)}`);
   return gammaToEventWithMarkets(g);
@@ -129,13 +124,6 @@ export function useEventsInfinite(
     // refresh (a sync streams markets in over a few seconds). Only refetches
     // while the tab is visible (refetchIntervalInBackground defaults to false).
     refetchInterval: 5000,
-  });
-}
-
-export function useEventCategories() {
-  return useQuery({
-    queryKey: ["events", "categories"],
-    queryFn: listEventCategories,
   });
 }
 
