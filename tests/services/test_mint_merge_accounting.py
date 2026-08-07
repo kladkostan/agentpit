@@ -258,3 +258,35 @@ def test_net_size_can_no_longer_go_negative_on_a_mint_heavy_account(db):
         assert AccountService._token_flow(db, key, tok).net_size == 300
     for key, tok in (("taker-key", "fn2-n"), ("maker-key", "fn2-y")):
         assert AccountService._token_flow(db, key, tok).net_size == 0
+
+
+def test_a_self_matched_normal_sell_cannot_manufacture_a_negative_net(db):
+    """The matcher has no same-account guard: a resting order of this user's
+    can be crossed by a later order of theirs, same api_key on both sides of
+    the row. Collapsing that to a single `is_taker` used to book only the
+    taker's SELL leg — sold_size with no offsetting buy — which is how a net
+    could go negative even though the account transacted with itself for net
+    zero."""
+    m = _binary_market(db, "fs1")
+    _trade(db, market=m, asset="fs1-y", maker_asset="fs1-y", kind="NORMAL",
+           taker_side="SELL", price=400_000, size=100,
+           taker="self-key", maker="self-key")
+    flow = AccountService._token_flow(db, "self-key", "fs1-y")
+    assert flow.bought_size == 100
+    assert flow.sold_size == 100
+    assert flow.net_size == 0
+
+
+def test_a_self_matched_mint_still_costs_one_dollar_for_the_pair(db):
+    """One account standing on both sides of a mint acquires BOTH outcomes,
+    and the taker/maker prices still sum to $1 — the pair's economics don't
+    change just because one account happens to be both parties."""
+    m = _binary_market(db, "fs2")
+    _trade(db, market=m, asset="fs2-y", maker_asset="fs2-n", kind="MINT",
+           taker_side="BUY", price=300_000, size=100,
+           taker="self-key", maker="self-key")
+    yes = AccountService._token_flow(db, "self-key", "fs2-y")
+    no = AccountService._token_flow(db, "self-key", "fs2-n")
+    assert yes.bought_size == 100
+    assert no.bought_size == 100
+    assert yes.avg_buy_price_micro + no.avg_buy_price_micro == 1_000_000

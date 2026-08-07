@@ -1,7 +1,8 @@
 """AccountService._avg_fill_price must report the TAKER's real per-share cost.
-A MINT match (taker BUY vs maker BUY) records the maker's complement price
-(1-p) against the taker's asset_id, so averaging raw trade prices skews the
-cost basis toward $0.50. The fix flips MINT (maker-BUY) trades to ONE - price."""
+A MINT match records the maker's complement price (1-p) against the taker's
+asset_id, so averaging raw trade prices skews the cost basis toward $0.50.
+The fix reads MATCH_KIND (not a maker-side heuristic) and flips the taker
+leg of a MINT row to ONE - price."""
 import json
 import uuid
 
@@ -39,8 +40,9 @@ def test_avg_fill_price_flips_mint_complement():
 
 def test_avg_fill_price_excludes_exit_sells():
     # Real bug: bot BOUGHT NO @ 0.84, then the exit engine partially SOLD it
-    # (at 0.21/0.22 and the MINT complements 0.78/0.79). Those sells must not
-    # drag the cost basis down — entry stays 0.84, not ~0.61.
+    # (at 0.21 and 0.78 — neither row carries MATCH_KIND, so both take the
+    # NORMAL path and are stored at the price actually sold, no flip). Those
+    # sells must not drag the cost basis down — entry stays 0.84, not ~0.61.
     db = DbSession(Settings().database_url)
     tok = "costbasis-exit"
     with db.write() as conn:

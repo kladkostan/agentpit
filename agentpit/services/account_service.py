@@ -312,6 +312,11 @@ class AccountService:
         prices sum to the $1 the mint costs (or the merge returns), so a
         query scoped to `token_id` must match on ASSET_ID for the taker leg
         and on MAKER_ASSET_ID for the maker leg.
+
+        The matcher has no same-account guard, so one row can have this user
+        as BOTH taker and maker (a resting order of theirs crossed by a later
+        order of theirs). Both legs are real and are booked independently —
+        see `legs` below — rather than picking one via a single `is_taker`.
         """
         rows = conn.execute(
             "SELECT SIDE, PRICE, TRADE_SIZE, MATCH_TIME, MATCH_KIND, "
@@ -324,31 +329,43 @@ class AccountService:
         bought_size = bought_cost = sold_size = sold_proceeds = 0
         last_sell_time = 0
         for r in rows:
-            is_taker = r["TAKER_API_KEY"] == api_key
+            maker_asset = r["MAKER_ASSET_ID"] or r["ASSET_ID"]
+            # A user can hold BOTH sides of one row — the matcher has no
+            # same-account guard against a resting order of theirs getting
+            # crossed by their own later order. Each leg they own that moves
+            # this token is real and must be booked; collapsing to a single
+            # `is_taker` silently drops one (and can leave a net negative).
+            legs = []
+            if r["TAKER_API_KEY"] == api_key and r["ASSET_ID"] == token_id:
+                legs.append(True)
+            if r["MAKER_API_KEY"] == api_key and maker_asset == token_id:
+                legs.append(False)
             kind = r["MATCH_KIND"] or "NORMAL"
-            price = int(r["PRICE"])  # always the MAKER's price
             size = int(r["TRADE_SIZE"])
-            if kind == "MINT":
-                # Both sides acquire, of different tokens, and their prices
-                # sum to the $1 the mint costs.
-                acquiring = True
-                if is_taker:
-                    price = 1_000_000 - price
-            elif kind == "MERGE":
-                # Both sides dispose; their proceeds sum to the $1 returned.
-                acquiring = False
-                if is_taker:
-                    price = 1_000_000 - price
-            else:
-                # One token, opposite directions, one price.
-                acquiring = (r["SIDE"] == "BUY") == is_taker
-            if acquiring:
-                bought_size += size
-                bought_cost += price * size
-            else:
-                sold_size += size
-                sold_proceeds += price * size
-                last_sell_time = max(last_sell_time, int(r["MATCH_TIME"] or 0))
+            for is_taker in legs:
+                price = int(r["PRICE"])  # always the MAKER's price; re-read
+                # per leg so one leg's flip cannot leak into the next.
+                if kind == "MINT":
+                    # Both sides acquire, of different tokens, and their prices
+                    # sum to the $1 the mint costs.
+                    acquiring = True
+                    if is_taker:
+                        price = 1_000_000 - price
+                elif kind == "MERGE":
+                    # Both sides dispose; their proceeds sum to the $1 returned.
+                    acquiring = False
+                    if is_taker:
+                        price = 1_000_000 - price
+                else:
+                    # One token, opposite directions, one price.
+                    acquiring = (r["SIDE"] == "BUY") == is_taker
+                if acquiring:
+                    bought_size += size
+                    bought_cost += price * size
+                else:
+                    sold_size += size
+                    sold_proceeds += price * size
+                    last_sell_time = max(last_sell_time, int(r["MATCH_TIME"] or 0))
         return _TokenFlow(
             bought_size=bought_size,
             bought_cost=bought_cost,
