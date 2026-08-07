@@ -42,7 +42,15 @@ const COLUMNS: {
   { key: "capital", label: "Capital", show: "hidden lg:block" },
   { key: "invested", label: "Invested", show: "hidden sm:block" },
   { key: "unrealized", label: "Open P/L", show: "", signed: true },
-  { key: "realized", label: "Realized", show: "hidden sm:block", signed: true },
+  // "Realized P/L", not bare "Realized": the pair reads as two halves of one
+  // measure, and an adjective on its own leaves the reader asking "realized
+  // what?". Measured at 88px in the 112px track, so it needs no more room.
+  {
+    key: "realized",
+    label: "Realized P/L",
+    show: "hidden sm:block",
+    signed: true,
+  },
   { key: "trades", label: "Trades", show: "hidden sm:block" },
 ];
 
