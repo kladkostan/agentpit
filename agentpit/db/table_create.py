@@ -51,82 +51,16 @@ class TableCreate:
         conn.execute(
             "ALTER TABLE trades ADD COLUMN IF NOT EXISTS MATCH_KIND TEXT"
         )
-        # The backfill's "is there anything to do" probe filters on
-        # MATCH_KIND IS NULL; once every row is labelled this partial index
-        # keeps that probe an index scan instead of a full sequential scan
-        # that only grows as the table accrues trades, on every startup.
+        # scripts/backfill_trade_match_kind.py labels rows written before
+        # MATCH_KIND existed, filtering on MATCH_KIND IS NULL each run; this
+        # partial index keeps that probe an index scan instead of a full
+        # sequential scan that only grows as the table accrues trades. DDL
+        # only — the labelling itself does NOT run here (see that script's
+        # module docstring for why: it used to, and it blocked app startup).
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_unlabelled "
             "ON trades(TRADE_ID) WHERE MATCH_KIND IS NULL"
         )
-        TableCreate.backfill_trade_match_kind(conn)
-
-    @staticmethod
-    def backfill_trade_match_kind(conn: psycopg.Connection) -> None:
-        """Label rows written before MATCH_KIND existed, and name their maker's
-        token.
-
-        Nothing is lost, so nothing has to be guessed: the taker's side is on
-        the row, the maker's is inside MAKER_ORDERS, and those two decide the
-        kind exactly as the matcher decided it. The maker's token is then the
-        same asset for a NORMAL match, or the market's other outcome for a
-        MINT/MERGE — and `markets.ERC1155_TOKENS` still holds the pair.
-
-        Touches only rows where MATCH_KIND IS NULL, so it is idempotent and
-        never overwrites what the write path recorded first-hand.
-        """
-        rows = conn.execute(
-            "SELECT TRADE_ID, ASSET_ID, SIDE, MAKER_ORDERS FROM trades "
-            "WHERE MATCH_KIND IS NULL"
-        ).fetchall()
-        if not rows:
-            return
-        # One read of every binary market, rather than one per trade row.
-        complements: dict[str, str] = {}
-        for m in conn.execute(
-            "SELECT ERC1155_TOKENS FROM markets"
-        ).fetchall():
-            try:
-                pairs = json.loads(m["ERC1155_TOKENS"])
-            except (TypeError, ValueError):
-                continue
-            if len(pairs) != 2:
-                continue
-            a, b = pairs[0][0], pairs[1][0]
-            complements[a] = b
-            complements[b] = a
-
-        updates: list[tuple[str, str, str]] = []
-        for r in rows:
-            taker_side = r["SIDE"]
-            mo = r["MAKER_ORDERS"]
-            try:
-                parsed = json.loads(mo) if isinstance(mo, str) else mo
-                maker_side = parsed[0].get("side") if parsed else None
-            except (TypeError, ValueError, IndexError, KeyError, AttributeError):
-                maker_side = None
-            asset = r["ASSET_ID"]
-            if taker_side == "BUY" and maker_side == "BUY":
-                kind = "MINT"
-            elif taker_side == "SELL" and maker_side == "SELL":
-                kind = "MERGE"
-            else:
-                kind = "NORMAL"
-            # A complement we cannot resolve (non-binary market, or a token no
-            # market claims) falls back to the taker's asset: wrong for a mint,
-            # but no worse than the NULL it replaces, and it keeps the column
-            # total so readers need no second code path.
-            maker_asset = (
-                asset if kind == "NORMAL" else complements.get(asset, asset)
-            )
-            updates.append((maker_asset, kind, r["TRADE_ID"]))
-
-        with conn.cursor() as cur:
-            cur.executemany(
-                "UPDATE trades SET MAKER_ASSET_ID = %s, MATCH_KIND = %s "
-                "WHERE TRADE_ID = %s",
-                updates,
-            )
 
     @staticmethod
     def create_orders_table(conn: psycopg.Connection) -> None:

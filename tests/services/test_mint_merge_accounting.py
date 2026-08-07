@@ -77,8 +77,8 @@ from agentpit.datastructures.create_market_request import (  # noqa: E402
     CreateMarketRequest,
 )
 from agentpit.datastructures.market_state import MarketState  # noqa: E402
-from agentpit.db.table_create import TableCreate  # noqa: E402
 from agentpit.db.table_write import TableWrite  # noqa: E402
+from scripts.backfill_trade_match_kind import backfill_trade_match_kind  # noqa: E402
 
 
 def _hex32(seed: str) -> str:
@@ -128,7 +128,7 @@ def _kinds(db):
 def test_backfill_labels_a_normal_match_and_keeps_one_token(db):
     m = _binary_market(db, "bfn")
     _legacy_trade(db, market=m, asset="bfn-y", taker_side="BUY", maker_side="SELL")
-    TableCreate.backfill_trade_match_kind(db)
+    backfill_trade_match_kind(db)
     assert _kinds(db) == [("bfn-y", "bfn-y", "NORMAL")]
 
 
@@ -136,7 +136,7 @@ def test_backfill_gives_a_mint_maker_the_complementary_token(db):
     """Both sides buying is a mint: the maker receives the OTHER outcome."""
     m = _binary_market(db, "bfm")
     _legacy_trade(db, market=m, asset="bfm-y", taker_side="BUY", maker_side="BUY")
-    TableCreate.backfill_trade_match_kind(db)
+    backfill_trade_match_kind(db)
     assert _kinds(db) == [("bfm-y", "bfm-n", "MINT")]
 
 
@@ -144,7 +144,7 @@ def test_backfill_gives_a_merge_maker_the_complementary_token(db):
     """Both sides selling is a merge: the maker burns the OTHER outcome."""
     m = _binary_market(db, "bfg")
     _legacy_trade(db, market=m, asset="bfg-n", taker_side="SELL", maker_side="SELL")
-    TableCreate.backfill_trade_match_kind(db)
+    backfill_trade_match_kind(db)
     assert _kinds(db) == [("bfg-n", "bfg-y", "MERGE")]
 
 
@@ -159,7 +159,7 @@ def test_backfill_leaves_already_labelled_rows_alone(db):
         (uuid.uuid4().hex, m.condition_id.value,
          json.dumps([{"side": "BUY"}])),
     )
-    TableCreate.backfill_trade_match_kind(db)
+    backfill_trade_match_kind(db)
     # Were it re-derived, the BUY/BUY pair would relabel this MINT.
     assert _kinds(db) == [("bfi-y", "DELIBERATE", "NORMAL")]
 
@@ -167,9 +167,9 @@ def test_backfill_leaves_already_labelled_rows_alone(db):
 def test_backfill_is_a_no_op_on_a_second_run(db):
     m = _binary_market(db, "bft")
     _legacy_trade(db, market=m, asset="bft-y", taker_side="BUY", maker_side="BUY")
-    TableCreate.backfill_trade_match_kind(db)
+    backfill_trade_match_kind(db)
     first = _kinds(db)
-    TableCreate.backfill_trade_match_kind(db)
+    backfill_trade_match_kind(db)
     assert _kinds(db) == first
 
 
