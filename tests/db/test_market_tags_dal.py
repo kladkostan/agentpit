@@ -10,6 +10,7 @@ from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.db.table_create import TableCreate
+from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from tests.db_helpers import fresh_test_conn
 
@@ -114,3 +115,158 @@ def test_replace_market_tags_keeps_the_label(db):
         "SELECT LABEL FROM market_tags WHERE MARKET_ID = %s", (m.market_id,)
     ).fetchone()
     assert row["LABEL"] == "Culture"
+
+
+# ----- TableRead.list_tag_nav / list_tag_facets -------------------------------
+
+
+def _event_with_tagged_markets(db, *, slug: str, tags_per_market: list[list[str]]):
+    """Create one event whose markets carry the given tag slugs.
+
+    Returns the event. Labels are derived from the slug so assertions can check
+    the label plumbing without a second parameter.
+    """
+    event = TableWrite.upsert_event(db, slug=slug, title=slug.replace("-", " ").title())
+    for i, slugs in enumerate(tags_per_market):
+        market = _make_market(
+            db,
+            question=f"{slug} m{i}?",
+            cond_id=_hex32(f"{slug}{i}"),
+            event_id=event.event_id,
+        )
+        TableWrite.replace_market_tags(
+            db,
+            market_id=market.market_id,
+            tags=[(s, s.replace("-", " ").title()) for s in slugs],
+        )
+    return event
+
+
+def test_list_tag_nav_counts_events_not_markets(db):
+    """Two markets of one event both tagged `politics` is ONE politics event."""
+    _event_with_tagged_markets(db, slug="e1", tags_per_market=[["politics"], ["politics"]])
+    rows = TableRead.list_tag_nav(db, slugs=["politics"], min_events=1)
+    assert rows == [("politics", "Politics", 1)]
+
+
+def test_list_tag_nav_unions_tags_across_an_events_markets(db):
+    """An event's tag set is the union over its markets — market A carries
+    `politics`, market B carries `iran`, the event has both."""
+    _event_with_tagged_markets(db, slug="e2", tags_per_market=[["politics"], ["iran"]])
+    rows = dict((s, c) for s, _, c in TableRead.list_tag_nav(
+        db, slugs=["politics", "iran"], min_events=1
+    ))
+    assert rows == {"politics": 1, "iran": 1}
+
+
+def test_list_tag_nav_applies_the_threshold(db):
+    _event_with_tagged_markets(db, slug="e3", tags_per_market=[["politics"]])
+    _event_with_tagged_markets(db, slug="e4", tags_per_market=[["politics"]])
+    _event_with_tagged_markets(db, slug="e5", tags_per_market=[["science"]])
+    got = {s for s, _, _ in TableRead.list_tag_nav(
+        db, slugs=["politics", "science"], min_events=2
+    )}
+    assert got == {"politics"}
+
+
+def test_list_tag_nav_ignores_slugs_not_asked_for(db):
+    _event_with_tagged_markets(db, slug="e6", tags_per_market=[["politics", "iran"]])
+    got = {s for s, _, _ in TableRead.list_tag_nav(db, slugs=["politics"], min_events=1)}
+    assert got == {"politics"}
+
+
+def test_list_tag_nav_skips_markets_with_no_event(db):
+    market = _make_market(db, question="orphan?", cond_id=_hex32("orph"))
+    TableWrite.replace_market_tags(
+        db, market_id=market.market_id, tags=[("politics", "Politics")]
+    )
+    assert TableRead.list_tag_nav(db, slugs=["politics"], min_events=1) == []
+
+
+def test_list_tag_facets_orders_by_event_count_descending(db):
+    for i in range(3):
+        _event_with_tagged_markets(db, slug=f"p{i}", tags_per_market=[["politics", "elections"]])
+    _event_with_tagged_markets(db, slug="p3", tags_per_market=[["politics", "iran"]])
+    rows = TableRead.list_tag_facets(
+        db,
+        parent_slug="politics",
+        blocked=frozenset(),
+        deprecated_prefix="deprec-",
+        limit=20,
+        max_coverage=1.0,
+    )
+    assert [(s, c) for s, _, c in rows] == [("elections", 3), ("iran", 1)]
+
+
+def test_list_tag_facets_excludes_the_parent_itself(db):
+    _event_with_tagged_markets(db, slug="q1", tags_per_market=[["politics", "iran"]])
+    rows = TableRead.list_tag_facets(
+        db,
+        parent_slug="politics",
+        blocked=frozenset(),
+        deprecated_prefix="deprec-",
+        limit=20,
+        max_coverage=1.0,
+    )
+    assert [s for s, _, _ in rows] == ["iran"]
+
+
+def test_list_tag_facets_excludes_blocked_and_deprecated_slugs(db):
+    _event_with_tagged_markets(
+        db,
+        slug="q2",
+        tags_per_market=[["politics", "recurring", "deprec-us-election", "iran"]],
+    )
+    rows = TableRead.list_tag_facets(
+        db,
+        parent_slug="politics",
+        blocked=frozenset({"recurring"}),
+        deprecated_prefix="deprec-",
+        limit=20,
+        max_coverage=1.0,
+    )
+    assert [s for s, _, _ in rows] == ["iran"]
+
+
+def test_list_tag_facets_drops_a_facet_above_the_coverage_ceiling(db):
+    """`games` sits on 832 of 895 Sports events — it is the parent under
+    another name and tells a reader nothing."""
+    for i in range(10):
+        _event_with_tagged_markets(db, slug=f"s{i}", tags_per_market=[["sports", "games"]])
+    _event_with_tagged_markets(db, slug="s-tennis", tags_per_market=[["sports", "tennis"]])
+    rows = TableRead.list_tag_facets(
+        db,
+        parent_slug="sports",
+        blocked=frozenset(),
+        deprecated_prefix="deprec-",
+        limit=20,
+        max_coverage=0.9,
+    )
+    # games = 10/11 = 0.909 > 0.9 → dropped. tennis = 1/11 → kept.
+    assert [s for s, _, _ in rows] == ["tennis"]
+
+
+def test_list_tag_facets_caps_the_list(db):
+    _event_with_tagged_markets(
+        db, slug="q3", tags_per_market=[["politics"] + [f"t{i}" for i in range(30)]]
+    )
+    rows = TableRead.list_tag_facets(
+        db,
+        parent_slug="politics",
+        blocked=frozenset(),
+        deprecated_prefix="deprec-",
+        limit=5,
+        max_coverage=1.0,
+    )
+    assert len(rows) == 5
+
+
+def test_list_tag_facets_returns_empty_for_an_unknown_parent(db):
+    assert TableRead.list_tag_facets(
+        db,
+        parent_slug="nope",
+        blocked=frozenset(),
+        deprecated_prefix="deprec-",
+        limit=20,
+        max_coverage=0.9,
+    ) == []

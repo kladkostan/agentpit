@@ -758,6 +758,101 @@ class TableRead:
         return [str(row["c"]) for row in cur.fetchall()]
 
     @staticmethod
+    def list_tag_nav(
+        db: psycopg.Connection, *, slugs: list[str], min_events: int
+    ) -> "list[tuple[str, str, int]]":
+        """``(slug, label, event_count)`` for each requested slug that carries
+        at least ``min_events`` events. Unordered — the caller restores the
+        curated order.
+
+        Counts DISTINCT events, not tag rows: one event whose two markets both
+        carry `politics` is one Politics event, not two. Markets with no event
+        are excluded — an unbound market is not reachable from any listing.
+
+        ``MIN(LABEL)`` rather than an arbitrary pick: after an upstream rename
+        the same slug can briefly carry two labels across markets, and the
+        answer must not flicker between calls.
+        """
+        if not slugs:
+            return []
+        cur = db.execute(
+            """
+            SELECT mt.SLUG AS SLUG, MIN(mt.LABEL) AS LABEL,
+                   COUNT(DISTINCT m.EVENT_ID) AS CNT
+            FROM market_tags mt
+            JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+            WHERE m.EVENT_ID IS NOT NULL AND mt.SLUG = ANY(%s)
+            GROUP BY mt.SLUG
+            HAVING COUNT(DISTINCT m.EVENT_ID) >= %s
+            """,
+            (list(slugs), min_events),
+        )
+        return [(str(r["SLUG"]), str(r["LABEL"]), int(r["CNT"])) for r in cur.fetchall()]
+
+    @staticmethod
+    def list_tag_facets(
+        db: psycopg.Connection,
+        *,
+        parent_slug: str,
+        blocked: "frozenset[str]",
+        deprecated_prefix: str,
+        limit: int,
+        max_coverage: float,
+    ) -> "list[tuple[str, str, int]]":
+        """Tags co-occurring with ``parent_slug``, most common first.
+
+        "Co-occurring" is at EVENT level: a facet counts an event whose tag
+        union contains both slugs, even when they arrived on different markets
+        of that event.
+
+        Two filters run in Python rather than SQL because both need the
+        parent's own total, which the same pass computes: the coverage ceiling
+        (a facet matching nearly every event of its parent is the parent under
+        another name) and the length cap.
+        """
+        parent_total = db.execute(
+            """
+            SELECT COUNT(DISTINCT m.EVENT_ID) AS CNT
+            FROM market_tags mt
+            JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+            WHERE mt.SLUG = %s AND m.EVENT_ID IS NOT NULL
+            """,
+            (parent_slug,),
+        ).fetchone()["CNT"]
+        if not parent_total:
+            return []
+        cur = db.execute(
+            """
+            WITH parent_events AS (
+                SELECT DISTINCT m.EVENT_ID AS EVENT_ID
+                FROM market_tags mt
+                JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+                WHERE mt.SLUG = %s AND m.EVENT_ID IS NOT NULL
+            )
+            SELECT mt.SLUG AS SLUG, MIN(mt.LABEL) AS LABEL,
+                   COUNT(DISTINCT m.EVENT_ID) AS CNT
+            FROM market_tags mt
+            JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+            JOIN parent_events pe ON pe.EVENT_ID = m.EVENT_ID
+            WHERE mt.SLUG <> %s
+              AND NOT (mt.SLUG = ANY(%s))
+              AND mt.SLUG NOT LIKE %s
+            GROUP BY mt.SLUG
+            ORDER BY CNT DESC, mt.SLUG ASC
+            """,
+            (parent_slug, parent_slug, list(blocked), f"{deprecated_prefix}%"),
+        )
+        out: list[tuple[str, str, int]] = []
+        for row in cur.fetchall():
+            count = int(row["CNT"])
+            if count / parent_total > max_coverage:
+                continue
+            out.append((str(row["SLUG"]), str(row["LABEL"]), count))
+            if len(out) >= limit:
+                break
+        return out
+
+    @staticmethod
     def list_orphan_markets(db: psycopg.Connection) -> "list[Market]":
         """Markets with no EVENT_ID — used by the auto-wrap singleton helper."""
         cur = db.execute(
