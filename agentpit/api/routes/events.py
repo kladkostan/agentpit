@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from agentpit.api.deps import EventServiceDep
+from agentpit.datastructures.event_sort import EventSort
 from agentpit.datastructures.event_with_markets import ListEventCategoriesResponse
 from agentpit.datastructures.gamma_market import GammaEvent
 
@@ -13,9 +14,10 @@ router = APIRouter(tags=["events"])
 # every few seconds; without a cache, N clients = N DB reads per interval even
 # though the list only changes when a sync runs. With it, a poll burst collapses
 # to ~one DB read per TTL window, regardless of client count. Keyed by
-# (limit, offset, category, tag, subtags) — every filter MUST be part of the
-# key or a filtered page would be served to an unfiltered request (and vice
-# versa) for up to one TTL. Per-process; staleness is bounded by the TTL.
+# (limit, offset, category, tag, subtags, sort) — every filter MUST be part of
+# the key or a filtered/sorted page would be served to a differently
+# filtered/sorted request (and vice versa) for up to one TTL. Per-process;
+# staleness is bounded by the TTL.
 _EVENTS_TTL_S = 3.0
 # `category`/`tag`/`subtag` are caller-supplied, so the key space is
 # unbounded: without a cap, `/events?category=<random>` in a loop grows this
@@ -23,7 +25,7 @@ _EVENTS_TTL_S = 3.0
 # when its exact key repeats).
 _EVENTS_CACHE_MAX = 256
 _events_cache: dict[
-    tuple[int, int, str | None, str | None, tuple[str, ...]],
+    tuple[int, int, str | None, str | None, tuple[str, ...], str],
     tuple[float, list[GammaEvent]],
 ] = {}
 
@@ -36,6 +38,7 @@ def _list_events_cached(
     category: str | None = None,
     tag: str | None = None,
     subtags: list[str] | None = None,
+    sort: str | None = None,
     now: float,
 ) -> list[GammaEvent]:
     """Return the cached page if it is younger than the TTL, else fetch + store.
@@ -55,7 +58,18 @@ def _list_events_cached(
     normalized_subtags = tuple(
         sorted(s.strip().lower() for s in (subtags or []) if s and s.strip())
     )
-    key = (limit, offset, normalized or None, normalized_tag, normalized_subtags)
+    resolved_sort = EventSort.parse(sort)
+    key = (
+        limit,
+        offset,
+        normalized or None,
+        normalized_tag,
+        normalized_subtags,
+        # The resolved member, not the raw string: `?sort=nonsense` and no
+        # `sort` at all produce the same page, so they must share one entry
+        # rather than filling the cache with junk keys.
+        resolved_sort.value,
+    )
     hit = _events_cache.get(key)
     if hit is not None and now - hit[0] < _EVENTS_TTL_S:
         return hit[1]
@@ -65,6 +79,7 @@ def _list_events_cached(
         category=normalized,
         tag=normalized_tag,
         subtags=list(normalized_subtags),
+        sort=resolved_sort,
     )
     # Entries live 3s, so a plain flush at the cap is enough — no LRU needed.
     if len(_events_cache) >= _EVENTS_CACHE_MAX:
@@ -81,6 +96,7 @@ def list_events(
     category: str | None = None,
     tag: str | None = None,
     subtag: Annotated[list[str] | None, Query()] = None,
+    sort: str | None = None,
 ) -> list[GammaEvent]:
     return _list_events_cached(
         service,
@@ -89,6 +105,7 @@ def list_events(
         category=category,
         tag=tag,
         subtags=subtag,
+        sort=sort,
         now=time.monotonic(),
     )
 

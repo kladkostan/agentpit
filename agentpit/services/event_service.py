@@ -1,3 +1,4 @@
+from agentpit.datastructures.event_sort import EventSort
 from agentpit.datastructures.event_with_markets import (
     ListEventCategoriesResponse,
     EventWithMarkets,
@@ -32,6 +33,7 @@ class EventService:
         category: str | None = None,
         tag: str | None = None,
         subtags: list[str] | None = None,
+        sort: EventSort | None = None,
     ) -> ListEventsResponse:
         if limit < 1 or limit > 1000:
             raise InvalidPaginationError("limit must be between 1 and 1000")
@@ -45,6 +47,7 @@ class EventService:
                 category=category,
                 tag=tag,
                 subtags=subtags,
+                sort=sort,
             )
         events = [
             EventWithMarkets(event=event, markets=markets) for event, markets in pairs
@@ -60,6 +63,7 @@ class EventService:
         category: str | None = None,
         tag: str | None = None,
         subtags: list[str] | None = None,
+        sort: EventSort | None = None,
     ) -> list[GammaEvent]:
         if limit < 1 or limit > 1000:
             raise InvalidPaginationError("limit must be between 1 and 1000")
@@ -73,6 +77,7 @@ class EventService:
                 category=category,
                 tag=tag,
                 subtags=subtags,
+                sort=sort,
             )
             all_markets = [m for _event, markets in pairs for m in markets]
             prices = prices_for_markets(conn, all_markets)

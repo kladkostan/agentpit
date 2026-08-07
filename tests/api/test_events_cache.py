@@ -30,6 +30,7 @@ class _FakeService:
         category: str | None = None,
         tag: str | None = None,
         subtags: list[str] | None = None,
+        sort=None,
     ):
         self.calls += 1
         return [f"page-{limit}-{offset}-{category}-call{self.calls}"]
