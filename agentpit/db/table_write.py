@@ -449,6 +449,34 @@ class TableWrite:
         )
 
     @staticmethod
+    def replace_market_tags(
+        db: psycopg.Connection, *, market_id: int, tags: list[tuple[str, str]]
+    ) -> None:
+        """Set this market's tag rows to exactly ``tags``, a list of
+        ``(slug, label)`` pairs the caller has already normalised.
+
+        Replace rather than merge: a tag Polymarket removed must disappear
+        locally on the next sync pass, and only a full rewrite of one market's
+        set achieves that without needing to know the previous contents.
+
+        Duplicate slugs within one call are collapsed. Two upstream entries can
+        normalise to the same slug (Gamma has returned both "1H" and "1h"), and
+        a duplicate row would violate the primary key and abort the statement,
+        taking the caller's whole transaction with it.
+        """
+        db.execute("DELETE FROM market_tags WHERE MARKET_ID = %s", (market_id,))
+        deduped: dict[str, str] = {}
+        for slug, label in tags:
+            deduped.setdefault(slug, label)
+        if not deduped:
+            return
+        with db.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO market_tags (MARKET_ID, SLUG, LABEL) VALUES (%s, %s, %s)",
+                [(market_id, slug, label) for slug, label in deduped.items()],
+            )
+
+    @staticmethod
     def update_event_category(
         db: psycopg.Connection, *, event_id: int, category: str
     ) -> None:

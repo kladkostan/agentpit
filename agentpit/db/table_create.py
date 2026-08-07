@@ -214,6 +214,36 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_market_tags_table(conn: psycopg.Connection) -> None:
+        """Polymarket's per-market tag list, mirrored verbatim.
+
+        Tags live on the MARKET, not the event, because that is where Gamma
+        puts them and because replacing one market's set on each sync pass is
+        self-healing: a tag removed upstream disappears here too. An
+        event-level union could only ever grow. An event's tag set is the
+        union over its markets, taken by join at read time.
+
+        No foreign key on MARKET_ID — the schema uses plain columns plus
+        indexes throughout (markets.EVENT_ID has none either).
+        """
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_tags (
+                MARKET_ID BIGINT NOT NULL,
+                SLUG TEXT NOT NULL,
+                LABEL TEXT NOT NULL,
+                PRIMARY KEY (MARKET_ID, SLUG)
+            )
+            """
+        )
+        # The facet and nav queries both start from a slug, so this index is
+        # the one that matters; MARKET_ID is already covered by the PK's
+        # leading column.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_market_tags_slug ON market_tags(SLUG)"
+        )
+
+    @staticmethod
     def create_events_table(conn: psycopg.Connection) -> None:
         conn.execute(
             """
@@ -378,6 +408,7 @@ class TableCreate:
         TableCreate.create_personalities_table(conn)
         TableCreate.create_events_table(conn)
         TableCreate.create_markets_table(conn)
+        TableCreate.create_market_tags_table(conn)
         TableCreate.create_transactions_table(conn)
         TableCreate.create_price_snapshots_table(conn)
         TableCreate.create_account_snapshots_table(conn)
