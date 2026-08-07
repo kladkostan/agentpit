@@ -35,7 +35,11 @@ NAV_SLUGS: tuple[str, ...] = (
     "world",
     "ai",
     "business",
-    "science",
+    # `science` is deliberately absent. It clears MIN_NAV_EVENTS (11 events on
+    # 2026-08-07) but the sidebar is a vertical list, and at seventeen entries
+    # it stopped fitting on screen. The smallest category is the one to drop.
+    # Its markets are still reachable: most also carry weather, health or
+    # space, which are facets under their own parents.
 )
 
 # Operational tags: they describe a market's cadence, its settlement mechanic
@@ -79,7 +83,8 @@ BLOCKED_SLUGS: frozenset[str] = frozenset(
 DEPRECATED_PREFIX = "deprec-"
 
 # A top-level entry below this many events is hidden rather than rendered as a
-# near-empty tab. On the 2026-08-06 snapshot this hides `science` (9 events).
+# near-empty tab. It is the floor, not the editorial choice: a slug can also be
+# left out of NAV_SLUGS entirely, which is what happened to `science`.
 MIN_NAV_EVENTS = 10
 
 # A facet matching more than this share of its parent says nothing — it is the
