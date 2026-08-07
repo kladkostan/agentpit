@@ -14,6 +14,7 @@ from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.polymarket.category_resolver import category_rank, resolve_category
+from agentpit.polymarket.tag_taxonomy import normalize_slug
 from agentpit.datastructures.event import Event
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.services.market_service import prepare_market_on_chain
@@ -477,6 +478,37 @@ def bind_existing_market_to_upstream_event(
     return True
 
 
+def extract_tags(pm_market: dict) -> list[tuple[str, str]] | None:
+    """Pull ``(slug, label)`` pairs off an upstream market.
+
+    Returns ``None`` — meaning "upstream said nothing, keep what is stored" —
+    when ``tags`` is absent, null, or not a list. That distinction is the whole
+    point: a Gamma request without ``include_tag=true`` returns ``tags: null``
+    for every market, and treating that as an empty set would wipe good rows on
+    every pass through such a code path. An empty LIST is different: upstream
+    positively says this market has no tags, and the stored set should clear.
+
+    Malformed entries are skipped individually rather than raised on. Raising
+    here would abort this market's binding on every future pass, permanently.
+
+    The label is only ever a display string, so a missing or non-string one
+    falls back to the slug rather than dropping an otherwise good tag.
+    """
+    raw = pm_market.get("tags")
+    if not isinstance(raw, list):
+        return None
+    out: list[tuple[str, str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        slug = normalize_slug(entry.get("slug"))
+        if slug is None:
+            continue
+        label = entry.get("label")
+        out.append((slug, label if isinstance(label, str) and label.strip() else slug))
+    return out
+
+
 def bind_market_to_upstream_event(
     db, market: "Market", pm_market: dict
 ) -> None:
@@ -524,6 +556,13 @@ def bind_market_to_upstream_event(
         outcome_label=outcome_label,
         icon_url=icon_url,
     )
+    # Mirror the upstream tag list. This is the same payload `resolve_category`
+    # above collapses into one CATEGORY; storing it whole is what lets the
+    # sidebar offer real subcategories. Skipped entirely when upstream carried
+    # no tags list, so a caller without include_tag=true cannot clear good rows.
+    tags = extract_tags(pm_market)
+    if tags is not None:
+        TableWrite.replace_market_tags(db, market_id=market.market_id, tags=tags)
 
 
 def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
