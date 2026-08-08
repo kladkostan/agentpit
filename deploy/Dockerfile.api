@@ -8,6 +8,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agentpit/ agentpit/
+# The one-off backfills are written to be run against production
+# (`docker exec agentpit-api-1 python -m scripts.<name> --dry-run`), so they
+# have to be in the image — the API itself never imports them. Only the
+# backfills: the rest of scripts/ is local tooling, and db_reset.sh has no
+# business being one typo away from a production shell.
+COPY scripts/backfill_*.py scripts/
 
 # deployments/local.json is bind-mounted at runtime (Settings default path is
 # deployments/local.json relative to the workdir) — see compose.
