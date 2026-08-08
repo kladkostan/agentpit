@@ -76,7 +76,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db = DbSession(Settings().database_url)
+    # create_tables=False: the API has already migrated this database, and
+    # re-running the DDL from a second process deadlocks against it — every
+    # idempotent ADD COLUMN still takes an AccessExclusiveLock.
+    db = DbSession(Settings().database_url, create_tables=False)
     with db.read() as conn:
         rows = conn.execute(
             """
