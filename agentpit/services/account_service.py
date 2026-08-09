@@ -372,12 +372,9 @@ class AccountService:
             user = TableRead.get_user_by_eth_address(conn, eth_address)
             if user is None:
                 return []
-            trade_rows = conn.execute(
-                "SELECT MARKET, ASSET_ID, SIDE, PRICE, TRADE_SIZE, MATCH_TIME, "
-                "TRANSACTION_HASH FROM trades "
-                "WHERE (TAKER_API_KEY = %s OR MAKER_API_KEY = %s) AND STATUS != 'FAILED'",
-                (user.api_key, user.api_key),
-            ).fetchall()
+            acts: list[ActivityWire] = AccountService._trade_activity(
+                conn, user.api_key, eth_address
+            )
             tx_rows = conn.execute(
                 "SELECT TRANSACTION_TYPE, MARKET_ID, DETAILS, "
                 "EXTRACT(EPOCH FROM TIMESTAMP)::bigint AS TS "
@@ -385,7 +382,6 @@ class AccountService:
                 (user.api_key,),
             ).fetchall()
 
-            acts: list[ActivityWire] = []
             # One account fills the same handful of markets repeatedly, so the
             # slug of an event is looked up once and reused across its rows.
             slug_cache: dict[int, str] = {}
@@ -398,33 +394,6 @@ class AccountService:
                     slug_cache[mkt.event_id] = found.get(mkt.event_id, "")
                 return slug_cache[mkt.event_id]
 
-            for r in trade_rows:
-                resolved = resolve_by_token_id(conn, r["ASSET_ID"])
-                mkt = resolved.market if resolved else None
-                price = price_to_float(int(r["PRICE"]))
-                size = size_to_float(int(r["TRADE_SIZE"]))
-                outcome = (
-                    mkt.erc1155_tokens[resolved.outcome_index][1]
-                    if resolved and mkt else ""
-                )
-                acts.append(ActivityWire(
-                    proxyWallet=eth_address,
-                    timestamp=int(r["MATCH_TIME"]),
-                    conditionId=r["MARKET"],
-                    type="TRADE",
-                    size=size,
-                    usdcSize=price * size,
-                    transactionHash=r["TRANSACTION_HASH"] or "",
-                    price=price,
-                    asset=r["ASSET_ID"],
-                    side=r["SIDE"],
-                    outcomeIndex=resolved.outcome_index if resolved else 0,
-                    title=mkt.question if mkt else "",
-                    slug=(mkt.slug or "") if mkt else "",
-                    icon=(mkt.icon_url or "") if mkt else "",
-                    eventSlug=event_slug_of(mkt),
-                    outcome=outcome,
-                ))
             for r in tx_rows:
                 mkt = (
                     TableRead.read_market(conn, r["MARKET_ID"])
@@ -452,6 +421,66 @@ class AccountService:
             acts = [a for a in acts if a.conditionId in market]
         acts.sort(key=lambda a: a.timestamp, reverse=True)
         return acts[offset:offset + limit]
+
+    @staticmethod
+    def _trade_activity(conn, api_key: str, eth_address: str) -> "list[ActivityWire]":
+        """One ActivityWire per leg this account holds.
+
+        A NORMAL self-match yields two rows, a buy and a sell — that is the
+        account genuinely standing on both sides. A MINT/MERGE maker's row
+        names the token it actually received, not the taker's.
+        """
+        rows = conn.execute(
+            "SELECT MARKET, ASSET_ID, MAKER_ASSET_ID, MATCH_KIND, SIDE, PRICE, "
+            "TRADE_SIZE, MATCH_TIME, TRANSACTION_HASH, TAKER_API_KEY, "
+            "MAKER_API_KEY FROM trades "
+            "WHERE (TAKER_API_KEY = %s OR MAKER_API_KEY = %s) AND STATUS != 'FAILED'",
+            (api_key, api_key),
+        ).fetchall()
+
+        acts: list[ActivityWire] = []
+        slug_cache: dict[int, str] = {}
+
+        def event_slug_of(mkt) -> str:
+            if mkt is None or mkt.event_id is None:
+                return ""
+            if mkt.event_id not in slug_cache:
+                found = TableRead.event_slugs_by_id(conn, [mkt.event_id])
+                slug_cache[mkt.event_id] = found.get(mkt.event_id, "")
+            return slug_cache[mkt.event_id]
+
+        for r in rows:
+            for leg in legs_for_user(r, api_key):
+                # Resolve the token THIS leg moved, not the row's ASSET_ID:
+                # they differ for a MINT/MERGE maker, and the outcome label
+                # and index have to follow the corrected token.
+                resolved = resolve_by_token_id(conn, leg.token_id)
+                mkt = resolved.market if resolved else None
+                price = price_to_float(leg.price_micro)
+                size = size_to_float(leg.size_micro)
+                outcome = (
+                    mkt.erc1155_tokens[resolved.outcome_index][1]
+                    if resolved and mkt else ""
+                )
+                acts.append(ActivityWire(
+                    proxyWallet=eth_address,
+                    timestamp=int(r["MATCH_TIME"] or 0),
+                    conditionId=r["MARKET"],
+                    type="TRADE",
+                    size=size,
+                    usdcSize=price * size,
+                    transactionHash=r["TRANSACTION_HASH"] or "",
+                    price=price,
+                    asset=leg.token_id,
+                    side=leg.side,
+                    outcomeIndex=resolved.outcome_index if resolved else 0,
+                    title=mkt.question if mkt else "",
+                    slug=(mkt.slug or "") if mkt else "",
+                    icon=(mkt.icon_url or "") if mkt else "",
+                    eventSlug=event_slug_of(mkt),
+                    outcome=outcome,
+                ))
+        return acts
 
     # --- helpers --------------------------------------------------------
 

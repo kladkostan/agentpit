@@ -56,3 +56,86 @@ def test_the_newest_print_wins_across_both_legs(db):
     got = TableRead.last_trade_prices_for_tokens(db, ["a"])
     # At t=2000 token "a" was the MAKER's token, priced at the stored PRICE.
     assert got["a"] == 900_000
+
+
+# ----- the activity feed ------------------------------------------------------
+
+from agentpit.datastructures.condition_id import ConditionId  # noqa: E402
+from agentpit.datastructures.create_market_request import (  # noqa: E402
+    CreateMarketRequest,
+)
+from agentpit.datastructures.market_state import MarketState  # noqa: E402
+from agentpit.db.table_write import TableWrite  # noqa: E402
+
+
+def _market(db, seed="act"):
+    return TableWrite.create_market(
+        db,
+        CreateMarketRequest(
+            question=f"{seed}?",
+            description="d",
+            erc1155_tokens=[(f"{seed}-y", "Yes"), (f"{seed}-n", "No")],
+            slug=seed,
+            condition_id=ConditionId("0x" + seed.encode().hex().ljust(64, "0")[:64]),
+            state=MarketState.ACTIVE,
+        ),
+        is_polygon_market=False,
+    )
+
+
+def _activity_rows(db, api_key, eth_address):
+    """The trade half of list_activity, exercised through the same code."""
+    from agentpit.services.account_service import AccountService
+    return AccountService._trade_activity(db, api_key, eth_address)
+
+
+def test_a_mint_makers_activity_names_the_token_it_received(db):
+    m = _market(db, "act")
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, MARKET, ASSET_ID, MAKER_ASSET_ID, "
+        "MATCH_KIND, SIDE, PRICE, TRADE_SIZE, STATUS, MATCH_TIME, "
+        "TAKER_API_KEY, MAKER_API_KEY) "
+        "VALUES (%s,%s,'act-y','act-n','MINT','BUY',300000,100,'matched',10,"
+        "'tk','mk')",
+        (uuid.uuid4().hex, m.condition_id.value),
+    )
+    acts = _activity_rows(db, "mk", "0xmaker")
+    assert len(acts) == 1
+    a = acts[0]
+    assert a.asset == "act-n", "the maker received the OTHER outcome"
+    assert a.side == "BUY", "both sides of a mint ACQUIRE"
+    assert a.price == 0.3, "the stored price IS the maker's"
+    assert a.outcome == "No"
+    assert a.usdcSize == pytest.approx(0.3 * a.size)
+
+
+def test_the_mint_taker_sees_the_complement_of_the_stored_price(db):
+    m = _market(db, "actt")
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, MARKET, ASSET_ID, MAKER_ASSET_ID, "
+        "MATCH_KIND, SIDE, PRICE, TRADE_SIZE, STATUS, MATCH_TIME, "
+        "TAKER_API_KEY, MAKER_API_KEY) "
+        "VALUES (%s,%s,'actt-y','actt-n','MINT','BUY',300000,100,'matched',10,"
+        "'tk','mk')",
+        (uuid.uuid4().hex, m.condition_id.value),
+    )
+    a = _activity_rows(db, "tk", "0xtaker")[0]
+    assert a.asset == "actt-y"
+    assert a.side == "BUY"
+    assert a.price == 0.7
+
+
+def test_a_self_matched_normal_row_shows_both_sides(db):
+    """One account on both legs is the dominant shape on production."""
+    m = _market(db, "acts")
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, MARKET, ASSET_ID, MAKER_ASSET_ID, "
+        "MATCH_KIND, SIDE, PRICE, TRADE_SIZE, STATUS, MATCH_TIME, "
+        "TAKER_API_KEY, MAKER_API_KEY) "
+        "VALUES (%s,%s,'acts-y','acts-y','NORMAL','BUY',250000,100,'matched',"
+        "10,'same','same')",
+        (uuid.uuid4().hex, m.condition_id.value),
+    )
+    acts = _activity_rows(db, "same", "0xsame")
+    assert sorted(a.side for a in acts) == ["BUY", "SELL"]
+    assert {a.price for a in acts} == {0.25}
