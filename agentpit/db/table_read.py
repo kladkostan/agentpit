@@ -1170,8 +1170,15 @@ class TableRead:
         trade_id: str | None = None,
         before: int | None = None,
         after: int | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
-        """Trades where the user is taker OR maker, newest first."""
+        """Trades where the user is taker OR maker, newest first.
+
+        `limit`, when given, is applied in SQL (ORDER BY MATCH_TIME DESC
+        already makes the ordering deterministic, so this returns the same
+        page a Python-side `[:limit]` slice would) instead of building every
+        matching row only to throw most of them away.
+        """
         clauses = ["(TAKER_API_KEY = %s OR MAKER_API_KEY = %s)"]
         params: list = [api_key, api_key]
         if market is not None:
@@ -1193,14 +1200,17 @@ class TableRead:
             clauses.append("MATCH_TIME < %s"); params.append(before)
         if after is not None:
             clauses.append("MATCH_TIME > %s"); params.append(after)
-        cur = db.execute(
+        query = (
             "SELECT TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID, "
             "MAKER_ASSET_ID, MATCH_KIND, "
             "PRICE, TRADE_SIZE, SIDE, STATUS, MATCH_TIME, TRANSACTION_HASH, "
             "BUCKET_INDEX, FEE_RATE_BPS, TAKER_API_KEY, MAKER_API_KEY "
-            f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC",
-            params,
+            f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC"
         )
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(limit)
+        cur = db.execute(query, params)
         # Keep the case-insensitive dict rows — a plain dict(r) would lower-case
         # the keys and break the upper-case access in TradeService.
         return list(cur.fetchall())

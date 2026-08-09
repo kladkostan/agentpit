@@ -25,23 +25,31 @@ class TradeService:
 
     def list_trades(self, user: User, *, limit: int = 100, **filters) -> TradesEnvelope:
         with self._db.read() as conn:
-            rows = TableRead.list_trades_for_api_key(conn, user.api_key, **filters)
+            rows = TableRead.list_trades_for_api_key(
+                conn, user.api_key, limit=limit, **filters
+            )
+            outcome_cache: dict[str, str] = {}
             trades = [
                 TradeService._to_wire(
                     conn, r, api_key=user.api_key, user_id=user.user_id,
                     eth_address=user.eth_address,
+                    outcome_cache=outcome_cache,
                 )
                 for r in rows
             ]
         # next_cursor is the static "no more pages" sentinel ("LTE="): agentpit
         # returns all matching trades up to `limit` in one page (paper-rig
         # volumes are small). TODO: real cursor pagination if counts grow.
+        # The limit is now pushed into SQL (see list_trades_for_api_key), so
+        # `rows`/`trades` already IS the page — this slice is a no-op safety
+        # net, not the primary limiting mechanism.
         page = trades[:limit]
         return TradesEnvelope(limit=limit, count=len(page), data=page)
 
     @staticmethod
     def _to_wire(
-        conn, r, *, api_key: str, user_id: str, eth_address: str
+        conn, r, *, api_key: str, user_id: str, eth_address: str,
+        outcome_cache: dict[str, str] | None = None,
     ) -> TradeWire:
         trader_side = "TAKER" if r["TAKER_API_KEY"] == api_key else "MAKER"
         legs = legs_for_user(r, api_key)
@@ -66,11 +74,16 @@ class TradeService:
         # The outcome label follows the token THIS leg moved. It used to come
         # from maker_orders[0] for both perspectives, which handed a MINT's
         # taker the complement's label.
-        resolved = resolve_by_token_id(conn, leg.token_id)
-        outcome = (
-            resolved.market.erc1155_tokens[resolved.outcome_index][1]
-            if resolved and resolved.market else ""
-        )
+        if outcome_cache is not None and leg.token_id in outcome_cache:
+            outcome = outcome_cache[leg.token_id]
+        else:
+            resolved = resolve_by_token_id(conn, leg.token_id)
+            outcome = (
+                resolved.market.erc1155_tokens[resolved.outcome_index][1]
+                if resolved and resolved.market else ""
+            )
+            if outcome_cache is not None:
+                outcome_cache[leg.token_id] = outcome
         match_time = str(int(r["MATCH_TIME"]))
         return TradeWire(
             id=r["TRADE_ID"],
