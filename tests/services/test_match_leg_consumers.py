@@ -196,6 +196,37 @@ def test_the_taker_perspective_flips_the_price_and_keeps_its_own_outcome(db):
     assert wire.trader_side == "TAKER"
 
 
+def _self_mint_row(db, condition_id):
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, "
+        "ASSET_ID, MAKER_ASSET_ID, MATCH_KIND, SIDE, PRICE, TRADE_SIZE, "
+        "STATUS, MATCH_TIME, BUCKET_INDEX, FEE_RATE_BPS, TAKER_API_KEY, "
+        "MAKER_API_KEY) VALUES (%s,'o','[]',%s,'dtm-y','dtm-n','MINT','BUY',"
+        "300000,100,'matched',10,0,0,'same','same')",
+        (uuid.uuid4().hex, condition_id),
+    )
+
+
+def test_a_self_matched_mint_filtered_by_the_makers_token_returns_the_makers_leg(db):
+    """Self-matching is the dominant production shape (373k of 458k rows):
+    one api_key is BOTH taker and maker on the row, so `trader_side` is
+    always TAKER (TAKER_API_KEY == api_key) and, without prefer_token, the
+    taker leg would win even when the caller explicitly filtered by the
+    maker's own token — asset_id would silently disagree with the filter
+    that found the row."""
+    from agentpit.services.trade_service import TradeService
+    m = _market(db, "dtm")
+    _self_mint_row(db, m.condition_id.value)
+    rows = TableRead.list_trades_for_api_key(db, "same", asset_id="dtm-n")
+    assert len(rows) == 1
+    wire = TradeService._to_wire(
+        db, rows[0], api_key="same", user_id="1", eth_address="0xsame",
+        prefer_token="dtm-n",
+    )
+    assert wire.asset_id == "dtm-n"
+    assert wire.price == "0.3", "the maker's own price, not the taker's flipped one"
+
+
 def _normal_row(db, condition_id):
     db.execute(
         "INSERT INTO trades (TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, "

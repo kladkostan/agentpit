@@ -33,6 +33,7 @@ class TradeService:
                 TradeService._to_wire(
                     conn, r, api_key=user.api_key, user_id=user.user_id,
                     eth_address=user.eth_address,
+                    prefer_token=filters.get("asset_id"),
                     outcome_cache=outcome_cache,
                 )
                 for r in rows
@@ -49,13 +50,26 @@ class TradeService:
     @staticmethod
     def _to_wire(
         conn, r, *, api_key: str, user_id: str, eth_address: str,
+        prefer_token: str | None = None,
         outcome_cache: dict[str, str] | None = None,
     ) -> TradeWire:
         trader_side = "TAKER" if r["TAKER_API_KEY"] == api_key else "MAKER"
         legs = legs_for_user(r, api_key)
-        leg = next(
-            (x for x in legs if x.is_taker == (trader_side == "TAKER")), legs[0]
-        )
+        # No-filter behaviour (prefer_token=None): one row per trade, taker
+        # leg preferred — unchanged. This endpoint is per-trade, not per-leg
+        # (unlike the Activity feed), so a self-matched row's other leg is
+        # deliberately not emitted here even though `legs` may hold both.
+        # When the caller filtered by asset_id (prefer_token set), honor
+        # that token if this row actually has a leg on it — a self-matched
+        # MINT/MERGE can be selected via either branch, and returning the
+        # OTHER token's leg would silently violate the caller's own filter.
+        leg = None
+        if prefer_token is not None:
+            leg = next((x for x in legs if x.token_id == prefer_token), None)
+        if leg is None:
+            leg = next(
+                (x for x in legs if x.is_taker == (trader_side == "TAKER")), legs[0]
+            )
         makers_raw = json.loads(r["MAKER_ORDERS"]) if r["MAKER_ORDERS"] else []
         maker_orders = [
             MakerOrderWire(
