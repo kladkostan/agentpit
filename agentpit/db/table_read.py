@@ -60,6 +60,41 @@ def _row_to_market(row) -> Market:
 
 
 class TableRead:
+    #: One price print per (match, token): "this token traded at this price".
+    #:
+    #: The taker branch covers every non-failed row; the maker branch fires
+    #: ONLY for MINT/MERGE, because a NORMAL maker trades the same token at
+    #: the same price and its leg is not a second print. Emitting it would
+    #: double every chart point and every tape-derived volume, silently.
+    #:
+    #: For a MINT/MERGE the stored PRICE is the maker's, so the taker's token
+    #: printed at MICRO - PRICE and the maker's at PRICE — summing to the $1
+    #: the pair costs or returns.
+    #:
+    #: Takes TWO parameters, both the SAME list of token ids: the predicate is
+    #: pushed into each branch so both use an index. One filter over the union
+    #: would seq-scan the whole table.
+    #:
+    #: Append your own `SELECT ... FROM prints`.
+    TOKEN_PRINTS_CTE = """
+        WITH prints AS (
+            SELECT ASSET_ID AS TOKEN_ID, MATCH_TIME, TRADE_SIZE,
+                   CASE WHEN COALESCE(MATCH_KIND, 'NORMAL') IN ('MINT', 'MERGE')
+                        THEN 1000000 - PRICE ELSE PRICE END AS PRICE,
+                   CASE WHEN COALESCE(MATCH_KIND, 'NORMAL') = 'MINT' THEN 'BUY'
+                        WHEN COALESCE(MATCH_KIND, 'NORMAL') = 'MERGE' THEN 'SELL'
+                        ELSE SIDE END AS SIDE
+            FROM trades
+            WHERE STATUS != 'FAILED' AND ASSET_ID = ANY(%s)
+            UNION ALL
+            SELECT MAKER_ASSET_ID, MATCH_TIME, TRADE_SIZE, PRICE,
+                   CASE WHEN MATCH_KIND = 'MINT' THEN 'BUY' ELSE 'SELL' END
+            FROM trades
+            WHERE STATUS != 'FAILED' AND MATCH_KIND IN ('MINT', 'MERGE')
+              AND MAKER_ASSET_ID IS NOT NULL AND MAKER_ASSET_ID = ANY(%s)
+        )
+    """
+
     @staticmethod
     def read_condition_id_by_polymarket_id(
         db: psycopg.Connection, polymarket_id: int

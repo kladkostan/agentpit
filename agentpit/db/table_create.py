@@ -64,6 +64,17 @@ class TableCreate:
             "CREATE INDEX IF NOT EXISTS idx_trades_unlabelled "
             "ON trades(TRADE_ID) WHERE MATCH_KIND IS NULL"
         )
+        # The price tape looks a token up by BOTH columns — the taker's leg on
+        # ASSET_ID and, for a MINT/MERGE, the maker's on MAKER_ASSET_ID.
+        # Neither was indexed: production measured a 132 ms parallel seq scan
+        # over 458k rows to return 21 chart points, on every chart load.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trades_asset_id ON trades(ASSET_ID)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trades_maker_asset_id "
+            "ON trades(MAKER_ASSET_ID)"
+        )
 
     @staticmethod
     def create_orders_table(conn: psycopg.Connection) -> None:
