@@ -73,6 +73,27 @@ def test_a_null_match_kind_takes_the_normal_path(db):
     assert _prints(db, ["y"]) == [("y", 250_000, "BUY")]
 
 
+def test_a_mint_with_unresolved_complement_suppresses_the_maker_print(db):
+    """MAKER_ASSET_ID can be NULL on a MINT/MERGE row: commit 9b374f5 made the
+    backfill record "unknown" rather than assert a token the maker never
+    held, when the complement could not be resolved. The maker branch's
+    `MAKER_ASSET_ID IS NOT NULL` guard excludes that row, so only the taker's
+    print survives — we cannot name the token the maker received, and a print
+    at the maker's price on the TAKER's token would be a false price, which
+    is worse than a missing one.
+
+    Deliberately NOT folded into test_the_sql_and_the_python_truth_table_agree:
+    `legs_for_user` COALESCEs a NULL MAKER_ASSET_ID back to ASSET_ID, so the
+    position layer books the maker's leg on the taker's token — a position
+    must account for size that genuinely moved even when the token is
+    unknown. The print layer has no such obligation and suppresses it
+    instead. That divergence between the two layers is intentional; do not
+    "fix" one into matching the other.
+    """
+    _trade(db, asset="y", maker_asset=None, kind="MINT", side="BUY", price=300_000)
+    assert _prints(db, ["y", "n"]) == [("y", 700_000, "BUY")]
+
+
 def test_a_failed_trade_never_prints(db):
     db.execute(
         "INSERT INTO trades (TRADE_ID, ASSET_ID, MAKER_ASSET_ID, MATCH_KIND, "
