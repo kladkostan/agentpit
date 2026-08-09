@@ -149,3 +149,16 @@ def test_both_token_columns_are_indexed(db):
     }
     assert "idx_trades_asset_id" in names
     assert "idx_trades_maker_asset_id" in names
+
+
+def test_the_maker_asset_id_index_is_partial(db):
+    """The maker branch is gated on MATCH_KIND IN ('MINT', 'MERGE'), so a
+    full index would carry an entry for every mirrored row (373k of 458k in
+    production) that branch can never return. Without the predicate the
+    planner falls back to a Bitmap Heap Scan instead of an Index Scan."""
+    row = db.execute(
+        "SELECT indexdef AS INDEXDEF FROM pg_indexes "
+        "WHERE tablename='trades' AND indexname='idx_trades_maker_asset_id'"
+    ).fetchone()
+    assert row is not None
+    assert "MATCH_KIND" in row["INDEXDEF"].upper()

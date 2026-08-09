@@ -68,12 +68,21 @@ class TableCreate:
         # ASSET_ID and, for a MINT/MERGE, the maker's on MAKER_ASSET_ID.
         # Neither was indexed: production measured a 132 ms parallel seq scan
         # over 458k rows to return 21 chart points, on every chart load.
+        # idx_trades_asset_id stays full: the taker branch has no MATCH_KIND
+        # predicate, so every row is a candidate. idx_trades_maker_asset_id is
+        # partial: agentpit/liquidity/tape.py writes MAKER_ASSET_ID = ASSET_ID
+        # on every mirrored row, so a full index would carry an entry for all
+        # 373k mirror rows that the maker branch — gated on MATCH_KIND IN
+        # ('MINT', 'MERGE') — can never return. Measured on a 400k-row
+        # mirror-shaped table: full index cost a Bitmap Heap Scan (409
+        # buffers); partial costs an Index Scan (208 buffers), and the index
+        # itself shrinks from ~3.2 MB to 16 kB.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_asset_id ON trades(ASSET_ID)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_maker_asset_id "
-            "ON trades(MAKER_ASSET_ID)"
+            "ON trades(MAKER_ASSET_ID) WHERE MATCH_KIND IN ('MINT', 'MERGE')"
         )
 
     @staticmethod
