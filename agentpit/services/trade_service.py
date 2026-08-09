@@ -86,7 +86,7 @@ class TradeService:
             last_update=match_time,
             outcome=outcome,
             bucket_index=int(r["BUCKET_INDEX"]),
-            owner=str(user_id),
+            owner=user_id,
             maker_address=eth_address,
             maker_orders=maker_orders,
             transaction_hash=r["TRANSACTION_HASH"] or "",
