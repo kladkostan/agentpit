@@ -483,8 +483,8 @@ class AccountService:
         if bids and asks:
             return price_to_float((max(bids) + min(asks)) // 2)
         last = conn.execute(
-            "SELECT PRICE FROM trades WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-            "ORDER BY MATCH_TIME DESC LIMIT 1",
-            (token_id,),
+            TableRead.TOKEN_PRINTS_CTE
+            + "SELECT PRICE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
+            ([token_id], [token_id]),
         ).fetchone()
         return price_to_float(int(last["PRICE"])) if last else 0.5

@@ -467,9 +467,9 @@ class OrderService:
                 (token_id,),
             ).fetchall()
             last = conn.execute(
-                "SELECT PRICE FROM trades WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-                "ORDER BY MATCH_TIME DESC LIMIT 1",
-                (token_id,),
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT PRICE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
+                ([token_id], [token_id]),
             ).fetchone()
         bids = sorted(
             (r for r in rows if r["SIDE"] == "BUY"),
@@ -544,11 +544,11 @@ class OrderService:
             start = end - hours * 3600
         with self._db.read() as conn:
             rows = conn.execute(
-                "SELECT MATCH_TIME, PRICE FROM trades "
-                "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-                "AND MATCH_TIME >= %s AND MATCH_TIME <= %s "
-                "ORDER BY MATCH_TIME ASC",
-                (token_id, start, end),
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT MATCH_TIME, PRICE FROM prints "
+                  "WHERE MATCH_TIME >= %s AND MATCH_TIME <= %s "
+                  "ORDER BY MATCH_TIME ASC",
+                ([token_id], [token_id], start, end),
             ).fetchall()
         points = [
             {"t": int(r["MATCH_TIME"]), "p": price_to_float(int(r["PRICE"]))}
@@ -594,10 +594,9 @@ class OrderService:
     def get_last_trade_price(self, token_id: str) -> dict:
         with self._db.read() as conn:
             row = conn.execute(
-                "SELECT PRICE, SIDE FROM trades "
-                "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-                "ORDER BY MATCH_TIME DESC LIMIT 1",
-                (token_id,),
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT PRICE, SIDE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
+                ([token_id], [token_id]),
             ).fetchone()
         if row is None:
             raise NotFoundError("no trades for token")

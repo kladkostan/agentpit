@@ -1019,16 +1019,21 @@ class TableRead:
     def last_trade_prices_for_tokens(
         db: psycopg.Connection, token_ids: "list[str]"
     ) -> "dict[str, int]":
-        """Most-recent non-failed trade price (scaled int) per token, batched."""
+        """Most-recent price print per token, batched.
+
+        Reads prints rather than raw rows: a MINT prints on BOTH tokens, and
+        the complement's price is the one the maker actually paid.
+        """
         if not token_ids:
             return {}
+        ids = list(token_ids)
         rows = db.execute(
-            "SELECT DISTINCT ON (ASSET_ID) ASSET_ID, PRICE FROM trades "
-            "WHERE STATUS != 'FAILED' AND ASSET_ID = ANY(%s) "
-            "ORDER BY ASSET_ID, MATCH_TIME DESC",
-            (list(token_ids),),
+            TableRead.TOKEN_PRINTS_CTE
+            + "SELECT DISTINCT ON (TOKEN_ID) TOKEN_ID, PRICE FROM prints "
+              "ORDER BY TOKEN_ID, MATCH_TIME DESC",
+            (ids, ids),
         ).fetchall()
-        return {r["ASSET_ID"]: int(r["PRICE"]) for r in rows}
+        return {r["TOKEN_ID"]: int(r["PRICE"]) for r in rows}
 
     @staticmethod
     def list_unresolved_ended_markets(
