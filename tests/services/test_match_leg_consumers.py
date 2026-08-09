@@ -139,3 +139,58 @@ def test_a_self_matched_normal_row_shows_both_sides(db):
     acts = _activity_rows(db, "same", "0xsame")
     assert sorted(a.side for a in acts) == ["BUY", "SELL"]
     assert {a.price for a in acts} == {0.25}
+
+
+# ----- /data/trades -----------------------------------------------------------
+
+
+def _mint_row(db, condition_id):
+    db.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, "
+        "ASSET_ID, MAKER_ASSET_ID, MATCH_KIND, SIDE, PRICE, TRADE_SIZE, "
+        "STATUS, MATCH_TIME, BUCKET_INDEX, FEE_RATE_BPS, TAKER_API_KEY, "
+        "MAKER_API_KEY) VALUES (%s,'o','[]',%s,'dt-y','dt-n','MINT','BUY',"
+        "300000,100,'matched',10,0,0,'tk','mk')",
+        (uuid.uuid4().hex, condition_id),
+    )
+
+
+def test_filtering_by_your_own_token_finds_your_maker_fill(db):
+    m = _market(db, "dt")
+    _mint_row(db, m.condition_id.value)
+    rows = TableRead.list_trades_for_api_key(db, "mk", asset_id="dt-n")
+    assert len(rows) == 1, "the maker's own token used to match nothing"
+
+
+def test_the_taker_filter_is_unaffected(db):
+    m = _market(db, "dt")
+    _mint_row(db, m.condition_id.value)
+    assert len(TableRead.list_trades_for_api_key(db, "tk", asset_id="dt-y")) == 1
+    assert TableRead.list_trades_for_api_key(db, "tk", asset_id="dt-n") == []
+
+
+def test_the_maker_perspective_reports_its_own_token_at_its_own_price(db):
+    from agentpit.services.trade_service import TradeService
+    m = _market(db, "dt")
+    _mint_row(db, m.condition_id.value)
+    rows = TableRead.list_trades_for_api_key(db, "mk")
+    wire = TradeService._to_wire(db, rows[0], api_key="mk", user_id=1,
+                                 eth_address="0xmaker")
+    assert wire.asset_id == "dt-n"
+    assert wire.price == "0.3", "PRICE is already the maker's — do not flip it"
+    assert wire.side == "BUY"
+    assert wire.outcome == "No"
+    assert wire.trader_side == "MAKER"
+
+
+def test_the_taker_perspective_flips_the_price_and_keeps_its_own_outcome(db):
+    from agentpit.services.trade_service import TradeService
+    m = _market(db, "dt")
+    _mint_row(db, m.condition_id.value)
+    rows = TableRead.list_trades_for_api_key(db, "tk")
+    wire = TradeService._to_wire(db, rows[0], api_key="tk", user_id=2,
+                                 eth_address="0xtaker")
+    assert wire.asset_id == "dt-y"
+    assert wire.price == "0.7"
+    assert wire.outcome == "Yes", "used to report the maker's outcome label"
+    assert wire.trader_side == "TAKER"

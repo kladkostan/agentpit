@@ -1177,7 +1177,16 @@ class TableRead:
         if market is not None:
             clauses.append("MARKET = %s"); params.append(market)
         if asset_id is not None:
-            clauses.append("ASSET_ID = %s"); params.append(asset_id)
+            # A MINT/MERGE maker's own token is MAKER_ASSET_ID, not ASSET_ID
+            # (that's the taker's), and filtering on ASSET_ID alone dropped
+            # their fill entirely. But the match must stay per-leg: a flat
+            # OR of both asset columns would also match api_key's row via
+            # the COUNTERPARTY's leg, not just their own.
+            clauses.append(
+                "((TAKER_API_KEY = %s AND ASSET_ID = %s) OR "
+                "(MAKER_API_KEY = %s AND COALESCE(MAKER_ASSET_ID, ASSET_ID) = %s))"
+            )
+            params.extend([api_key, asset_id, api_key, asset_id])
         if trade_id is not None:
             clauses.append("TRADE_ID = %s"); params.append(trade_id)
         if before is not None:
@@ -1186,6 +1195,7 @@ class TableRead:
             clauses.append("MATCH_TIME > %s"); params.append(after)
         cur = db.execute(
             "SELECT TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID, "
+            "MAKER_ASSET_ID, MATCH_KIND, "
             "PRICE, TRADE_SIZE, SIDE, STATUS, MATCH_TIME, TRANSACTION_HASH, "
             "BUCKET_INDEX, FEE_RATE_BPS, TAKER_API_KEY, MAKER_API_KEY "
             f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC",
