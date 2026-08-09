@@ -374,7 +374,13 @@ def test_a_failed_trade_never_prints(db):
 
 def test_the_sql_and_the_python_truth_table_agree(db):
     """The two representations encode the same domain in two languages. This
-    is what stops them drifting — silently, months from now."""
+    is what stops them drifting — silently, months from now.
+
+    The bridge between them: a token's print is the leg of the party whose
+    OWN token it is — the taker for ASSET_ID, the maker for MAKER_ASSET_ID.
+    For a NORMAL match both legs sit on one token and the print is the
+    taker's, which is exactly why NORMAL yields one print and not two.
+    """
     cases = [
         ("NORMAL", "BUY", 250_000, "y"),
         ("NORMAL", "SELL", 250_000, "y"),
@@ -389,12 +395,15 @@ def test_the_sql_and_the_python_truth_table_agree(db):
             "SELECT TAKER_API_KEY, MAKER_API_KEY, ASSET_ID, MAKER_ASSET_ID, "
             "MATCH_KIND, SIDE, PRICE, TRADE_SIZE FROM trades"
         ).fetchone()
-        # Every leg the SQL prints must be a leg the truth table agrees with.
-        by_token = {}
-        for leg in legs_for_user(row, "tk") + legs_for_user(row, "mk"):
-            by_token[leg.token_id] = (leg.price_micro, leg.side)
-        for token, price_sql, side_sql in _prints(db, ["y", "n"]):
-            assert by_token[token] == (price_sql, side_sql), (kind, token)
+        taker_leg = legs_for_user(row, "tk")[0]
+        maker_leg = legs_for_user(row, "mk")[0]
+        expected = {taker_leg.token_id: (taker_leg.price_micro, taker_leg.side)}
+        if kind in ("MINT", "MERGE"):
+            expected[maker_leg.token_id] = (
+                maker_leg.price_micro, maker_leg.side
+            )
+        got = {t: (p, s) for t, p, s in _prints(db, ["y", "n"])}
+        assert got == expected, kind
 
 
 def test_both_token_columns_are_indexed(db):
