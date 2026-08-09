@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from agentpit.datastructures.activity_wire import ActivityWire
 from agentpit.datastructures.market_state import MarketState
+from agentpit.datastructures.match_leg import legs_for_user
 from agentpit.datastructures.position_wire import PositionWire
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -297,16 +298,9 @@ class AccountService:
         proceeds and the sale time, not just the net quantity `_net_bought`
         reports, and it must not double-count a maker fill as the taker's side.
 
-        A trade row's stored PRICE is always the MAKER's price. Which token
-        moved and in which direction depends on `MATCH_KIND`, recorded by the
-        matcher itself (rows written before that column existed default to
-        NORMAL, the only kind they could have been):
-
-        | kind   | this user is taker                | this user is maker         |
-        |--------|------------------------------------|-----------------------------|
-        | NORMAL | token ASSET_ID, dir SIDE, price p   | token ASSET_ID, dir ~SIDE, price p |
-        | MINT   | token ASSET_ID, ACQUIRES, price 1-p | token MAKER_ASSET_ID, ACQUIRES, price p |
-        | MERGE  | token ASSET_ID, DISPOSES, price 1-p | token MAKER_ASSET_ID, DISPOSES, price p |
+        A trade row's stored PRICE is always the MAKER's price; which token
+        moved and in which direction depends on `MATCH_KIND` — the truth
+        table lives in `agentpit.datastructures.match_leg`, not here.
 
         For a MINT/MERGE, both parties transact in different tokens whose
         prices sum to the $1 the mint costs (or the merge returns), so a
@@ -316,7 +310,8 @@ class AccountService:
         The matcher has no same-account guard, so one row can have this user
         as BOTH taker and maker (a resting order of theirs crossed by a later
         order of theirs). Both legs are real and are booked independently —
-        see `legs` below — rather than picking one via a single `is_taker`.
+        `legs_for_user` returns one entry per leg the user holds — rather
+        than picking one via a single `is_taker`.
         """
         rows = conn.execute(
             "SELECT SIDE, PRICE, TRADE_SIZE, MATCH_TIME, MATCH_KIND, "
@@ -329,42 +324,15 @@ class AccountService:
         bought_size = bought_cost = sold_size = sold_proceeds = 0
         last_sell_time = 0
         for r in rows:
-            maker_asset = r["MAKER_ASSET_ID"] or r["ASSET_ID"]
-            # A user can hold BOTH sides of one row — the matcher has no
-            # same-account guard against a resting order of theirs getting
-            # crossed by their own later order. Each leg they own that moves
-            # this token is real and must be booked; collapsing to a single
-            # `is_taker` silently drops one (and can leave a net negative).
-            legs = []
-            if r["TAKER_API_KEY"] == api_key and r["ASSET_ID"] == token_id:
-                legs.append(True)
-            if r["MAKER_API_KEY"] == api_key and maker_asset == token_id:
-                legs.append(False)
-            kind = r["MATCH_KIND"] or "NORMAL"
-            size = int(r["TRADE_SIZE"])
-            for is_taker in legs:
-                price = int(r["PRICE"])  # always the MAKER's price; re-read
-                # per leg so one leg's flip cannot leak into the next.
-                if kind == "MINT":
-                    # Both sides acquire, of different tokens, and their prices
-                    # sum to the $1 the mint costs.
-                    acquiring = True
-                    if is_taker:
-                        price = 1_000_000 - price
-                elif kind == "MERGE":
-                    # Both sides dispose; their proceeds sum to the $1 returned.
-                    acquiring = False
-                    if is_taker:
-                        price = 1_000_000 - price
+            for leg in legs_for_user(r, api_key):
+                if leg.token_id != token_id:
+                    continue
+                if leg.side == "BUY":
+                    bought_size += leg.size_micro
+                    bought_cost += leg.price_micro * leg.size_micro
                 else:
-                    # One token, opposite directions, one price.
-                    acquiring = (r["SIDE"] == "BUY") == is_taker
-                if acquiring:
-                    bought_size += size
-                    bought_cost += price * size
-                else:
-                    sold_size += size
-                    sold_proceeds += price * size
+                    sold_size += leg.size_micro
+                    sold_proceeds += leg.price_micro * leg.size_micro
                     last_sell_time = max(last_sell_time, int(r["MATCH_TIME"] or 0))
         return _TokenFlow(
             bought_size=bought_size,
