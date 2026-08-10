@@ -46,15 +46,27 @@ then transacting from it on their behalf is a contradiction that grows sharper
 the more the native coin is worth. On a paper chain it meant nothing. On this
 one it does.
 
-### 3. An unredeemed win is invisible
+### 3. An unredeemed win is mislabelled as a live position
 
-`AccountService.list_closed_positions` reconstructs won positions **from REDEEM
-transactions**. Until the redeem happens there is no row anywhere saying the
-user is owed money. Today auto-redeem hides that gap by always firing. Turn it
-off without fixing it and winnings silently vanish from the interface.
+`AccountService.list_positions` filters on `bal > 0` and nothing else — there is
+no market-state check. So a resolved market whose winning token the account
+still holds appears among **open positions**, priced by `_cur_price`. A resolved
+market has no live book (the mirror cancels its orders once the market leaves
+the active set), so that falls through to the last trade print: a share worth
+exactly $1 is displayed at whatever it last changed hands for.
 
-That ordering constraint is the load-bearing part of this design: **visibility
-must ship with the switch-off, not after it.**
+`list_closed_positions` cannot help, because it reconstructs won positions
+**from REDEEM transactions** — until the redeem happens there is no closed row
+either.
+
+So the money is not hidden; it is worse than hidden. It is shown as a live
+position at a stale price, in a market that can no longer be traded. Today
+auto-redeem papers over this by always firing within minutes. Turn it off
+without fixing it and every unclaimed win becomes a permanent lie on the
+positions list.
+
+That ordering constraint is the load-bearing part of this design: **the correct
+presentation must ship with the switch-off, not after it.**
 
 ## Design
 
@@ -101,24 +113,45 @@ loop runs only when it is on AND the account has opted in.
 No migration sweep is needed. Turning the flag off strands nothing, because the
 visibility change surfaces every unclaimed win at the same moment.
 
-### Unredeemed winnings become a number the user can see
+### Unclaimed becomes the third state a position can be in
 
-For each RESOLVED market where the account still holds a winning outcome token,
-the amount owed is that token's balance — a winning token is worth exactly $1.
-Sum it, show it, and put a button next to it.
+A position is open, or it is closed, or it is **decided but not collected**. The
+profile's filter already names the first two; the third is missing, which is why
+settled money ends up sitting under "open".
 
-The redeem endpoint already exists: `POST /markets/{market_id}/redeem_position`
+So: give it its own filter beside them, and value it correctly — a winning token
+is worth exactly $1, not the last price it traded at. Each row carries its own
+**Claim** button. The filter's label carries the total (`Unclaimed · $12.40`)
+and the filter appears only when there is something to claim, so it is both the
+number and the way to act on it, in one place, and absent when irrelevant.
+
+The endpoint already exists: `POST /markets/{market_id}/redeem_position`
 (`api/routes/positions.py:35`). Nothing new is needed on the write side.
 
-### Two things to show in Settings
+Copy: the button says **Claim**, and so does the toast when it succeeds — one
+name for one action, all the way through. Not "Redeem": that is the contract's
+word, not the user's.
 
-**Credits balance.** On SKALE the account's native balance *is* its credit
-balance. We already read it (`_maybe_reonboard` uses `native_balance`). Show it
-beside the address, where the export button now lives.
+### Credits appear where they block you, not as a second balance
 
-**The auto-redeem toggle**, with a line saying plainly what it spends: that
-claiming a win costs a small amount of gas from this wallet, and that leaving
-this off means claiming them yourself.
+The account already shows a **Balance** — paper USDC, the money it trades with.
+Putting a credits figure beside it invites exactly the confusion that generates
+support tickets: two balances, and no way to tell which one buys a position.
+
+Credits get two homes instead:
+
+- **Settings**, beside the address and the export button — the durable place
+  where facts about the wallet live.
+- **The unclaimed view, conditionally.** Claiming costs about $0.001 in credits.
+  Say nothing when the account can afford it. When it cannot, replace the
+  claim button's helper line with what is missing and how to fix it. An empty
+  wallet is a moment for direction, not a number.
+
+### The auto-redeem toggle goes in Settings
+
+Its own row, after Address. The line under it says what it spends rather than
+what it is: claiming a win costs a small amount of gas from this wallet, and
+with this off you claim them yourself.
 
 ## Ordering
 
