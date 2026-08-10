@@ -3,12 +3,22 @@ import { Check, Copy, Eye, EyeOff, Key, KeyRound, Lock, Mail, User, X } from "lu
 import { toast } from "sonner";
 import {
   changePasswordRequest,
+  exportPrivateKeyRequest,
   type UserPublic,
   updateHandleRequest,
 } from "@/api/auth";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/useAuth";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -38,7 +48,11 @@ export function SettingsPage() {
                 <p className="break-all font-mono text-sm text-muted-foreground">
                   {user.eth_address}
                 </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Import it into MetaMask to fund this wallet.
+                </p>
               </div>
+              <ExportKeyButton />
             </div>
             <ApiKeyRow apiKey={user.api_key} />
             <ChangePasswordRow />
@@ -228,6 +242,129 @@ function ApiKeyRow({ apiKey }: { apiKey: string }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+type ExportedKey = { private_key: string; eth_address: string };
+
+function ExportKeyButton() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<ExportedKey | null>(null);
+
+  const reset = () => {
+    setPassword("");
+    setError("");
+    setLoading(false);
+    setResult(null);
+  };
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) reset();
+  };
+
+  const submit = async (factor: { password: string } | { googleCredential: string }) => {
+    setError("");
+    setLoading(true);
+    try {
+      const exported = await exportPrivateKeyRequest(factor);
+      setResult(exported);
+    } catch (err) {
+      let message = "Failed to export private key.";
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          message = "Incorrect password.";
+        } else if (err.status === 400) {
+          message = "Too many attempts. Wait a moment and try again.";
+        }
+      }
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.private_key);
+      toast.success("Private key copied to clipboard.");
+    } catch {
+      toast.error("Could not copy private key.");
+    }
+  };
+
+  if (!user) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          Export private key
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Export private key</DialogTitle>
+          <DialogDescription>
+            Anyone with this key controls the wallet and everything in it. We
+            cannot undo an export or move the funds back.
+          </DialogDescription>
+        </DialogHeader>
+        {result ? (
+          <div className="flex flex-col gap-3">
+            <p className="break-all rounded-md border bg-muted p-3 font-mono text-sm">
+              {result.private_key}
+            </p>
+            <Button type="button" variant="outline" onClick={() => void copy()}>
+              <Copy className="mr-2 size-4" />
+              Copy private key
+            </Button>
+          </div>
+        ) : user.has_password ? (
+          <div className="flex flex-col gap-2">
+            <Input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              autoFocus
+              disabled={loading}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && password && !loading) {
+                  e.preventDefault();
+                  void submit({ password });
+                }
+              }}
+            />
+            {error && <p className="text-xs text-red-500">{error}</p>}
+            <Button
+              type="button"
+              onClick={() => void submit({ password })}
+              disabled={loading || !password}
+            >
+              Confirm
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <GoogleSignInButton
+              onCredential={(credential) =>
+                void submit({ googleCredential: credential })
+              }
+              onError={setError}
+            />
+            {error && <p className="text-xs text-red-500">{error}</p>}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

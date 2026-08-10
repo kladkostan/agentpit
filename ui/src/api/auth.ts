@@ -6,6 +6,7 @@ export type UserPublic = {
   handle: string | null;
   eth_address: string;
   api_key: string;
+  has_password: boolean;
   onboarded_at: number | null;
   created_at: number;
 };
@@ -72,4 +73,17 @@ export function changePasswordRequest(
       new_password: newPassword,
     }),
   });
+}
+
+export function exportPrivateKeyRequest(
+  factor: { password: string } | { googleCredential: string },
+): Promise<{ private_key: string; eth_address: string }> {
+  const body =
+    "password" in factor
+      ? { password: factor.password }
+      : { google_credential: factor.googleCredential };
+  return apiFetch<{ private_key: string; eth_address: string }>(
+    "/me/private-key",
+    { method: "POST", body: JSON.stringify(body) },
+  );
 }
