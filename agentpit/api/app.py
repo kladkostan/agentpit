@@ -90,6 +90,7 @@ def _run_polymarket_sync(db: DbSession, admin: OnchainAdmin, settings: Settings)
             admin,
             max_markets=settings.sync_max_markets,
             liquidity_min=settings.sync_liquidity_min,
+            event_max_outcomes=settings.sync_event_max_outcomes,
         )
     return len(created)
 

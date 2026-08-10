@@ -6,6 +6,7 @@ from agentpit.common import check_state
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.db.table_read import TableRead
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
+from agentpit.polymarket import polymarket_sync
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _is_market_over,
@@ -164,3 +165,109 @@ def test_accepting_orders_is_coerced_from_its_string_forms():
     for raw, expected in (("true", True), ("false", False), (1, True), (0, False)):
         m = _normalize_market_fields(_overdue(acceptingOrders=raw))
         assert m["accepting_orders"] is expected, raw
+
+
+# ----- an event is one question; half an answer is worse than none ----------
+
+
+def _sib(name, *, v24, liq=20_000, closed=False, vol=1_000_000):
+    """One outcome of a multi-outcome event.
+
+    `vol` (cumulative volumeNum) defaults high so tests that only care about
+    the `liq` knob aren't accidentally tripped by the filter's "stronger of
+    liquidity or volume" rule. The illiquid-placeholder case below overrides
+    it to 0 — a `Person C` nobody has ever traded has zero of both.
+    """
+    return {
+        "conditionId": "0x" + name.encode().hex().ljust(64, "0")[:64],
+        "question": f"Will {name} win?",
+        "groupItemTitle": name,
+        "volume24hr": v24,
+        "volumeNum": vol,
+        "liquidity": liq,
+        "closed": closed,
+        "active": True,
+        "archived": False,
+        "acceptingOrders": True,
+        "endDate": "2099-01-01T00:00:00Z",
+    }
+
+
+def _event(*markets):
+    return {"id": "77", "slug": "who-wins", "markets": list(markets)}
+
+
+def _primary(name):
+    """The market that qualified in the top-1000 window on its own merit."""
+    m = _sib(name, v24=678_000)
+    m["events"] = [{"id": "77"}]
+    return m
+
+
+def _fetcher_for(event):
+    def fetch(ids, host):
+        assert ids == ["77"], ids
+        return [event]
+    return fetch
+
+
+def test_the_siblings_of_a_qualifying_market_come_with_it():
+    favourite = _primary("Adanech")
+    event = _event(favourite, _sib("Abiy", v24=328), _sib("Demeke", v24=1033))
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert sorted(m["groupItemTitle"] for m in extra) == ["Abiy", "Demeke"]
+
+
+def test_the_market_that_already_qualified_is_not_returned_twice():
+    favourite = _primary("Adanech")
+    event = _event(favourite, _sib("Abiy", v24=328))
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert [m["groupItemTitle"] for m in extra] == ["Abiy"]
+
+
+def test_the_cap_keeps_the_busiest_outcomes():
+    favourite = _primary("Adanech")
+    others = [_sib(f"P{i}", v24=100 - i) for i in range(10)]
+    event = _event(favourite, *others)
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=3, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    # cap 3 covers the favourite plus the two busiest siblings.
+    assert [m["groupItemTitle"] for m in extra] == ["P0", "P1"]
+
+
+def test_an_illiquid_placeholder_sibling_is_dropped():
+    """Upstream keeps zero-liquidity placeholders for unnamed candidates —
+    `Person C`, `Person D`. Four of the Ethiopia event's 33 are exactly that."""
+    favourite = _primary("Adanech")
+    event = _event(favourite, _sib("Person C", v24=0, liq=0, vol=0))
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert extra == []
+
+
+def test_a_closed_sibling_is_never_pulled():
+    favourite = _primary("Adanech")
+    event = _event(favourite, _sib("Gone", v24=5000, closed=True))
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert extra == []
+
+
+def test_a_market_with_no_event_contributes_nothing():
+    lone = _sib("Solo", v24=678_000)      # no "events" key at all
+    assert polymarket_sync.fetch_event_siblings(
+        [lone], cap=12, liquidity_threshold=5000,
+        fetcher=lambda ids, host: pytest.fail("must not fetch"),
+    ) == []

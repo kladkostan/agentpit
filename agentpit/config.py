@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     sync_liquidity_min: float = Field(
         default=0.0, validation_alias="SYNC_LIQUIDITY_MIN"
     )
+    # When a market qualifies, its sibling outcomes come with it, capped at
+    # this many per event (busiest first by 24h volume). The median upstream
+    # event has 11 open outcomes, so 12 lets most through whole; the largest
+    # carry 128 and nobody trades their tail. Measured cost at 12: 2302
+    # markets per pass against 1000 without it. 0 disables the expansion.
+    sync_event_max_outcomes: int = Field(
+        default=12, validation_alias="SYNC_EVENT_MAX_OUTCOMES"
+    )
     resolution_mirror_enabled: bool | None = Field(
         default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
     )

@@ -208,6 +208,39 @@ def _is_market_over(market: dict) -> bool:
     return not accepting
 
 
+def _passes_market_filters(
+    m: dict, *, liquidity_threshold: float, closed: bool, archived: bool
+) -> bool:
+    """Does this ALREADY-NORMALIZED market belong in the catalogue?
+
+    The single copy of that question. The primary window and the sibling pass
+    both call it, so a market cannot be admitted through one path and rejected
+    through the other.
+    """
+    if not m.get("condition_id"):
+        return False
+    # Use the stronger of orderbook depth ("liquidity") and cumulative trade
+    # volume ("volumeNum"). Multi-outcome favourites have shallow books on the
+    # cheap side even though they're heavily traded — filtering on liquidity
+    # alone silently drops exactly the markets users care about.
+    liquidity = _as_float(m.get("liquidity"))
+    volume = _as_float(m.get("volumeNum"))
+    if volume == 0.0:
+        volume = _as_float(m.get("volume"))
+    if max(liquidity, volume) < liquidity_threshold:
+        return False
+    if not archived and m.get("archived", False):
+        raise ValueError(
+            f"API returned archived market {m.get('condition_id')} despite "
+            "request for non-archived"
+        )
+    if not closed and m.get("closed", False):
+        return False
+    if not closed and _is_market_over(m):
+        return False
+    return True
+
+
 def fetch_all_polymarket_markets(
     host: str = POLYMARKET_GAMMA_URL,
     closed: bool = False,
@@ -281,38 +314,13 @@ def fetch_all_polymarket_markets(
         filtered_data = []
         for m in data:
             m = _normalize_market_fields(m)
-
-            if not m.get("condition_id"):
-                continue
-
-            # Use the stronger of orderbook depth ("liquidity") and cumulative
-            # trade volume ("volumeNum"). Multi-outcome favorites (e.g. France
-            # in a World Cup event) have shallow books on the cheap side even
-            # though they're heavily traded — filtering on liquidity alone
-            # silently drops exactly the markets users care about.
-            liquidity = _as_float(m.get("liquidity"))
-            volume = _as_float(m.get("volumeNum"))
-            if volume == 0.0:
-                volume = _as_float(m.get("volume"))
-
-            if max(liquidity, volume) < liquidity_threshold:
-                continue
-
-            # Filter archived if not requested (API might leak them or mock data includes them)
-            if not archived and m.get("archived", False):
-                raise ValueError(
-                    f"API returned archived market {m.get('condition_id')} despite request for non-archived"
-                )
-
-            # Gamma can still leak closed markets when closed=false.
-            if not closed and m.get("closed", False):
-                continue
-
-            # Filter expired markets unless we asked for closed ones
-            # (Test expectations require client-side filtering of expired markets)
-            if not closed and _is_market_over(m):
-                continue
-            filtered_data.append(m)
+            if _passes_market_filters(
+                m,
+                liquidity_threshold=liquidity_threshold,
+                closed=closed,
+                archived=archived,
+            ):
+                filtered_data.append(m)
 
         all_markets.extend(filtered_data)
         logger.debug(
@@ -329,6 +337,84 @@ def fetch_all_polymarket_markets(
 
     logger.info("Finished fetching %d markets from Polymarket", len(all_markets))
     return all_markets
+
+
+#: Gamma caps a response at 100 rows; 40 ids per call leaves headroom.
+_EVENT_BATCH = 40
+
+
+def _fetch_events_by_id(ids: list[str], host: str) -> list[dict]:
+    # Event ids are numeric strings from the payload we just fetched, and the
+    # rest of this module builds Gamma URLs the same way (see
+    # `fetch_polymarket_market`), so no escaping layer is introduced here.
+    query = "&".join(f"id={i}" for i in ids)
+    response = get(f"{host}/events?limit=100&{query}")
+    return response if isinstance(response, list) else []
+
+
+def fetch_event_siblings(
+    pm_markets: list[dict],
+    *,
+    cap: int,
+    liquidity_threshold: float,
+    host: str = POLYMARKET_GAMMA_URL,
+    fetcher=None,
+) -> list[dict]:
+    """The other outcomes of the events `pm_markets` belong to.
+
+    An event is one question, and half an answer to it is worse than none: the
+    top-1000-by-24h-volume window admitted exactly 1 of the 33 outcomes of
+    "Next Prime Minister of Ethiopia?", so the site showed a $273M event as one
+    candidate at under 1%.
+
+    Keeps each event's `cap` busiest open outcomes by 24h volume. The median
+    event has 11, so 12 lets most through whole and truncates only the
+    long-tail monsters — the largest upstream events carry 128 outcomes and
+    nobody trades their tail.
+
+    Returns only markets NOT already in `pm_markets`, so a market that
+    qualified on its own merit can never be displaced by the cap.
+    """
+    fetch = fetcher or _fetch_events_by_id
+    have = {m.get("condition_id") or m.get("conditionId") for m in pm_markets}
+    event_ids: list[str] = []
+    for m in pm_markets:
+        for e in (m.get("events") or []):
+            if e.get("id") is not None and str(e["id"]) not in event_ids:
+                event_ids.append(str(e["id"]))
+    if not event_ids:
+        return []
+
+    extra: list[dict] = []
+    for i in range(0, len(event_ids), _EVENT_BATCH):
+        try:
+            events = fetch(event_ids[i : i + _EVENT_BATCH], host)
+        except Exception as exc:  # one bad batch must not lose the rest
+            logger.warning(
+                "event sibling fetch failed for batch %d (%s)",
+                i // _EVENT_BATCH,
+                exc.__class__.__name__,
+            )
+            continue
+        for event in events:
+            outcomes = [
+                m for m in (event.get("markets") or []) if not m.get("closed")
+            ]
+            outcomes.sort(key=lambda m: -_as_float(m.get("volume24hr")))
+            for m in outcomes[:cap]:
+                m = _normalize_market_fields(m)
+                if m.get("condition_id") in have:
+                    continue
+                if not _passes_market_filters(
+                    m,
+                    liquidity_threshold=liquidity_threshold,
+                    closed=False,
+                    archived=False,
+                ):
+                    continue
+                have.add(m["condition_id"])
+                extra.append(m)
+    return extra
 
 
 def fetch_is_polymarket_market_closed(condition_id: ConditionId) -> bool:
@@ -628,6 +714,7 @@ def fetch_and_sync_polymarket_markets(
     *,
     max_markets: int = 300,
     liquidity_min: float = 0.0,
+    event_max_outcomes: int = 0,
 ) -> list[Market]:
     """Discover + locally create the trending Polymarket markets.
 
@@ -638,6 +725,10 @@ def fetch_and_sync_polymarket_markets(
     Args:
         max_markets: cap on how many top-by-volume markets to consider per pass.
         liquidity_min: minimum max(liquidity, volume) floor; 0 = no floor.
+        event_max_outcomes: cap on sibling outcomes pulled in per event for any
+            market that qualified in the primary window; 0 disables the pass
+            (the default, so existing callers keep making no extra network
+            calls).
     """
     pm_markets = fetch_all_polymarket_markets(
         host,
@@ -647,6 +738,18 @@ def fetch_and_sync_polymarket_markets(
         order="volume24hr",
         max_markets=max_markets,
     )
+    if event_max_outcomes > 0:
+        siblings = fetch_event_siblings(
+            pm_markets,
+            cap=event_max_outcomes,
+            liquidity_threshold=liquidity_min,
+            host=host,
+        )
+        logger.info(
+            "event expansion added %d sibling markets to %d primary",
+            len(siblings), len(pm_markets),
+        )
+        pm_markets = pm_markets + siblings
     created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
     return created_markets
 
