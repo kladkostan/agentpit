@@ -182,6 +182,8 @@ class TableCreate:
             ("TOTAL_DEPOSITED", "BIGINT"),
             ("DEPLOYMENT_ID", "TEXT"),
             ("GOOGLE_SUB", "TEXT"),
+            ("KEY_EXPORTED_AT", "BIGINT"),
+            ("KEY_EXPORT_ATTEMPT_AT", "BIGINT"),
         ]
         for col, col_type in additions:
             conn.execute(

@@ -1,6 +1,8 @@
 import logging
+import time
 
 from eth_account.signers.local import LocalAccount
+from web3 import Web3
 
 from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
@@ -189,6 +191,58 @@ class AuthService:
             if not updated:
                 raise UserNotFoundError()
 
+    #: Seconds between export attempts on one account. This endpoint sits
+    #: behind an authenticated session, so an attacker needs the session
+    #: before they can guess at all — but the prize is a key that cannot be
+    #: revoked, unlike the session itself, so online guessing gets a floor.
+    #: The project has no rate limiting anywhere else, including /login.
+    KEY_EXPORT_COOLDOWN_S = 5
+
+    def export_private_key(
+        self,
+        *,
+        user_id: str,
+        password: str | None = None,
+        google_credential: str | None = None,
+    ) -> str:
+        """The account's own private key, after proving it is the account.
+
+        Exactly one factor, chosen by what the account HAS rather than by what
+        the caller offers: a password account cannot authenticate with a Google
+        token and a Google account has no password to give.
+        """
+        now = int(time.time())
+        with self._db.write() as conn:
+            user = TableRead.get_user_by_userid(conn, user_id)
+            if user is None:
+                raise UserNotFoundError()
+            _, last_attempt = TableRead.get_key_export_state(conn, user_id)
+            if last_attempt is not None and now - last_attempt < self.KEY_EXPORT_COOLDOWN_S:
+                raise BusinessRuleError("too many attempts — wait a moment")
+            TableWrite.mark_key_export_attempt(conn, user_id, now)
+
+            password_hash = TableRead.get_password_hash_by_userid(conn, user_id)
+            if password_hash is not None:
+                if password is None:
+                    raise BusinessRuleError("this account exports with its password")
+                if not verify_password(password, password_hash):
+                    raise InvalidCredentialsError("invalid password")
+            else:
+                if google_credential is None:
+                    raise BusinessRuleError("this account exports with Google")
+                if self._google is None:
+                    raise FeatureDisabledError("Google sign-in is not configured")
+                identity = self._google.verify(google_credential)
+                owner = TableRead.get_user_by_google_sub(conn, identity.sub)
+                # A valid token proves somebody signed in with Google. It has
+                # to be THIS account's Google identity, or the key goes to
+                # whoever authenticated last.
+                if owner is None or owner.user_id != user_id:
+                    raise InvalidCredentialsError("that Google account is not this one")
+
+            TableWrite.mark_key_exported(conn, user_id, now)
+        return Web3.to_hex(user.eth_key.key)
+
     # --- helpers --------------------------------------------------------
 
     def _run_onboarding(self, user_account) -> None:
@@ -217,8 +271,20 @@ class AuthService:
         `simulated_chain=False` turns this off and the signup grant becomes once
         per account. (The house account does not rely on this path at all — it is
         kept above a gas floor by the mirror's top-up loop.)
+
+        A second lock sits beside the first: once the holder has exported their
+        private key, this repair never runs again, because from that point a
+        zero balance can also mean they emptied the wallet on purpose.
         """
         if not self._settings.simulated_chain:
+            return
+        with self._db.read() as conn:
+            exported_at, _ = TableRead.get_key_export_state(conn, user.user_id)
+        if exported_at is not None:
+            # While we hold the key the only way to a zero balance is a chain
+            # wipe, which is what this repair is for. Once the holder has the
+            # key they can empty the wallet deliberately, and every login would
+            # be another free grant.
             return
         if self._onchain is None or user.onboarded_at is None:
             return
@@ -330,6 +396,10 @@ class AuthService:
 
     def _issue(self, user: User) -> AuthResponse:
         token = self._coder.encode(user_id=user.user_id, email=user.email)
+        with self._db.read() as conn:
+            has_password = (
+                TableRead.get_password_hash_by_userid(conn, user.user_id) is not None
+            )
         return AuthResponse(
             access_token=token,
             user=UserPublic(
@@ -340,5 +410,6 @@ class AuthService:
                 api_key=user.api_key,
                 onboarded_at=user.onboarded_at,
                 created_at=user.created_at,
+                has_password=has_password,
             ),
         )

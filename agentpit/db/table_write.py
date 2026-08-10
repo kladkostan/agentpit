@@ -87,6 +87,27 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
+    def mark_key_export_attempt(
+        db: psycopg.Connection, user_id: str, at: int
+    ) -> bool:
+        cur = db.execute(
+            "UPDATE users SET KEY_EXPORT_ATTEMPT_AT = %s WHERE USER_ID = %s",
+            (at, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def mark_key_exported(db: psycopg.Connection, user_id: str, at: int) -> bool:
+        """First export only — a later one must not move the stamp, or the
+        re-grant lock would appear to lapse."""
+        cur = db.execute(
+            "UPDATE users SET KEY_EXPORTED_AT = %s "
+            "WHERE USER_ID = %s AND KEY_EXPORTED_AT IS NULL",
+            (at, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def link_google_identity(
         db: psycopg.Connection, user_id: str, google_sub: str
     ) -> bool:

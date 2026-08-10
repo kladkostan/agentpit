@@ -326,6 +326,25 @@ class TableRead:
         return row["PASSWORD_HASH"] if row else None
 
     @staticmethod
+    def get_key_export_state(
+        db: psycopg.Connection, user_id: str
+    ) -> "tuple[int | None, int | None]":
+        """`(exported_at, last_attempt_at)` for one user, epoch seconds."""
+        row = db.execute(
+            "SELECT KEY_EXPORTED_AT, KEY_EXPORT_ATTEMPT_AT FROM users "
+            "WHERE USER_ID = %s",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return (None, None)
+        exported = row["KEY_EXPORTED_AT"]
+        attempted = row["KEY_EXPORT_ATTEMPT_AT"]
+        return (
+            int(exported) if exported is not None else None,
+            int(attempted) if attempted is not None else None,
+        )
+
+    @staticmethod
     def get_last_topup_at(db: psycopg.Connection, user_id: str) -> int | None:
         row = db.execute(
             "SELECT LAST_TOPUP_AT FROM users WHERE USER_ID = %s", (user_id,)

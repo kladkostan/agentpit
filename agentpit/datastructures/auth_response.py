@@ -9,6 +9,7 @@ class UserPublic(BaseModel):
     api_key: str
     onboarded_at: int | None
     created_at: int
+    has_password: bool
 
 
 class AuthResponse(BaseModel):
