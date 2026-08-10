@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  closeLabel,
   displayTagLabel,
   formatPnlPct,
+  formatShortDate,
   shortAddress,
   formatProbabilityPct,
   formatSignedUsd,
@@ -221,5 +223,41 @@ describe("displayTagLabel acronyms", () => {
     // Upstream mostly sends these correctly; the map is only for the strays.
     expect(displayTagLabel("MLB")).toBe("MLB");
     expect(displayTagLabel("AI")).toBe("AI");
+  });
+});
+
+describe("closeLabel", () => {
+  const JUN_1 = Math.floor(Date.UTC(2026, 5, 1) / 1000);
+  const AUG_10 = Math.floor(Date.UTC(2026, 7, 10) / 1000);
+  const DEC_1 = Math.floor(Date.UTC(2026, 11, 1) / 1000);
+
+  it("prints the date while it is still ahead", () => {
+    expect(closeLabel(DEC_1, "ACTIVE", AUG_10)).toEqual({
+      prefix: "closes",
+      value: formatShortDate(DEC_1),
+    });
+  });
+
+  it("says the outcome is pending once the date has passed on a live market", () => {
+    // The Ethiopia case: deadline 1 Jun, still trading in August.
+    expect(closeLabel(JUN_1, "ACTIVE", AUG_10)).toEqual({
+      prefix: null,
+      value: "Awaiting resolution",
+    });
+  });
+
+  it("keeps printing the date for a past-dated market that is finished", () => {
+    // 849 events on production are past-dated and fully resolved. Gating on
+    // the date alone would have every one of them claim it awaits resolution.
+    for (const state of ["RESOLVED", "CANCELLED", "CLOSED"] as const) {
+      expect(closeLabel(JUN_1, state, AUG_10)).toEqual({
+        prefix: "closes",
+        value: formatShortDate(JUN_1),
+      });
+    }
+  });
+
+  it("has nothing to say without a date", () => {
+    expect(closeLabel(null, "ACTIVE", AUG_10)).toBeNull();
   });
 });

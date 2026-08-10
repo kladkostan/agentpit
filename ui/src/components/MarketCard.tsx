@@ -3,8 +3,8 @@ import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
 import {
+  closeLabel,
   formatProbabilityPct,
-  formatShortDate,
   formatVolume,
   volumeStat,
 } from "@/lib/format";
@@ -38,7 +38,11 @@ export function MarketCard({
   const { data: spark } = usePricesHistory(yesTokenId);
   const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
-  const closes = formatShortDate(market.end_date);
+  const closes = closeLabel(
+    market.end_date,
+    market.market_state,
+    Date.now() / 1000,
+  );
   const vol = volumeStat(volume ?? null, volume24hr ?? null, volumePrefer);
   const href = eventSlug
     ? `/events/${eventSlug}`
@@ -79,7 +83,10 @@ export function MarketCard({
           <span className="shrink-0 whitespace-nowrap">
             {closes ? (
               <>
-                <span className="text-foreground/40">closes</span> {closes}
+                {closes.prefix ? (
+                  <span className="text-foreground/40">{closes.prefix} </span>
+                ) : null}
+                {closes.value}
               </>
             ) : (
               <span className="text-foreground/40">#{market.market_id}</span>

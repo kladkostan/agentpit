@@ -6,6 +6,8 @@
  *  null inputs so call sites don't have to guard.
  */
 
+import type { MarketState } from "@/types/market";
+
 const SHORT_DATE_FMT = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -27,6 +29,28 @@ export function formatShortDate(seconds: number | null): string | null {
 export function formatLongDate(seconds: number | null): string | null {
   if (seconds === null) return null;
   return LONG_DATE_FMT.format(new Date(seconds * 1000));
+}
+
+/** What a card prints where a closing date goes.
+ *
+ *  A market can trade past its own stated deadline — Polymarket keeps the book
+ *  open while the question stays open — and printing "closes Jun 1" beside a
+ *  live order book makes the card contradict itself.
+ *
+ *  The test is deliberately date AND state, never date alone: 849 events on
+ *  production are past-dated and fully resolved, and for those the date is the
+ *  right thing to show. */
+export function closeLabel(
+  endDate: number | null,
+  state: MarketState,
+  nowSeconds: number,
+): { prefix: string | null; value: string } | null {
+  if (endDate === null) return null;
+  if (endDate < nowSeconds && state === "ACTIVE") {
+    return { prefix: null, value: "Awaiting resolution" };
+  }
+  const value = formatShortDate(endDate);
+  return value === null ? null : { prefix: "closes", value };
 }
 
 const CLOCK_FMT = new Intl.DateTimeFormat("en-US", {
