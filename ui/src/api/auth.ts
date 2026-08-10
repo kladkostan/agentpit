@@ -72,6 +72,9 @@ export function changePasswordRequest(
       current_password: currentPassword,
       new_password: newPassword,
     }),
+    // A 401 here means "current password is wrong," the expected case for a
+    // re-auth prompt — not a dead session. See client.ts's ApiFetchInit.
+    skipAuthEvent: true,
   });
 }
 
@@ -84,6 +87,12 @@ export function exportPrivateKeyRequest(
       : { google_credential: factor.googleCredential };
   return apiFetch<{ private_key: string; eth_address: string }>(
     "/me/private-key",
-    { method: "POST", body: JSON.stringify(body) },
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      // Same reasoning as changePasswordRequest: a 401 means the re-auth
+      // factor was wrong, not that the session died.
+      skipAuthEvent: true,
+    },
   );
 }

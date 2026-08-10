@@ -38,9 +38,20 @@ export function setAccessTokenGetter(getter: TokenGetter): void {
 /** Event name dispatched on window when a 401 hits with a token attached. */
 export const UNAUTHORIZED_EVENT = "agentpit:unauthorized";
 
+/**
+ * `RequestInit` plus an opt-out from the UNAUTHORIZED_EVENT dispatch below.
+ *
+ * Default (unset/false) keeps today's behaviour for every existing caller: a
+ * 401 with a token attached means the session died, so we log out. Only a
+ * caller re-authenticating with the account's OWN factor (a password re-auth
+ * prompt, not a bearer-token check) should set this — there a 401 means "you
+ * typed it wrong," the expected case, not "your session died."
+ */
+export type ApiFetchInit = RequestInit & { skipAuthEvent?: boolean | undefined };
+
 export async function apiFetch<T>(
   path: string,
-  init?: RequestInit,
+  init?: ApiFetchInit,
 ): Promise<T> {
   const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
   const token = tokenGetter();
@@ -62,9 +73,16 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    if (response.status === 401 && token) {
+    if (response.status === 401 && token && !init?.skipAuthEvent) {
       // Server rejected our token (expired, secret rotated, account deleted).
       // The provider listens for this and clears local auth state.
+      //
+      // A password re-auth endpoint (change-password, key export) also
+      // answers 401 for "you typed the wrong password" — nothing to do with
+      // the bearer token above, which is still perfectly valid. Those
+      // callers pass skipAuthEvent so a mistyped password doesn't log the
+      // user out from under the dialog they're re-authenticating in. Do not
+      // remove this opt-out to "simplify" the check.
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     }
     throw new ApiError(
