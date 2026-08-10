@@ -115,6 +115,22 @@ def test_google_sign_in_links_to_a_matching_password_account(google):
     conn.close()
 
 
+def test_linking_reports_has_password_false_in_the_same_response(google):
+    """`link_google_identity` clears PASSWORD_HASH as part of the same write
+    that hands the account to the Google identity. The in-memory user read
+    before that write must not leak its old has_password=True into the
+    response this call returns -- that would tell the Task 2 dialog the
+    account still has a password seconds after it stopped being true."""
+    google({"cred-ivy": GoogleIdentity(sub="google-sub-ivy", email="ivy@example.com")})
+    with TestClient(app) as client:
+        client.post(
+            "/register",
+            json={"email": "ivy@example.com", "password": "hunter22hunter22"},
+        )
+        linked = client.post("/auth/google", json={"credential": "cred-ivy"}).json()
+        assert linked["user"]["has_password"] is False
+
+
 def test_linking_ignores_email_case(google):
     google({"cred-carol": GoogleIdentity(sub="sub-carol", email="carol@example.com")})
     with TestClient(app) as client:
