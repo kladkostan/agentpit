@@ -238,11 +238,14 @@ describe("closeLabel", () => {
     });
   });
 
-  it("says the outcome is pending once the date has passed on a live market", () => {
-    // The Ethiopia case: deadline 1 Jun, still trading in August.
+  it("says the deadline lapsed, not that the market is settled", () => {
+    // The Ethiopia case: deadline 1 Jun, upstream still reports
+    // acceptingOrders true and $678k of 24h volume in August. Saying
+    // "Awaiting resolution" told a reader the position was settled when they
+    // could still take one.
     expect(closeLabel(JUN_1, "ACTIVE", AUG_10)).toEqual({
-      prefix: null,
-      value: "Awaiting resolution",
+      prefix: "overdue",
+      value: "Jun 1",
     });
   });
 
@@ -272,11 +275,13 @@ describe("closeLabel", () => {
     });
   });
 
-  it("ignores the formatter once the market is overdue and live", () => {
+  it("uses the caller-provided formatter for the overdue date too", () => {
+    // Detail pages render "overdue Jun 1, 2026", not the short-date "Jun 1" —
+    // the overdue branch shares the same formatter as the on-time one.
     const longFormat = (s: number) => `LONG:${s}`;
     expect(closeLabel(JUN_1, "ACTIVE", AUG_10, longFormat)).toEqual({
-      prefix: null,
-      value: "Awaiting resolution",
+      prefix: "overdue",
+      value: `LONG:${JUN_1}`,
     });
   });
 });

@@ -52,7 +52,11 @@ export function closeLabel(
 ): { prefix: string | null; value: string } | null {
   if (endDate === null) return null;
   if (endDate < nowSeconds && state === "ACTIVE") {
-    return { prefix: null, value: "Awaiting resolution" };
+    // The deadline lapsed, not the market: upstream keeps the book open while
+    // the question stays open. Keep the date — how far it has slipped is
+    // information — and drop the claim that anything is closing.
+    const overdue = formatDate(endDate);
+    return overdue === null ? null : { prefix: "overdue", value: overdue };
   }
   const value = formatDate(endDate);
   // `value` is only ever null here if a caller's formatter returns null for a

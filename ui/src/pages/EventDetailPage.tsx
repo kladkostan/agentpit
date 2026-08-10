@@ -173,7 +173,7 @@ export function EventDetailPage() {
           {closes ? (
             <span>
               {closes.prefix ? (
-                <span className="text-foreground/40">Closes </span>
+                <span className="text-foreground/40">{closes.prefix} </span>
               ) : null}
               {closes.value}
             </span>
