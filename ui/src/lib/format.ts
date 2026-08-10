@@ -39,17 +39,24 @@ export function formatLongDate(seconds: number | null): string | null {
  *
  *  The test is deliberately date AND state, never date alone: 849 events on
  *  production are past-dated and fully resolved, and for those the date is the
- *  right thing to show. */
+ *  right thing to show.
+ *
+ *  `formatDate` defaults to the short grid-card format; the detail pages pass
+ *  their own long-date formatter so this stays the one place "is this overdue
+ *  and live" gets decided, while each caller keeps its own date shape. */
 export function closeLabel(
   endDate: number | null,
   state: MarketState,
   nowSeconds: number,
+  formatDate: (seconds: number) => string | null = formatShortDate,
 ): { prefix: string | null; value: string } | null {
   if (endDate === null) return null;
   if (endDate < nowSeconds && state === "ACTIVE") {
     return { prefix: null, value: "Awaiting resolution" };
   }
-  const value = formatShortDate(endDate);
+  const value = formatDate(endDate);
+  // `value` is only ever null here if a caller's formatter returns null for a
+  // non-null input, which none does — kept for the TS narrowing below.
   return value === null ? null : { prefix: "closes", value };
 }
 

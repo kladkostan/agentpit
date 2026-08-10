@@ -260,4 +260,22 @@ describe("closeLabel", () => {
   it("has nothing to say without a date", () => {
     expect(closeLabel(null, "ACTIVE", AUG_10)).toBeNull();
   });
+
+  it("uses a caller-provided formatter instead of the default short date", () => {
+    // The detail pages render long dates ("Jun 1, 2026"); this is how they
+    // share the overdue-and-live rule without duplicating it.
+    const longFormat = (s: number) => `LONG:${s}`;
+    expect(closeLabel(DEC_1, "ACTIVE", AUG_10, longFormat)).toEqual({
+      prefix: "closes",
+      value: `LONG:${DEC_1}`,
+    });
+  });
+
+  it("ignores the formatter once the market is overdue and live", () => {
+    const longFormat = (s: number) => `LONG:${s}`;
+    expect(closeLabel(JUN_1, "ACTIVE", AUG_10, longFormat)).toEqual({
+      prefix: null,
+      value: "Awaiting resolution",
+    });
+  });
 });

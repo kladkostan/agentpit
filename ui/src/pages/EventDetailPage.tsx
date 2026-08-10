@@ -14,7 +14,8 @@ import {
   yesPriceMap,
 } from "@/lib/eventOutcomes";
 import { detectRotatingSeries } from "@/lib/rotatingSeries";
-import { formatLongDate } from "@/lib/format";
+import { closeLabel, formatLongDate } from "@/lib/format";
+import { eventState } from "@/lib/marketState";
 import type { MarketState } from "@/types/market";
 
 const NON_TRADEABLE: ReadonlySet<MarketState> = new Set([
@@ -118,7 +119,12 @@ export function EventDetailPage() {
   }
 
   const { event, markets } = data;
-  const endLabel = formatLongDate(event.end_date);
+  const closes = closeLabel(
+    event.end_date,
+    eventState(markets),
+    Date.now() / 1000,
+    formatLongDate,
+  );
   const isSingleMarket = markets.length === 1;
   const onlyMarket = markets[0] ?? null;
 
@@ -164,9 +170,12 @@ export function EventDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          {endLabel ? (
+          {closes ? (
             <span>
-              <span className="text-foreground/40">Closes</span> {endLabel}
+              {closes.prefix ? (
+                <span className="text-foreground/40">Closes </span>
+              ) : null}
+              {closes.value}
             </span>
           ) : null}
           {series ? (

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMarket } from "@/api/markets";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { closeLabel } from "@/lib/format";
 import { STATE_TONE } from "@/lib/marketState";
 import { cn } from "@/lib/utils";
 import { Orderbook } from "@/components/orders/Orderbook";
@@ -87,7 +88,12 @@ export function MarketDetailPage() {
 
   const stateTone = STATE_TONE[market.market_state];
   const startLabel = formatTs(market.start_date);
-  const endLabel = formatTs(market.end_date);
+  const closes = closeLabel(
+    market.end_date,
+    market.market_state,
+    Date.now() / 1000,
+    formatTs,
+  );
   const conditionHex = unwrapHex(market.condition_id);
 
   return (
@@ -113,9 +119,12 @@ export function MarketDetailPage() {
             />
             <span className={stateTone.label}>{market.market_state}</span>
           </span>
-          {endLabel ? (
+          {closes ? (
             <span>
-              <span className="text-foreground/40">closes</span> {endLabel}
+              {closes.prefix ? (
+                <span className="text-foreground/40">{closes.prefix} </span>
+              ) : null}
+              {closes.value}
             </span>
           ) : null}
           <span className="text-foreground/40">#{market.market_id}</span>
