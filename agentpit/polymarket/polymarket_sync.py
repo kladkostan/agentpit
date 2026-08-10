@@ -154,7 +154,7 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
     _coalesce_key(market, "liquidity", ["liquidityNum", "liquidityClob"])
-    _coalesce_key(market, "accepting_orders", ["acceptingOrders", "acceptingOrder"])
+    _coalesce_key(market, "accepting_orders", ["acceptingOrders"])
 
     # Normalize bool-ish fields that may arrive as strings.
     for key in ("active", "closed", "archived", "accepting_orders"):
