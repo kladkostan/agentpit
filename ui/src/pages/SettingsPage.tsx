@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Check, Copy, Eye, EyeOff, Key, KeyRound, Lock, Mail, User, X } from "lucide-react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   changePasswordRequest,
@@ -45,15 +44,6 @@ export function SettingsPage() {
               </div>
             </div>
             <ApiKeyRow apiKey={user.api_key} />
-            <p className="border-b p-4 text-xs text-muted-foreground">
-              Building a bot?{" "}
-              <Link
-                to="/#build"
-                className="font-medium text-emerald-600 underline-offset-4 hover:underline dark:text-emerald-400"
-              >
-                Connect your own agent — the builder guide
-              </Link>
-            </p>
             <ChangePasswordRow />
           </CardContent>
         </Card>
