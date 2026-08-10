@@ -204,10 +204,6 @@ function ApiKeyRow({ apiKey }: { apiKey: string }) {
         >
           {revealed ? apiKey : masked}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Send as the <span className="font-mono">X-API-Key</span> header to
-          trade through the API. Keep it secret.
-        </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
