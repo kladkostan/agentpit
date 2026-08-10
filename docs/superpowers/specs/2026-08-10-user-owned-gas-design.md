@@ -58,15 +58,31 @@ must ship with the switch-off, not after it.**
 
 ## Design
 
-### The top-up is sized to the job
+### On a real chain the house gives away gas exactly once, and only to open the door
 
-Replace the flat `gas_topup_wei = 10**18` with a floor-and-target top-up
-following `house_accounts.gas_topup_wei`: send nothing when the holder already
-has enough, otherwise top up to a target sized on the measured cost of a redeem
-(91,743 gas, so a target of a few hundred thousand gas leaves generous room).
+The rule: **no gas grants at all, except the one that makes an account able to
+trade in the first place.**
 
-This alone takes an auto-redeem from $0.2516 to about $0.0016. It is a bug fix
-and lands regardless of everything else below.
+Signup stays sponsored, because it has to be. Three transactions —
+`approve` × 2 and `setApprovalForAll` — are signed by the USER's key and must
+land before the exchange can move their collateral or their outcome tokens.
+Without them the account cannot trade at all, and a wallet with zero credits
+cannot send them. That is the one place a grant buys something the user cannot
+buy for themselves yet.
+
+Size it to the job: 138,946 gas measured across all 16 accounts on the chain,
+so a grant covering that plus a margin. Not `10**18`, which is 21,000,000 gas —
+150 times the need. Cost per signup falls from **$0.25 to about $0.002**.
+
+**The redeem top-up goes away entirely.** `fund_gas` disappears from
+`auto_redeem_resolved_markets`. Claiming a win costs 91,743 gas ≈ $0.0011 and
+the holder pays it from their own credits, like any other transaction they
+choose to send. An account with no credits sees its unredeemed winnings and a
+button that tells it what it needs.
+
+That is also what makes the `signup_gas_grant_wei` question disappear from the
+"out of scope" list below: there is now one grant, it is sized, and it is the
+only one.
 
 ### Auto-redeem becomes a per-account choice, default off
 
@@ -106,7 +122,9 @@ this off means claiming them yourself.
 
 ## Ordering
 
-1. The top-up fix — independent, and the largest saving.
+1. The grant changes — the signup grant sized to 138,946 gas plus a margin,
+   and `fund_gas` removed from the redeem loop. Independent, and the largest
+   saving.
 2. Unredeemed winnings: compute, expose, show, with the redeem button.
 3. Only then the per-account flag and the toggle.
 
@@ -115,15 +133,16 @@ Steps 2 and 3 may ship together but never in the opposite order.
 ## Out of scope
 
 - Changing what a redeem does on chain.
-- The signup gas grant (`signup_gas_grant_wei`, also 1 coin, also ~150x
-  oversized). Same class of problem, separately decided, separately measured.
 - Withdrawal of any kind. Redeeming converts a resolved token into apUSD inside
   agentpit; it does not move money out.
 
 ## Testing
 
-- The top-up sends nothing to a holder already above the floor, and tops up to
-  the target for one below it.
+- Signup grants the sized amount, not a whole coin, and an account can still
+  complete its three approvals with it.
+- The redeem loop sends no gas at all: `fund_gas` is never called from it.
+- A holder with too few credits to redeem gets a clear failure, not a silent
+  one — the button says what is missing.
 - The redeem loop skips an account with `AUTO_REDEEM_ENABLED` false and
   processes one with it true, with the global switch on in both cases.
 - The global switch off means neither is processed.
