@@ -17,6 +17,12 @@ interface MarketCardProps {
   /** When provided, the card links to /events/:slug instead of /markets/:id.
    * Used for singleton-market events so the URL surface stays event-centric. */
   eventSlug?: string;
+  /** Parent event's end date. When provided, this — not `market.end_date` —
+   *  decides the closes/Awaiting-resolution label, so a singleton-market
+   *  event's card agrees with what `MultiMarketEventCard` would show for the
+   *  same event: the two card shapes must not label the same thing
+   *  differently. Falls back to the market's own date when omitted. */
+  eventEndDate?: number | null;
   /** Parent event's upstream volumes (USD). Either is the fallback for the
    *  other: events no longer in the synced set carry only the 24h figure. */
   volume?: number | null;
@@ -29,6 +35,7 @@ interface MarketCardProps {
 export function MarketCard({
   market,
   eventSlug,
+  eventEndDate,
   volume,
   volume24hr,
   volumePrefer = "total",
@@ -39,7 +46,7 @@ export function MarketCard({
   const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
   const closes = closeLabel(
-    market.end_date,
+    eventEndDate !== undefined ? eventEndDate : market.end_date,
     market.market_state,
     Date.now() / 1000,
   );
