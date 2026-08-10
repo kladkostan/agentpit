@@ -88,11 +88,29 @@ class TableWrite:
 
     @staticmethod
     def mark_key_export_attempt(
-        db: psycopg.Connection, user_id: str, at: int
+        db: psycopg.Connection, user_id: str, at: int, not_before: int
     ) -> bool:
+        """Claim the export-attempt cooldown, atomically.
+
+        The predicate and the stamp are one statement -- the same idiom as
+        `claim_topup` -- so two concurrent callers cannot both read the same
+        stale `KEY_EXPORT_ATTEMPT_AT` and both pass the check before either
+        writes. Under READ COMMITTED, a second UPDATE that targets a row
+        another open transaction is about to write blocks on that row's
+        lock; once the first commits, the second re-evaluates its WHERE
+        clause against the value that commit just wrote, not the value it
+        started with. So the loser sees the winner's fresh stamp and its own
+        predicate fails, returning `rowcount == 0` here -- the cooldown is
+        active precisely because someone just claimed it, not because of a
+        stale read.
+
+        Returns False when the cooldown is still active.
+        """
         cur = db.execute(
-            "UPDATE users SET KEY_EXPORT_ATTEMPT_AT = %s WHERE USER_ID = %s",
-            (at, user_id),
+            "UPDATE users SET KEY_EXPORT_ATTEMPT_AT = %s "
+            "WHERE USER_ID = %s "
+            "AND (KEY_EXPORT_ATTEMPT_AT IS NULL OR KEY_EXPORT_ATTEMPT_AT <= %s)",
+            (at, user_id, not_before),
         )
         return cur.rowcount > 0
 

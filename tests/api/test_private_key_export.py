@@ -11,9 +11,11 @@ Google) runs the same on-chain onboarding every other auth test relies on.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from unittest.mock import patch
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,10 +24,11 @@ from agentpit.api.main import app
 from agentpit.auth.google import GoogleIdentity, GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.config import Settings
+from agentpit.db.row_factory import ci_dict_row
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.services.auth_service import AuthService
-from tests.db_helpers import fresh_test_conn, fresh_test_db
+from tests.db_helpers import TEST_DSN, fresh_test_conn, fresh_test_db
 
 
 @dataclass
@@ -260,6 +263,78 @@ def test_mark_key_exported_stamps_only_the_first_export(db_conn):
 
     exported_at, _ = TableRead.get_key_export_state(db_conn, user_id)
     assert exported_at == 1_000
+
+
+def test_a_second_claim_blocked_on_the_row_lock_sees_the_first_and_loses():
+    """`mark_key_export_attempt`'s predicate and its stamp are one UPDATE so
+    a concurrent caller cannot read the pre-claim timestamp and pass the
+    check too. This does not hope two threads happen to collide -- it forces
+    the exact interleaving: connection A claims the attempt and is held open
+    (uncommitted) on purpose; a second thread's claim on connection B is
+    issued while A is still open and must block on A's row lock rather than
+    read around it. Only once A commits does B's UPDATE get to run, and by
+    then it is re-checking its WHERE clause against A's just-committed
+    stamp -- READ COMMITTED re-evaluates the predicate against the newest
+    committed row, not the row B's transaction originally saw. That is what
+    makes B lose even though its own read (if it had done a separate one)
+    would have raced cleanly."""
+    setup = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        setup, email="export-race@example.com", password_hash="x", handle=None
+    )
+    setup.close()
+
+    cooldown = 5
+    t1 = 1_700_000_000
+    t2 = t1 + 1  # inside the cooldown window opened by t1
+
+    conn_a = psycopg.connect(TEST_DSN, autocommit=False, row_factory=ci_dict_row)
+    conn_b = psycopg.connect(TEST_DSN, autocommit=False, row_factory=ci_dict_row)
+    try:
+        claimed_a = TableWrite.mark_key_export_attempt(
+            conn_a, user_id, t1, t1 - cooldown
+        )
+        assert claimed_a is True  # no prior attempt -- the IS NULL branch
+        # conn_a's transaction is deliberately left open (uncommitted): its
+        # row lock on this user is what forces B to block below rather than
+        # racing a stale read.
+
+        result_b: list[bool] = []
+
+        def claim_b() -> None:
+            result_b.append(
+                TableWrite.mark_key_export_attempt(
+                    conn_b, user_id, t2, t2 - cooldown
+                )
+            )
+            conn_b.commit()
+
+        b_thread = threading.Thread(target=claim_b)
+        b_thread.start()
+        b_thread.join(timeout=1)
+        assert b_thread.is_alive(), (
+            "B must still be blocked on A's row lock -- if it already "
+            "finished, this test proved nothing about the race"
+        )
+
+        conn_a.commit()  # releases the lock; B's UPDATE can now proceed
+        b_thread.join(timeout=5)
+        assert not b_thread.is_alive()
+
+        assert result_b == [False], "B must see A's committed stamp and lose"
+
+        check = fresh_test_conn()
+        row = check.execute(
+            "SELECT KEY_EXPORT_ATTEMPT_AT FROM users WHERE USER_ID = %s",
+            (user_id,),
+        ).fetchone()
+        check.close()
+        assert row["KEY_EXPORT_ATTEMPT_AT"] == t1, (
+            "B's losing claim must not have overwritten A's stamp"
+        )
+    finally:
+        conn_a.close()
+        conn_b.close()
 
 
 class _NeverCalledOnchain:

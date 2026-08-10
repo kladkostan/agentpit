@@ -225,14 +225,24 @@ class AuthService:
         # guess would roll its own stamp back with it, and the cooldown would
         # only ever persist after a SUCCESSFUL export: the exact opposite of
         # the guessing floor this is meant to be.
+        #
+        # The claim itself is `mark_key_export_attempt`'s conditional UPDATE,
+        # not a separate read-then-check: at READ COMMITTED and a 16-
+        # connection pool (db/session.py) with no row lock of our own, N
+        # concurrent requests reading the same stamp before any of them
+        # writes would each see the cooldown as clear and all proceed to
+        # verification, leaving bcrypt as the only real cost. Making the
+        # predicate and the write one statement closes that gap -- see the
+        # docstring on `mark_key_export_attempt`.
         with self._db.write() as conn:
             user = TableRead.get_user_by_userid(conn, user_id)
             if user is None:
                 raise UserNotFoundError()
-            _, last_attempt = TableRead.get_key_export_state(conn, user_id)
-            if last_attempt is not None and now - last_attempt < self.KEY_EXPORT_COOLDOWN_S:
+            claimed = TableWrite.mark_key_export_attempt(
+                conn, user_id, now, now - self.KEY_EXPORT_COOLDOWN_S
+            )
+            if not claimed:
                 raise BusinessRuleError("too many attempts — wait a moment")
-            TableWrite.mark_key_export_attempt(conn, user_id, now)
 
         with self._db.write() as conn:
             password_hash = TableRead.get_password_hash_by_userid(conn, user_id)
