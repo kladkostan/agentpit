@@ -154,9 +154,10 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
     _coalesce_key(market, "liquidity", ["liquidityNum", "liquidityClob"])
+    _coalesce_key(market, "accepting_orders", ["acceptingOrders", "acceptingOrder"])
 
     # Normalize bool-ish fields that may arrive as strings.
-    for key in ("active", "closed", "archived"):
+    for key in ("active", "closed", "archived", "accepting_orders"):
         coerced = _to_bool(market.get(key))
         if coerced is not None:
             market[key] = coerced
@@ -173,25 +174,38 @@ def _normalize_market_fields(market: dict) -> dict:
     return market
 
 
-def _is_market_expired(market: dict) -> bool:
-    """Check if a market is expired based on end_date_iso."""
+def _is_market_over(market: dict) -> bool:
+    """Is this market finished — as UPSTREAM sees it, not as its date claims?
+
+    A stated end date is a deadline, not a verdict. Polymarket routinely lets a
+    market trade past its own date while the question stays open: "Next Prime
+    Minister of Ethiopia?" carried endDate 2026-06-01 and took $678k of volume
+    in the 24 hours before this was written, ranking #5 of every active market.
+    Trusting the date alone dropped 28 such markets out of the top-1000 window
+    — $1.8M of daily volume, every one of them still accepting orders.
+
+    So a lapsed date only counts when upstream has also stopped taking orders.
+    When the payload carries no `accepting_orders` at all — older Gamma shapes,
+    fixtures — the date decides, as it always did.
+    """
     end_date_iso = market.get("end_date_iso")
     if not end_date_iso:
         return False
     try:
-        # Handle 'Z' suffix for UTC if present (Python 3.10 fromisoformat doesn't always handle it)
+        # 'Z' is valid ISO 8601 but datetime.fromisoformat rejects it before 3.11.
         if end_date_iso.endswith("Z"):
             end_date_iso = end_date_iso[:-1] + "+00:00"
-
         end_date = datetime.fromisoformat(end_date_iso)
-
-        # Ensure timezone awareness for comparison
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=timezone.utc)
-
-        return end_date < datetime.now(timezone.utc)
     except (ValueError, TypeError):
         return False
+    if end_date >= datetime.now(timezone.utc):
+        return False
+    accepting = market.get("accepting_orders")
+    if accepting is None:
+        return True
+    return not accepting
 
 
 def fetch_all_polymarket_markets(
@@ -296,7 +310,7 @@ def fetch_all_polymarket_markets(
 
             # Filter expired markets unless we asked for closed ones
             # (Test expectations require client-side filtering of expired markets)
-            if not closed and _is_market_expired(m):
+            if not closed and _is_market_over(m):
                 continue
             filtered_data.append(m)
 

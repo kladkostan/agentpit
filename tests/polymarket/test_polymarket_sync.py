@@ -8,7 +8,8 @@ from agentpit.db.table_read import TableRead
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
-    _is_market_expired,
+    _is_market_over,
+    _normalize_market_fields,
     _polymarket_to_erc1155_tokens,
     build_create_market_request_from_json,
     create_polymarket_markets_if_needed,
@@ -109,3 +110,57 @@ def test_fetch_all_polymarket_markets_requests_tags(monkeypatch):
 
     assert seen
     assert "include_tag=true" in seen[0]
+
+
+# ----- a lapsed deadline is not the same as a finished market ----------------
+
+
+def _overdue(**over):
+    """A market whose stated end date passed two months ago."""
+    m = {
+        "conditionId": "0x" + "ab" * 32,
+        "question": "Will the deadline slip again?",
+        "endDate": "2026-06-01T00:00:00Z",
+        "liquidity": "19002",
+        "volumeNum": "76722445",
+        "closed": False,
+        "active": True,
+        "archived": False,
+        "acceptingOrders": True,
+    }
+    m.update(over)
+    return m
+
+
+def test_an_overdue_market_still_taking_orders_is_kept():
+    """The Ethiopia case: endDate 2026-06-01, and $678k traded in the last 24
+    hours. The deadline lapsed; the question did not."""
+    m = _normalize_market_fields(_overdue())
+    assert _is_market_over(m) is False
+
+
+def test_an_overdue_market_no_longer_taking_orders_is_dropped():
+    m = _normalize_market_fields(_overdue(acceptingOrders=False))
+    assert _is_market_over(m) is True
+
+
+def test_without_the_upstream_signal_the_date_still_decides():
+    """Older Gamma shapes and fixtures carry no acceptingOrders. Falling back
+    to the date keeps their behaviour rather than silently admitting them."""
+    m = _overdue()
+    del m["acceptingOrders"]
+    m = _normalize_market_fields(m)
+    assert _is_market_over(m) is True
+
+
+def test_a_future_deadline_is_never_over_whatever_upstream_says():
+    m = _normalize_market_fields(
+        _overdue(endDate="2099-01-01T00:00:00Z", acceptingOrders=False)
+    )
+    assert _is_market_over(m) is False
+
+
+def test_accepting_orders_is_coerced_from_its_string_forms():
+    for raw, expected in (("true", True), ("false", False), (1, True), (0, False)):
+        m = _normalize_market_fields(_overdue(acceptingOrders=raw))
+        assert m["accepting_orders"] is expected, raw
