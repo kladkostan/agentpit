@@ -122,6 +122,12 @@ class AuthService:
                     "google link found no row for user %s", by_email.user_id
                 )
                 raise InvalidCredentialsError("invalid Google credential")
+            # The link just cleared PASSWORD_HASH (see link_google_identity).
+            # `by_email` was read before that write, so its `has_password`
+            # would otherwise still say True -- reflect the change locally
+            # rather than re-reading the row, so the response this call
+            # issues doesn't claim a password that no longer exists.
+            by_email = by_email.model_copy(update={"has_password": False})
             self._maybe_reonboard(by_email)
             return self._google_response(by_email, created=False)
 
@@ -212,6 +218,13 @@ class AuthService:
         token and a Google account has no password to give.
         """
         now = int(time.time())
+        # Stamped in its own transaction, committed before the credential is
+        # looked at at all. psycopg's connection context commits on clean exit
+        # and rolls back on exception (see db/session.py) -- if this stamp
+        # shared a transaction with the verification below, every REJECTED
+        # guess would roll its own stamp back with it, and the cooldown would
+        # only ever persist after a SUCCESSFUL export: the exact opposite of
+        # the guessing floor this is meant to be.
         with self._db.write() as conn:
             user = TableRead.get_user_by_userid(conn, user_id)
             if user is None:
@@ -221,6 +234,7 @@ class AuthService:
                 raise BusinessRuleError("too many attempts — wait a moment")
             TableWrite.mark_key_export_attempt(conn, user_id, now)
 
+        with self._db.write() as conn:
             password_hash = TableRead.get_password_hash_by_userid(conn, user_id)
             if password_hash is not None:
                 if password is None:
@@ -396,20 +410,7 @@ class AuthService:
 
     def _issue(self, user: User) -> AuthResponse:
         token = self._coder.encode(user_id=user.user_id, email=user.email)
-        with self._db.read() as conn:
-            has_password = (
-                TableRead.get_password_hash_by_userid(conn, user.user_id) is not None
-            )
         return AuthResponse(
             access_token=token,
-            user=UserPublic(
-                user_id=user.user_id,
-                email=user.email,
-                handle=user.handle,
-                eth_address=user.eth_address,
-                api_key=user.api_key,
-                onboarded_at=user.onboarded_at,
-                created_at=user.created_at,
-                has_password=has_password,
-            ),
+            user=UserPublic.model_validate(user.model_dump()),
         )

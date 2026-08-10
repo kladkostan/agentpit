@@ -20,7 +20,12 @@ from fastapi.testclient import TestClient
 from agentpit.api.deps import get_google_verifier
 from agentpit.api.main import app
 from agentpit.auth.google import GoogleIdentity, GoogleTokenVerifier
-from tests.db_helpers import fresh_test_conn
+from agentpit.auth.jwt import JwtCoder
+from agentpit.config import Settings
+from agentpit.db.table_read import TableRead
+from agentpit.db.table_write import TableWrite
+from agentpit.services.auth_service import AuthService
+from tests.db_helpers import fresh_test_conn, fresh_test_db
 
 
 @dataclass
@@ -214,3 +219,93 @@ def test_has_password_reflects_how_the_account_signs_in(
     google_account = client.get("/me", headers=google_user.auth_header).json()
     assert password_account["has_password"] is True
     assert google_account["has_password"] is False
+
+
+# ----- security invariants ---------------------------------------------
+
+
+def test_a_failed_attempt_still_starts_the_cooldown(client, registered_user):
+    """The regression this closes: every failure branch used to raise inside
+    the same transaction as the attempt stamp, so psycopg rolled the stamp
+    back along with the exception and a REJECTED guess cost nothing. A second
+    call right after -- even with the RIGHT password this time -- must still
+    be refused while the window from the first (failed) attempt is open, or
+    an attacker can guess at full speed while only the legitimate owner ever
+    waits."""
+    first = client.post(
+        "/me/private-key",
+        json={"password": "not-the-password"},
+        headers=registered_user.auth_header,
+    )
+    assert first.status_code == 401
+
+    second = client.post(
+        "/me/private-key",
+        json={"password": registered_user.password},
+        headers=registered_user.auth_header,
+    )
+    assert second.status_code == 400
+    assert "private_key" not in second.text
+
+
+def test_mark_key_exported_stamps_only_the_first_export(db_conn):
+    """The re-grant lock in `_maybe_reonboard` reads this column; if a second
+    export moved the stamp, the lock would look like it lapses every time the
+    key is exported again."""
+    user_id, _acct, _key = TableWrite.create_user(
+        db_conn, email="stampfirst@example.com", password_hash="x", handle=None
+    )
+    assert TableWrite.mark_key_exported(db_conn, user_id, 1_000) is True
+    assert TableWrite.mark_key_exported(db_conn, user_id, 2_000) is False
+
+    exported_at, _ = TableRead.get_key_export_state(db_conn, user_id)
+    assert exported_at == 1_000
+
+
+class _NeverCalledOnchain:
+    """Every method records that it ran. `_maybe_reonboard`'s export-lock
+    guard must return before touching the chain at all, so the assertion is
+    that none of these lists ever gain an entry."""
+
+    def __init__(self):
+        self.fund_gas_calls: list = []
+
+    def fund_gas(self, *args, **kwargs):
+        self.fund_gas_calls.append((args, kwargs))
+
+    def faucet_drip(self, *args, **kwargs):
+        raise AssertionError("faucet_drip ran after the key was exported")
+
+    def grant_user_approvals(self, *args, **kwargs):
+        raise AssertionError("grant_user_approvals ran after the key was exported")
+
+    def native_balance(self, *args, **kwargs):
+        raise AssertionError("native_balance ran after the key was exported")
+
+
+def test_the_re_grant_lock_stops_reonboarding_once_the_key_is_exported():
+    """`_maybe_reonboard` re-funds an account it believes was wiped by a chain
+    reset. Once the holder has the key, a zero balance can also mean they
+    emptied it on purpose -- so once `KEY_EXPORTED_AT` is set, this must
+    return without ever reading the chain, let alone re-funding it."""
+    db = fresh_test_db()
+    try:
+        settings = Settings()
+        service = AuthService(db, JwtCoder(settings), _NeverCalledOnchain(), settings)
+        onchain = service._onchain
+
+        with db.write() as conn:
+            user_id, _acct, _key = TableWrite.create_user(
+                conn, email="regrantlock@example.com", password_hash="x", handle=None
+            )
+            TableWrite.mark_user_onboarded(conn, user_id)
+            TableWrite.mark_key_exported(conn, user_id, 1_700_000_000)
+
+        with db.read() as conn:
+            user = TableRead.get_user_by_userid(conn, user_id)
+
+        service._maybe_reonboard(user)
+
+        assert onchain.fund_gas_calls == []
+    finally:
+        db.close()

@@ -25,17 +25,6 @@ from agentpit.domain.exceptions import HandleAlreadyExistsError
 router = APIRouter(tags=["users"])
 
 
-def _to_user_public(db: SessionDep, user) -> UserPublic:
-    """`UserPublic` plus `has_password`, which `User` itself does not carry.
-
-    Every construction site needs this same lookup, so it lives here once
-    rather than being repeated at each route.
-    """
-    with db.read() as conn:
-        has_password = TableRead.get_password_hash_by_userid(conn, user.user_id) is not None
-    return UserPublic.model_validate({**user.model_dump(), "has_password": has_password})
-
-
 class TopUpStatusWire(BaseModel):
     nextAllowedAt: int
 
@@ -47,8 +36,8 @@ class TopUpWire(BaseModel):
 
 
 @router.get("/me", response_model=UserPublic)
-def get_me(user: CurrentUserDep, db: SessionDep) -> UserPublic:
-    return _to_user_public(db, user)
+def get_me(user: CurrentUserDep) -> UserPublic:
+    return UserPublic.model_validate(user.model_dump())
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -61,15 +50,15 @@ def update_me_handle(
         with db.write() as conn:
             updated = TableWrite.update_user_handle(conn, user.user_id, payload.handle)
         if not updated:
-            return _to_user_public(db, user)
+            return UserPublic.model_validate(user.model_dump())
     except psycopg.errors.UniqueViolation as exc:
         raise HandleAlreadyExistsError(payload.handle) from exc
 
     with db.read() as conn:
         refreshed = TableRead.get_user_by_userid(conn, user.user_id)
     if refreshed is None:
-        return _to_user_public(db, user)
-    return _to_user_public(db, refreshed)
+        return UserPublic.model_validate(user.model_dump())
+    return UserPublic.model_validate(refreshed.model_dump())
 
 
 @router.patch("/me/password", response_model=UserPublic)
@@ -77,14 +66,13 @@ def update_me_password(
     payload: ChangePasswordRequest,
     user: CurrentUserDep,
     service: AuthServiceDep,
-    db: SessionDep,
 ) -> UserPublic:
     service.change_password(
         user_id=user.user_id,
         current_password=payload.current_password,
         new_password=payload.new_password,
     )
-    return _to_user_public(db, user)
+    return UserPublic.model_validate(user.model_dump())
 
 
 @router.post("/me/private-key", response_model=PrivateKeyResponse)

@@ -215,7 +215,8 @@ class TableRead:
 
     _USER_COLS = (
         "USER_ID, EMAIL, HANDLE, ETH_ADDRESS, ETH_PRIVATE_KEY, "
-        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT"
+        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT, "
+        "(PASSWORD_HASH IS NOT NULL) AS HAS_PASSWORD"
     )
 
     @staticmethod
@@ -232,6 +233,7 @@ class TableRead:
             onboarded_at=row["ONBOARDED_AT"],
             created_at=row["CREATED_AT"] if row["CREATED_AT"] is not None else 0,
             is_bot=bool(row["IS_BOT"]),
+            has_password=bool(row["HAS_PASSWORD"]),
         )
 
     @staticmethod
