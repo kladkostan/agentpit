@@ -38,9 +38,6 @@ export function SettingsPage() {
                 <p className="break-all font-mono text-sm text-muted-foreground">
                   {user.eth_address}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Do not send funds to this address. For API use only.
-                </p>
               </div>
             </div>
             <ApiKeyRow apiKey={user.api_key} />
