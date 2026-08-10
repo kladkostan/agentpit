@@ -246,10 +246,11 @@ describe("closeLabel", () => {
     });
   });
 
-  it("keeps printing the date for a past-dated market that is finished", () => {
+  it("keeps printing the date for a past-dated market that isn't live", () => {
     // 849 events on production are past-dated and fully resolved. Gating on
     // the date alone would have every one of them claim it awaits resolution.
-    for (const state of ["RESOLVED", "CANCELLED", "CLOSED"] as const) {
+    // DRAFT is the one other reachable state, alongside the finished ones.
+    for (const state of ["RESOLVED", "CANCELLED", "CLOSED", "DRAFT"] as const) {
       expect(closeLabel(JUN_1, state, AUG_10)).toEqual({
         prefix: "closes",
         value: formatShortDate(JUN_1),
