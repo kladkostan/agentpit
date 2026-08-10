@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { GOOGLE_CLIENT_ID } from "@/lib/googleAuth";
+import { exportErrorMessage } from "@/lib/exportKeyError";
 
 export function SettingsPage() {
   const { user, setUser } = useAuth();
@@ -52,7 +54,7 @@ export function SettingsPage() {
                   Import it into MetaMask to fund this wallet.
                 </p>
               </div>
-              <ExportKeyButton />
+              <ExportKeyButton user={user} />
             </div>
             <ApiKeyRow apiKey={user.api_key} />
             <ChangePasswordRow />
@@ -247,8 +249,7 @@ function ApiKeyRow({ apiKey }: { apiKey: string }) {
 
 type ExportedKey = { private_key: string; eth_address: string };
 
-function ExportKeyButton() {
-  const { user } = useAuth();
+function ExportKeyButton({ user }: { user: UserPublic }) {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -273,15 +274,15 @@ function ExportKeyButton() {
     try {
       const exported = await exportPrivateKeyRequest(factor);
       setResult(exported);
+      // Clear it now rather than leaving it to `reset()` on close — the
+      // plaintext password otherwise sits in state for as long as the
+      // dialog stays open showing the key beside it.
+      setPassword("");
     } catch (err) {
-      let message = "Failed to export private key.";
-      if (err instanceof ApiError) {
-        if (err.status === 401) {
-          message = "Incorrect password.";
-        } else if (err.status === 400) {
-          message = "Too many attempts. Wait a moment and try again.";
-        }
-      }
+      const message =
+        err instanceof ApiError
+          ? exportErrorMessage(err.status, user.has_password, err.body)
+          : "Failed to export private key.";
       setError(message);
       toast.error(message);
     } finally {
@@ -298,8 +299,6 @@ function ExportKeyButton() {
       toast.error("Could not copy private key.");
     }
   };
-
-  if (!user) return null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -352,7 +351,7 @@ function ExportKeyButton() {
               Confirm
             </Button>
           </div>
-        ) : (
+        ) : GOOGLE_CLIENT_ID ? (
           <div className="flex flex-col gap-2">
             <GoogleSignInButton
               onCredential={(credential) =>
@@ -362,6 +361,14 @@ function ExportKeyButton() {
             />
             {error && <p className="text-xs text-red-500">{error}</p>}
           </div>
+        ) : (
+          // GoogleSignInButton renders nothing at all without a client id —
+          // without this branch a Google-only account would open the dialog
+          // to a warning and no control, with no way to ever export.
+          <p className="text-sm text-muted-foreground">
+            Google sign-in isn't configured on this deployment, so this
+            account can't export its key right now.
+          </p>
         )}
       </DialogContent>
     </Dialog>
