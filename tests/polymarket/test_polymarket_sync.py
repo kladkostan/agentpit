@@ -194,7 +194,12 @@ def _sib(name, *, v24, liq=20_000, closed=False, vol=1_000_000):
 
 
 def _event(*markets):
-    return {"id": "77", "slug": "who-wins", "markets": list(markets)}
+    return {
+        "id": "77",
+        "slug": "who-wins",
+        "title": "Who wins?",
+        "markets": list(markets),
+    }
 
 
 def _primary(name):
@@ -271,3 +276,59 @@ def test_a_market_with_no_event_contributes_nothing():
         [lone], cap=12, liquidity_threshold=5000,
         fetcher=lambda ids, host: pytest.fail("must not fetch"),
     ) == []
+
+
+def test_siblings_carry_the_events_entry_they_came_from():
+    """Markets nested under `/events` carry no `events` key of their own —
+    verified 0 of 33 on the live Ethiopia event. Without attaching one here,
+    every sibling lands as an orphan and gets wrapped in its own singleton
+    event downstream instead of joining the group it actually belongs to."""
+    favourite = _primary("Adanech")
+    event = _event(favourite, _sib("Abiy", v24=328))
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert len(extra) == 1
+    events = extra[0].get("events")
+    assert events is not None
+    assert events[0]["id"] == event["id"]
+    assert events[0]["slug"] == event["slug"]
+
+
+def test_a_sibling_survives_even_when_its_event_has_no_bindable_metadata():
+    """Malformed upstream event (no title): tradeable beats grouped. The
+    sibling is still returned; the startup orphan-wrap gives it a singleton
+    event, same reasoning as pinned.py's sync_pinned_series."""
+    favourite = _primary("Adanech")
+    event = {
+        "id": "77",
+        "slug": "who-wins",
+        # no "title" -> _event_entry can't build a bindable entry
+        "markets": [favourite, _sib("Abiy", v24=328)],
+    }
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert [m["groupItemTitle"] for m in extra] == ["Abiy"]
+    assert "events" not in extra[0]
+
+
+def test_the_cap_falls_back_to_lifetime_volume_when_24h_volume_is_missing():
+    """volume24hr is frequently absent on markets nested under `/events`.
+    `_as_float(None)` is 0.0, so without a fallback every such sibling ties
+    and the cap keeps whichever upstream happened to list first — not the
+    busiest. Lifetime volume (volumeNum) breaks the tie."""
+    favourite = _primary("Adanech")
+    quiet = _sib("Quiet", v24=0, vol=50)
+    busy = _sib("Busy", v24=0, vol=999)
+    del quiet["volume24hr"]
+    del busy["volume24hr"]
+    event = _event(favourite, quiet, busy)
+    extra = polymarket_sync.fetch_event_siblings(
+        [favourite], cap=2, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    # cap 2 covers the favourite plus the one busier by lifetime volume.
+    assert [m["groupItemTitle"] for m in extra] == ["Busy"]

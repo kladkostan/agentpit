@@ -352,6 +352,32 @@ def _fetch_events_by_id(ids: list[str], host: str) -> list[dict]:
     return response if isinstance(response, list) else []
 
 
+def _event_entry(src: dict) -> dict | None:
+    """Build an ``events[]``-array entry (the shape `_extract_event_metadata`
+    consumes) from an event-or-series dict. ``None`` if slug/title are missing.
+
+    Lives here (not in `pinned.py`, which defined this first) because
+    `pinned.py` already imports FROM this module — the reverse import would be
+    circular. `pinned.py` imports this symbol from here instead.
+    """
+    slug = src.get("slug")
+    title = src.get("title") or src.get("name")
+    if not slug or not title:
+        return None
+    return {
+        "id": src.get("id"),
+        "slug": str(slug),
+        "title": str(title),
+        "description": src.get("description") or "",
+        "image": src.get("image") or src.get("icon") or None,
+        "icon": src.get("icon") or src.get("image") or None,
+        "category": src.get("category"),
+        "startDate": src.get("startDate") or src.get("startDateIso"),
+        "endDate": src.get("endDate") or src.get("endDateIso"),
+        "volume24hr": src.get("volume24hr"),
+    }
+
+
 def fetch_event_siblings(
     pm_markets: list[dict],
     *,
@@ -367,10 +393,20 @@ def fetch_event_siblings(
     "Next Prime Minister of Ethiopia?", so the site showed a $273M event as one
     candidate at under 1%.
 
-    Keeps each event's `cap` busiest open outcomes by 24h volume. The median
-    event has 11, so 12 lets most through whole and truncates only the
-    long-tail monsters — the largest upstream events carry 128 outcomes and
-    nobody trades their tail.
+    Keeps each event's `cap` busiest open outcomes by 24h volume (falling back
+    to lifetime volume when 24h volume is absent, which upstream frequently
+    leaves unset on markets nested under `/events`). The median event has 11,
+    so 12 lets most through whole and truncates only the long-tail monsters —
+    the largest upstream events carry 128 outcomes and nobody trades their
+    tail.
+
+    Markets nested under `/events` carry no `events[]` key of their own (only
+    markets fetched through `/markets` do), so each returned sibling has one
+    attached here from the event payload just fetched — otherwise it would
+    land as an orphan and get wrapped in its own singleton event downstream,
+    which is worse than not expanding at all. When the event itself carries no
+    usable slug/title, the sibling is still returned (tradeable beats grouped;
+    the orphan-wrap gives it a singleton, same reasoning as `pinned.py`).
 
     Returns only markets NOT already in `pm_markets`, so a market that
     qualified on its own merit can never be displaced by the cap.
@@ -397,12 +433,31 @@ def fetch_event_siblings(
             )
             continue
         for event in events:
+            group = _event_entry(event)
+            if group is None:
+                logger.warning(
+                    "event sibling: event %s has no bindable metadata",
+                    event.get("id"),
+                )
+            # Normalize a COPY — these dicts are nested inside the event
+            # payload, and mutating them in place would corrupt it for any
+            # other consumer of the same fetch.
             outcomes = [
-                m for m in (event.get("markets") or []) if not m.get("closed")
+                _normalize_market_fields(dict(raw))
+                for raw in (event.get("markets") or [])
             ]
-            outcomes.sort(key=lambda m: -_as_float(m.get("volume24hr")))
+            # Normalizing before this check (rather than reading the raw
+            # `closed` field) coerces string-ish values like "false" through
+            # `_to_bool`, and matches the check `_passes_market_filters` makes
+            # later — the raw field alone left a latent truthy-string trap.
+            outcomes = [m for m in outcomes if not m.get("closed")]
+            outcomes.sort(
+                key=lambda m: (
+                    -_as_float(m.get("volume24hr")),
+                    -_as_float(m.get("volumeNum")),
+                )
+            )
             for m in outcomes[:cap]:
-                m = _normalize_market_fields(m)
                 if m.get("condition_id") in have:
                     continue
                 if not _passes_market_filters(
@@ -412,6 +467,8 @@ def fetch_event_siblings(
                     archived=False,
                 ):
                     continue
+                if group is not None:
+                    m["events"] = [group]
                 have.add(m["condition_id"])
                 extra.append(m)
     return extra
