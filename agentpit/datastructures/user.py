@@ -18,7 +18,11 @@ class User(BaseModel):
     onboarded_at: int | None = None
     created_at: int
     is_bot: bool = False
-    has_password: bool = False
+    # No default: `_row_to_user` is the only construction site and always
+    # supplies this. A defaulted value fails OPEN -- it would show the
+    # Google-only export control to a password account if a caller ever
+    # forgot to pass it.
+    has_password: bool
 
     def model_post_init(self, __context):
         if self.handle is not None:
