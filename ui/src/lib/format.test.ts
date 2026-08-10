@@ -253,7 +253,7 @@ describe("closeLabel", () => {
     for (const state of ["RESOLVED", "CANCELLED", "CLOSED", "DRAFT"] as const) {
       expect(closeLabel(JUN_1, state, AUG_10)).toEqual({
         prefix: "closes",
-        value: formatShortDate(JUN_1),
+        value: "Jun 1",
       });
     }
   });
