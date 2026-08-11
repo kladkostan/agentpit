@@ -71,8 +71,9 @@ class WorkOsError(RuntimeError):
 
     One type for every failure, deliberately: the migration script catches per
     account and carries on, and it can only do that if it knows what to catch.
-    The message never carries the request — the bearer token lives in the
-    headers and a traceback from here can reach a log.
+    The message never carries the request we sent, and the response body it
+    does carry is run through `_redact` first — a traceback from here reaches
+    a log, and plan 3 turns this string into a user-visible 401 `detail`.
     """
 
 
@@ -82,19 +83,30 @@ API_BASE = "https://api.workos.com"
 #: appears, not anchored, because it is being hunted inside a JSON body.
 _BCRYPT_RE = re.compile(r"\$2[aby]?\$\d{2}\$[./A-Za-z0-9]{0,53}")
 
+#: A WorkOS API key: `sk_test_…` / `sk_live_…`. Also matched unanchored, and
+#: for the same reason — it is being hunted inside a JSON body, possibly one
+#: that has JSON-escaped a quoted copy of our own request.
+_API_KEY_RE = re.compile(r"sk_[A-Za-z0-9_]+")
+
 
 def _redact(text: str) -> str:
-    """Strip anything password-shaped out of an error body before it is stored.
+    """Strip anything secret-shaped out of an error body before it is stored.
 
     The body is kept because it names the field WorkOS objected to, which is
-    what makes a failed import diagnosable. But a 422 is entitled to quote the
-    value it rejected, and the value we send is a bcrypt hash lifted from
-    `users.PASSWORD_HASH`. `migrate_users` catches per account and calls
-    `log.exception`, so without this a rejected import writes a live password
-    hash to stdout next to the address it belongs to, during a hand-run
-    production migration.
+    what makes a failed import diagnosable. But an error response is entitled
+    to quote the values it rejected, and we send two kinds of secret:
+
+    - a bcrypt hash lifted from `users.PASSWORD_HASH` on `create_user`.
+      `migrate_users` catches per account and calls `log.exception`, so without
+      this a rejected import writes a live password hash to stdout next to the
+      address it belongs to, during a hand-run production migration.
+    - the API key itself, which `/user_management/authenticate` wants in the
+      request BODY as `client_secret`. Measured 2026-08-11, WorkOS answers a
+      bad code with `{"code": "invalid_code"}` and echoes nothing — but a
+      gateway or WAF in front of it is under no such obligation, and that path
+      is reached by an unauthenticated caller who supplies the code.
     """
-    return _BCRYPT_RE.sub("[redacted]", text)
+    return _API_KEY_RE.sub("[redacted]", _BCRYPT_RE.sub("[redacted]", text))
 
 
 class RealWorkOsClient:
@@ -133,7 +145,8 @@ class RealWorkOsClient:
         if response.status_code >= 400:
             # The body may name the field WorkOS objected to, which is what
             # makes a failed migration diagnosable. The request is not
-            # included: it carries the hash, and the headers carry the key.
+            # included: it carries the hash and the key. `_redact` covers the
+            # remaining case, a response that quotes the request back at us.
             raise WorkOsError(
                 f"WorkOS {method} {path} returned {response.status_code}: "
                 f"{_redact(response.text)[:500]}"
@@ -218,8 +231,9 @@ class FakeWorkOsClient:
         self._by_email: dict[str, WorkOsUser] = {}
         self._next = 1
         self._codes: dict[str, str] = {}
-        #: How many codes this double has mailed, for tests that care.
-        self._sessions = 0
+        #: How many codes this double has mailed. Doubles as the source of the
+        #: code itself, so that no two addresses are ever issued the same one.
+        self._codes_sent = 0
 
     def create_user(self, *, email: str, password_hash: str | None) -> WorkOsUser:
         existing = self.find_user_by_email(email)
@@ -241,8 +255,12 @@ class FakeWorkOsClient:
         # The real API creates the user on this call; the double must too, or
         # the first-sign-in path is never exercised offline.
         self.create_user(email=email, password_hash=None)
-        self._codes[email.lower()] = "515627"
-        self._sessions += 1
+        # Six digits, and a DIFFERENT six for every address: a constant would
+        # make the double accept Alice's code presented for Mallory's address,
+        # which is exactly one of the cases the sign-in tests have to prove
+        # fails. Counter-derived rather than random so failures reproduce.
+        self._codes_sent += 1
+        self._codes[email.lower()] = f"{100000 + self._codes_sent}"
 
     def last_code(self, email: str) -> str:
         """Test-only: the code the real API would have mailed."""

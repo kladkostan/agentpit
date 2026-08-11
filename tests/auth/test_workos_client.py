@@ -229,12 +229,33 @@ def test_authenticate_with_code_returns_a_session():
     assert seen["body"]["client_id"] == "client_123"
     assert seen["body"]["client_secret"] == "sk_test_123"
     assert seen["body"]["code"] == "515627"
+    # The magic-auth grant requires the address alongside the code. Dropping it
+    # 400s on every sign-in with an error that reads like a bad code, so pin it
+    # here too rather than discovering it in production.
+    assert seen["body"]["email"] == "a@b.com"
 
 
 def test_a_wrong_code_raises_workos_error():
     client = _real(lambda _r: httpx.Response(400, json={"code": "invalid_code"}))
     with pytest.raises(WorkOsError):
         client.authenticate_with_code("a@b.com", "000000")
+
+
+def test_the_api_key_never_appears_in_an_authenticate_error():
+    # /user_management/authenticate is the one call that puts the API key in
+    # the request BODY, and it is reached by an unauthenticated caller who
+    # supplies the code. Measured, WorkOS itself answers `{"code":
+    # "invalid_code"}` and echoes nothing -- but a gateway in front of it may,
+    # and plan 3 turns this message into a user-visible 401 `detail`.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"code": "invalid_request", "received": request.read().decode()},
+        )
+
+    with pytest.raises(WorkOsError) as exc:
+        _real(handler).authenticate_with_code("a@b.com", "000000")
+    assert "sk_test_123" not in str(exc.value)
 
 
 def test_refresh_session_uses_the_refresh_grant():
@@ -266,6 +287,19 @@ def test_fake_rejects_a_wrong_code():
     fake.send_magic_auth_code("a@b.com")
     with pytest.raises(WorkOsError):
         fake.authenticate_with_code("a@b.com", "000000")
+
+
+def test_fake_rejects_a_code_issued_for_another_address():
+    # A code is bound to the address it was mailed to. If the double issued one
+    # constant code to everybody it would accept Alice's code presented for
+    # Mallory's address, and a service that authenticated against the wrong
+    # email would pass its tests.
+    fake = FakeWorkOsClient()
+    fake.send_magic_auth_code("alice@b.com")
+    fake.send_magic_auth_code("mallory@b.com")
+    assert fake.last_code("alice@b.com") != fake.last_code("mallory@b.com")
+    with pytest.raises(WorkOsError):
+        fake.authenticate_with_code("mallory@b.com", fake.last_code("alice@b.com"))
 
 
 def test_fake_creates_the_user_on_first_code_like_the_real_api_does():
