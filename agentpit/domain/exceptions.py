@@ -77,3 +77,13 @@ class InvalidPaginationError(BusinessRuleError):
 
 class MarketStateError(BusinessRuleError):
     """Raised when an operation is invalid for the market's current state."""
+
+
+class InsufficientGasError(BusinessRuleError):
+    """Raised when a user's wallet can't cover a transaction's gas.
+
+    The house no longer tops accounts up automatically -- the wallet is
+    theirs to fund. Distinct from the generic `BusinessRuleError` 400 so the
+    UI can tell "your input is wrong" from "your wallet needs funding" and
+    show the right recourse.
+    """

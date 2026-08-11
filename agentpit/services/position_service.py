@@ -1,3 +1,5 @@
+from web3.exceptions import Web3RPCError
+
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.position_response import PositionResponse
 from agentpit.datastructures.redeem_position_response import RedeemPositionResponse
@@ -11,6 +13,7 @@ from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
     InsufficientBalanceError,
+    InsufficientGasError,
     MarketNotFoundError,
     MarketStateError,
 )
@@ -19,6 +22,20 @@ from agentpit.onchain.user_wallet import send_user_tx
 from agentpit.utils.parse import hex2bytes
 
 _ZERO_BYTES32 = b"\x00" * 32
+
+
+def _is_insufficient_gas(exc: Web3RPCError) -> bool:
+    """True when a broadcast-time `Web3RPCError` is the node rejecting the
+    transaction because the sender can't cover gas * price (+ value).
+
+    There is no dedicated exception subclass for this on web3.py 7.x --
+    anvil/geth report it as a generic JSON-RPC error (observed: code -32003,
+    message "Insufficient funds for gas * price + value"), so the message
+    text is the only signal. Matched case-insensitively and by substring
+    since the exact wording isn't part of any spec.
+    """
+    message = (exc.message or str(exc)).lower()
+    return "insufficient funds" in message
 
 
 class PositionService:
@@ -77,7 +94,15 @@ class PositionService:
             usd_address, _ZERO_BYTES32, condition_id, partition
         )
         pre_balance = self._onchain.usd_balance(user.eth_address)
-        send_user_tx(self._onchain._client, user.eth_key, fn)  # noqa: SLF001
+        try:
+            send_user_tx(self._onchain._client, user.eth_key, fn)  # noqa: SLF001
+        except Web3RPCError as exc:
+            if not _is_insufficient_gas(exc):
+                raise
+            raise InsufficientGasError(
+                "wallet balance too low to pay for this transaction's gas -- "
+                f"send credits to {user.eth_address} and try claiming again"
+            ) from exc
         new_balance = self._onchain.usd_balance(user.eth_address)
         with self._db.write() as conn:
             TableWrite.log_transaction(
