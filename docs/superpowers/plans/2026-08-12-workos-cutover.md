@@ -370,7 +370,7 @@ Give `_resolve_account` a second flag and route the repairs through one place:
             #
             # `repair=False` for a related reason and a practical one. A
             # refresh runs about every 300 seconds with nobody watching, and
-            # both repairs are chain work: `_finish_onboarding` funds gas,
+            # both branches of `_repair` are chain work: onboarding funds gas,
             # drips collateral and sends three approvals, and `_reonboard`
             # reads a balance off the chain first. Every request the page has
             # in flight is queued behind the shared refresh while that runs,
