@@ -393,7 +393,12 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
   );
 }
 
-function AutoRedeemRow({ user, onUpdated }: UsernameRowProps) {
+type AutoRedeemRowProps = {
+  user: UserPublic;
+  onUpdated: (user: UserPublic) => void;
+};
+
+function AutoRedeemRow({ user, onUpdated }: AutoRedeemRowProps) {
   const [saving, setSaving] = useState(false);
 
   const toggle = async () => {

@@ -367,7 +367,7 @@ export function OrderTicket({
           </div>
         ) : isBuy ? (
           <div className="space-y-2">
-            <Field label="Amount" hint="USDC">
+            <Field label="Amount" hint="apUSD">
               <ValueInput
                 id="market-amount"
                 value={marketAmount}

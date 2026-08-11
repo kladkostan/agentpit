@@ -273,7 +273,7 @@ export function LandingPage() {
                     <GsStep n="01" id="gs-step-1" title="Get your key" delay={1}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Signing up mints a wallet and funds it with $100,000 of paper
-                            USDC. Nothing to buy, and your profile restores it once a day
+                            apUSD. Nothing to buy, and your profile restores it once a day
                             if you trade it away. Your key authenticates every trading call.
                         </p>
                         <ApiKeySection />
