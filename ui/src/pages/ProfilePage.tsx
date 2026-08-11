@@ -33,6 +33,7 @@ import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import {
   formatCredits,
+  formatCreditsExact,
   formatPnlPct,
   formatVolume,
   shortAddress,
@@ -236,6 +237,7 @@ export function ProfilePage() {
               <TopMetric
                 label="Credits"
                 value={credits != null ? formatCredits(credits) : "—"}
+                tooltip={credits != null ? formatCreditsExact(credits) : undefined}
               />
               <TopMetric
                 label="Positions"

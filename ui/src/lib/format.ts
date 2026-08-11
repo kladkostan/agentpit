@@ -185,14 +185,21 @@ export function formatPnlPct(pct: number): string {
 
 const WEI_PER_NATIVE = 1_000_000_000_000_000_000n;
 
-/** "1.23" — a wei string (from `/me/credits`) as a native-coin figure with
- *  two decimals.
+/** Four decimals: the signup grant is 0.02 native (`signup_gas_grant_wei`),
+ *  so two decimals rounds most real balances straight to "0.00" long before
+ *  the wallet is actually out of gas. This is the smallest fixed precision
+ *  that still shows life at that scale. */
+const CREDITS_DECIMALS = 4n;
+const CREDITS_SCALE = 10n ** CREDITS_DECIMALS;
+
+/** "0.0134" — a wei string (from `/me/credits`) as a native-coin figure,
+ *  precise enough to stay useful at the signup-grant's own scale.
  *
  *  BigInt arithmetic throughout, never `Number`: the whole point of sending
  *  wei as a string is that it can exceed Number's safe integer range, and
- *  routing it through a float on the way to two decimals would silently
+ *  routing it through a float on the way to four decimals would silently
  *  reintroduce the precision loss the string was chosen to avoid. Rounds
- *  half up at the second decimal rather than truncating. */
+ *  half up at the fourth decimal rather than truncating. */
 export function formatCredits(weiString: string): string {
   // `BigInt("")` returns 0n rather than throwing, so an empty string needs
   // its own guard before the try/catch below can catch everything else.
@@ -205,11 +212,33 @@ export function formatCredits(weiString: string): string {
   }
   const negative = wei < 0n;
   if (negative) wei = -wei;
-  const centiUnits =
-    (wei * 100n + WEI_PER_NATIVE / 2n) / WEI_PER_NATIVE;
-  const whole = centiUnits / 100n;
-  const cents = centiUnits % 100n;
-  const body = `${whole}.${cents.toString().padStart(2, "0")}`;
+  const scaledUnits =
+    (wei * CREDITS_SCALE + WEI_PER_NATIVE / 2n) / WEI_PER_NATIVE;
+  const whole = scaledUnits / CREDITS_SCALE;
+  const frac = scaledUnits % CREDITS_SCALE;
+  const body = `${whole}.${frac.toString().padStart(Number(CREDITS_DECIMALS), "0")}`;
+  return negative ? `-${body}` : body;
+}
+
+/** "0.0134" / "1" / "0" — a wei string as its exact native-coin figure, with
+ *  no rounding and no trailing zeros. For the tooltip on the Credits cell,
+ *  the same role `USD.format(balance)` plays for the apUSD cell: the
+ *  abbreviated/fixed-precision headline value stays scannable, and hovering
+ *  reveals precisely what's there down to the last wei. */
+export function formatCreditsExact(weiString: string): string {
+  if (weiString.trim() === "") return "—";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiString);
+  } catch {
+    return "—";
+  }
+  const negative = wei < 0n;
+  if (negative) wei = -wei;
+  const whole = wei / WEI_PER_NATIVE;
+  const frac = wei % WEI_PER_NATIVE;
+  const fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
+  const body = fracStr ? `${whole}.${fracStr}` : `${whole}`;
   return negative ? `-${body}` : body;
 }
 

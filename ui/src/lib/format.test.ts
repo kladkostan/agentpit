@@ -3,6 +3,7 @@ import {
   closeLabel,
   displayTagLabel,
   formatCredits,
+  formatCreditsExact,
   formatPnlPct,
   formatShortDate,
   shortAddress,
@@ -157,35 +158,67 @@ describe("formatPnlPct", () => {
 });
 
 describe("formatCredits", () => {
-  it("renders a whole native-coin amount with two decimals", () => {
-    expect(formatCredits("1000000000000000000")).toBe("1.00");
+  it("renders a whole native-coin amount with four decimals", () => {
+    expect(formatCredits("1000000000000000000")).toBe("1.0000");
   });
 
   it("renders zero", () => {
-    expect(formatCredits("0")).toBe("0.00");
+    expect(formatCredits("0")).toBe("0.0000");
   });
 
-  it("keeps two decimals for a fractional amount", () => {
-    expect(formatCredits("1500000000000000000")).toBe("1.50");
+  it("keeps four decimals for a fractional amount", () => {
+    expect(formatCredits("1500000000000000000")).toBe("1.5000");
   });
 
-  it("rounds half up at the second decimal", () => {
-    // 0.005 native rounds to 0.01, not down to 0.00.
-    expect(formatCredits("5000000000000000")).toBe("0.01");
+  it("rounds half up at the fourth decimal", () => {
+    // 0.00005 native rounds to 0.0001, not down to 0.0000.
+    expect(formatCredits("50000000000000")).toBe("0.0001");
   });
 
-  it("truncates rather than rounds up when just under the half cent", () => {
-    expect(formatCredits("4999999999999999")).toBe("0.00");
+  it("truncates rather than rounds up when just under the half", () => {
+    expect(formatCredits("49999999999999")).toBe("0.0000");
   });
 
   it("does not lose precision on a value beyond Number's safe integer range", () => {
     // 12345.6789 native units, expressed in wei -- well past 2^53.
-    expect(formatCredits("12345678900000000000000")).toBe("12345.68");
+    expect(formatCredits("12345678900000000000000")).toBe("12345.6789");
   });
 
   it("returns an em dash for input that isn't a valid integer string", () => {
     expect(formatCredits("not-a-number")).toBe("—");
     expect(formatCredits("")).toBe("—");
+  });
+
+  it("stays useful at the signup grant's own scale, where two decimals used to read 0.00", () => {
+    // 0.02 native signup grant minus the three onboarding approvals
+    // (~0.0066 native): a real, still-claimable balance that a two-decimal
+    // display flattened to "0.00", indistinguishable from actually empty.
+    expect(formatCredits("13400000000000000")).toBe("0.0134");
+  });
+});
+
+describe("formatCreditsExact", () => {
+  it("renders the exact figure with no rounding", () => {
+    expect(formatCreditsExact("13400000000000000")).toBe("0.0134");
+  });
+
+  it("trims trailing zeros without rounding away real precision", () => {
+    expect(formatCreditsExact("1000000000000000000")).toBe("1");
+    expect(formatCreditsExact("1230000000000000000")).toBe("1.23");
+  });
+
+  it("shows precision finer than the fixed four-decimal headline figure", () => {
+    // formatCredits rounds this to "0.0000"; the exact tooltip must not.
+    expect(formatCreditsExact("49999999999999")).toBe("0.000049999999999999");
+  });
+
+  it("renders zero", () => {
+    expect(formatCreditsExact("0")).toBe("0");
+  });
+
+  it("returns an em dash for input that isn't a valid integer string", () => {
+    expect(formatCreditsExact("not-a-number")).toBe("—");
+    expect(formatCreditsExact("")).toBe("—");
   });
 });
 
