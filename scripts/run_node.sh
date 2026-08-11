@@ -23,23 +23,9 @@ echo "Starting clean local node on 127.0.0.1:8545 (chain id 31337, no fork)"
 # --state persists the full chain to disk (load on start, dump every 30s + on
 # exit) so a crash/restart recovers instead of losing every contract + balance.
 # Missing file on first run -> starts fresh and creates it.
-# The base fee SKALE on Base reports (47.619 gwei), so a chain built from
-# scratch starts at the price the app is heading for rather than anvil's ~2
-# gwei default.
-#
-# It only bites on a FRESH chain. With --state loading an existing chain the
-# flag is ignored: the loaded block carries its own base fee, and EIP-1559 then
-# decays it 12.5% per under-full block — measured here, 47.6 gwei falls back to
-# 0.87 over thirty empty blocks. There is no anvil flag that pins it, and
-# --gas-price does not help because send_user_tx builds type-2 transactions
-# (agentpit/onchain/user_wallet.py:82) whose cost follows the block's base fee.
-#
-# So do not read a local wei figure as a SKALE wei figure. Read the GAS, which
-# is exact and identical on both, and multiply.
 exec anvil \
   --host 127.0.0.1 \
   --port 8545 \
   --chain-id 31337 \
-  --block-base-fee-per-gas 47619047620 \
   --state /Users/yavorsky/dev/agentpit/.anvil-state.json \
   --state-interval 30
