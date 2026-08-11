@@ -95,6 +95,13 @@ def make_current_user_dep(coder: JwtCoder, authkit: AuthKitVerifier | None = Non
             # legacy check is a local HMAC verification with no I/O, while
             # `authkit.verify` may fetch a JWKS. During the transition the
             # common case then costs nothing extra.
+            #
+            # Anything that is not a legacy token lands here, including
+            # unauthenticated junk, so `verify` must not fetch for a token that
+            # is not plausibly ours -- see the gate at the top of it, and the
+            # single-flight guard in `cached_key_resolver`. Without those, this
+            # line hands a stranger one live request to api.workos.com per
+            # request, in the threadpool the X-API-Key path shares.
             if authkit is None:
                 raise _unauth("invalid token")
             return _authkit_user(db, authkit, creds.credentials)

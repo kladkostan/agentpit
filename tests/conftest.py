@@ -19,8 +19,15 @@ os.environ.setdefault("JWT_SECRET", "test-only-secret")
 import psycopg
 import pytest
 
-from agentpit.api.deps import get_db_session, get_workos_client
+from agentpit.api.deps import (
+    get_current_user,
+    get_db_session,
+    get_jwt_coder,
+    get_workos_client,
+)
 from agentpit.api.main import app
+from agentpit.auth.authkit_tokens import AuthKitVerifier
+from agentpit.auth.dependencies import make_current_user_dep
 from agentpit.auth.workos_client import FakeWorkOsClient
 from agentpit.db.session import DbSession
 from agentpit.db.table_create import TableCreate
@@ -46,6 +53,30 @@ _boot.close()
 # would make a forgotten fixture fail as a confusing 401 instead of working.
 _default_workos = FakeWorkOsClient()
 app.dependency_overrides[get_workos_client] = lambda: _default_workos
+
+
+def _no_live_jwks(_token: str):
+    raise RuntimeError(
+        "this test would have fetched the live WorkOS JWKS -- override "
+        "get_current_user with a dependency built over a local key resolver, "
+        "the way tests/auth/test_current_user_authkit.py does"
+    )
+
+
+# The other half of the same argument, for the other half of the AuthKit
+# wiring: `create_app` builds an AuthKitVerifier whose resolver fetches
+# https://api.workos.com/sso/jwks/<client_id>, and the .env that load_dotenv()
+# pulls in above carries a real WORKOS_CLIENT_ID. A test that sends an
+# AuthKit-shaped bearer token to the shared app would then reach out to WorkOS
+# and merely look slow, rather than fail as the network-free rule it broke.
+# This default cannot reach anything: its resolver raises. The coder is the
+# app's own instance, so the X-API-Key and legacy-bearer paths are byte for
+# byte what create_app wired.
+_default_current_user = make_current_user_dep(
+    app.dependency_overrides[get_jwt_coder](),
+    AuthKitVerifier(client_id="client_test_offline", key_resolver=_no_live_jwks),
+)
+app.dependency_overrides[get_current_user] = _default_current_user
 
 
 def _truncate_all() -> None:

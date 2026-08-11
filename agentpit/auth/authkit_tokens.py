@@ -34,6 +34,7 @@ Both the issuer and the JWKS URL are derived from `client_id` rather than
 configured. There is then exactly one WorkOS value an operator can get wrong,
 and getting it wrong fails loudly at the first request instead of half-working.
 """
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -62,14 +63,55 @@ def authkit_jwks_url(client_id: str) -> str:
     return f"{_API_BASE}/sso/jwks/{client_id}"
 
 
-def remote_jwks_resolver(client_id: str) -> KeyResolver:
-    """Resolve signing keys from the live JWKS, with PyJWT's own caching.
+def cached_key_resolver(fetch: KeyResolver) -> KeyResolver:
+    """Wrap a fetching resolver so the request path can only ever hold one fetch.
 
-    `PyJWKClient` caches keys and refetches on an unknown `kid`, so a key
-    rotation upstream costs one extra request rather than an outage.
+    Read off PyJWT 2.12.1: when `PyJWKClient` meets a `kid` that is not in the
+    set it holds, `get_signing_key` calls `get_signing_keys(refresh=True)`,
+    which BYPASSES its own 300s `jwk_set_cache` and performs a fresh HTTPS
+    request with `timeout=30`. Its caching therefore only covers keys it has
+    already resolved; an unknown `kid` is uncached I/O, every time.
+
+    That matters here because `current_user` is a sync def, so FastAPI runs it
+    in the AnyIO threadpool (40 workers) that X-API-Key order placement also
+    runs in. Unknown-`kid` tokens arriving faster than WorkOS answers would
+    take every worker and queue every bot's order behind them.
+
+    So: a `kid` already resolved is answered from a dict without touching
+    `fetch` at all, and at most ONE fetch is in flight -- a request that
+    arrives while one is running is refused instead of parking a worker on the
+    lock. The refusal is per-attempt, not a cooldown, so an upstream key
+    rotation still costs a single fetch and the requests that lost the race
+    succeed on retry.
     """
+    known: dict[str, Any] = {}
+    fetching = threading.Lock()
+
+    def resolve(token: str) -> Any:
+        kid = jwt.get_unverified_header(token).get("kid")
+        if isinstance(kid, str):
+            cached = known.get(kid)
+            if cached is not None:
+                return cached
+        if not fetching.acquire(blocking=False):
+            raise InvalidCredentialsError("invalid session")
+        try:
+            key = fetch(token)
+        finally:
+            fetching.release()
+        if isinstance(kid, str):
+            known[kid] = key
+        return key
+
+    return resolve
+
+
+def remote_jwks_resolver(client_id: str) -> KeyResolver:
+    """Resolve signing keys from the live JWKS, behind the guard above."""
     client = jwt.PyJWKClient(authkit_jwks_url(client_id))
-    return lambda token: client.get_signing_key_from_jwt(token).key
+    return cached_key_resolver(
+        lambda token: client.get_signing_key_from_jwt(token).key
+    )
 
 
 class AuthKitVerifier:
@@ -86,6 +128,26 @@ class AuthKitVerifier:
         `InvalidCredentialsError`, because a caller that could tell them apart
         could use the difference to probe.
         """
+        # A local gate before the resolver, which is the only I/O in here: a
+        # `kid` it has not seen costs a live fetch from api.workos.com. Without
+        # this, any RS256 JWT at all -- signed by anyone, `kid` a random string
+        # -- turned one unauthenticated request into one outbound request, on
+        # the threadpool the bots' order placement shares.
+        #
+        # These claims are UNSIGNED, so this filters and does not authenticate:
+        # the real issuer and application checks below run on the verified
+        # payload and are unchanged. It only means a token has to at least
+        # CLAIM to be ours before we will spend a network round trip on it.
+        try:
+            unverified = jwt.decode(token, options={"verify_signature": False})
+        except Exception as exc:
+            raise InvalidCredentialsError("invalid session") from exc
+        if (
+            unverified.get("iss") != self._issuer
+            or unverified.get("client_id") != self._client_id
+        ):
+            raise InvalidCredentialsError("invalid session")
+
         try:
             key = self._resolve(token)
             claims = jwt.decode(
