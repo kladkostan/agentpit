@@ -164,9 +164,17 @@ class Settings(BaseSettings):
 
     # WorkOS AuthKit. An absent api key means the feature is simply not
     # present, the same shape as GOOGLE_CLIENT_ID above -- nothing raises at
-    # startup and every AuthKit path answers as unconfigured. The authkit
-    # domain is the issuer that signs access tokens and publishes the JWKS;
-    # it is NOT api.workos.com.
+    # startup and every AuthKit path answers as unconfigured.
+    #
+    # `workos_client_id` is load-bearing beyond identifying the application:
+    # both the token issuer and the JWKS URL are DERIVED from it (see
+    # auth/authkit_tokens.py), so it is the one value that must be right.
+    #
+    # `workos_authkit_domain` is the hosted sign-in surface. It is NOT the
+    # issuer -- a real token says it was issued by
+    # api.workos.com/user_management/<client_id>, verified against staging on
+    # 2026-08-11. It serves a JWKS carrying the same key, but nothing here
+    # verifies through it.
     workos_api_key: str = Field(default="", validation_alias="WORKOS_API_KEY")
     workos_client_id: str = Field(default="", validation_alias="WORKOS_CLIENT_ID")
     workos_authkit_domain: str = Field(
