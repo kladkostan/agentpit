@@ -1,6 +1,15 @@
 # Email verification at registration — design
 
-**Status:** approved 2026-08-11
+**Status:** SUPERSEDED 2026-08-11 by `2026-08-11-workos-authkit-design.md`, and
+never implemented. This spec verified addresses on our own auth with Resend as
+the mail channel; the decision changed the same day to move authentication to
+WorkOS AuthKit, which brings verification, password reset and deliverability
+with it. The dialog flow below — the six-digit code step, the resend button, the
+cooldown, and the rule that no local row exists until the address answers — is
+carried forward unchanged into that spec. What is obsolete is everything about
+`pending_registrations`, Resend, and our own code lifecycle.
+
+**Original status:** approved 2026-08-11
 
 ## Problem
 
