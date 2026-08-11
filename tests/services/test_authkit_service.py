@@ -45,12 +45,28 @@ class _FlakyOnboarder(_Onboarder):
         return super().__call__(user_id, acct)
 
 
-def _service(workos=None, onboarder=None):
+class _Reonboarder:
+    """Stands in for AuthService._maybe_reonboard.
+
+    The real one reads a native balance off the chain and re-funds a wallet the
+    chain forgot. Here it only records that it was asked, because what these
+    tests are about is WHICH sign-in paths ask.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, user):
+        self.calls.append(user.user_id)
+
+
+def _service(workos=None, onboarder=None, reonboarder=None):
     db = DbSession(Settings().database_url)
     return AuthKitService(
         db=db,
         workos=workos or FakeWorkOsClient(),
         onboard=onboarder or _Onboarder(),
+        reonboard=reonboarder or _Reonboarder(),
     ), db
 
 
@@ -280,3 +296,75 @@ def test_refresh_for_an_identity_with_no_local_row_is_refused():
     # that this is a refusal rather than a crash -- would go unpinned.
     with pytest.raises(InvalidCredentialsError):
         svc.refresh(f"rt-{created.workos_user_id}")
+
+
+def test_refresh_never_runs_on_chain_onboarding():
+    # A background call every 300 seconds with nobody watching. Onboarding is
+    # ~a second of chain round-trips and real gas, and the whole page's
+    # requests queue behind the shared in-flight refresh while it waits. If it
+    # failed once it will most likely fail again, so retrying it on a timer
+    # buys nothing and costs every five minutes.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    svc.send_code("a@example.com")
+    first = svc.sign_in("a@example.com", workos.last_code("a@example.com"))
+
+    with db.write() as conn:
+        TableWrite.clear_user_onboarded(conn, first.user.user_id)
+    onboarder.calls.clear()
+
+    again = svc.refresh(first.refresh_token)
+
+    assert again.user.user_id == first.user.user_id
+    assert onboarder.calls == []
+
+
+def test_sign_in_finishes_an_onboarding_that_never_completed():
+    # The complement of the test above. `_create_account` commits the row
+    # before onboarding it, so a chain that was down during somebody's first
+    # sign-in leaves a committed row with ONBOARDED_AT null -- a wallet with no
+    # gas, no collateral and no approvals, failing every order at trade time.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    svc.send_code("b@example.com")
+    first = svc.sign_in("b@example.com", workos.last_code("b@example.com"))
+
+    with db.write() as conn:
+        TableWrite.clear_user_onboarded(conn, first.user.user_id)
+    onboarder.calls.clear()
+
+    svc.send_code("b@example.com")
+    svc.sign_in("b@example.com", workos.last_code("b@example.com"))
+
+    assert onboarder.calls == [first.user.user_id]
+
+
+def test_sign_in_runs_the_chain_wipe_repair_for_an_onboarded_account():
+    # `_maybe_reonboard` hangs off `login` and `google_sign_in` and has never
+    # been reachable from a mailed-code sign-in. On the local anvil, whose
+    # state is wiped on restart while the database persists, whoever signs in
+    # by code therefore stays unfunded forever.
+    workos, reonboarder = FakeWorkOsClient(), _Reonboarder()
+    svc, _db = _service(workos, reonboarder=reonboarder)
+    svc.send_code("c@example.com")
+    first = svc.sign_in("c@example.com", workos.last_code("c@example.com"))
+
+    svc.send_code("c@example.com")
+    second = svc.sign_in("c@example.com", workos.last_code("c@example.com"))
+
+    # Not on the first: that account was onboarded by this very call and its
+    # wallet is as funded as it will ever be.
+    assert reonboarder.calls == [second.user.user_id]
+    assert first.user.user_id == second.user.user_id
+
+
+def test_refresh_never_runs_the_chain_wipe_repair():
+    workos, reonboarder = FakeWorkOsClient(), _Reonboarder()
+    svc, _db = _service(workos, reonboarder=reonboarder)
+    svc.send_code("d@example.com")
+    first = svc.sign_in("d@example.com", workos.last_code("d@example.com"))
+    reonboarder.calls.clear()
+
+    svc.refresh(first.refresh_token)
+
+    assert reonboarder.calls == []

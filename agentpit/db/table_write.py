@@ -69,6 +69,20 @@ class TableWrite:
         )
 
     @staticmethod
+    def clear_user_onboarded(db: psycopg.Connection, user_id: str) -> bool:
+        """Test-only: put a row back into the never-onboarded state.
+
+        The condition it recreates is real -- `_create_account` commits the row
+        before onboarding it, so a chain outage leaves exactly this -- but
+        nothing in the product ever writes it, and the repair paths that read
+        `ONBOARDED_AT` cannot be tested without a way to produce it.
+        """
+        cur = db.execute(
+            "UPDATE users SET ONBOARDED_AT = NULL WHERE USER_ID = %s", (user_id,)
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def update_user_handle(db: psycopg.Connection, user_id: str, handle: str) -> bool:
         cur = db.execute(
             "UPDATE users SET HANDLE = %s WHERE USER_ID = %s",

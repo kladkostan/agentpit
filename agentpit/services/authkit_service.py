@@ -31,13 +31,15 @@ class AuthKitSession:
 
 
 class AuthKitService:
-    def __init__(self, *, db: DbSession, workos: WorkOsClient, onboard):
+    def __init__(self, *, db: DbSession, workos: WorkOsClient, onboard, reonboard):
         self._db = db
         self._workos = workos
-        # `AuthService._onboard_new_account` -- injected rather than imported so
-        # the chain stays out of these tests, and so the two services do not
-        # depend on each other's construction.
+        # `AuthService._onboard_new_account` and `AuthService._maybe_reonboard`
+        # -- injected rather than imported so the chain stays out of these
+        # tests, and so the two services do not depend on each other's
+        # construction.
         self._onboard = onboard
+        self._reonboard = reonboard
 
     def send_code(self, email: str) -> None:
         self._workos.send_magic_auth_code(email)
@@ -45,7 +47,7 @@ class AuthKitService:
     def sign_in(self, email: str, code: str) -> AuthKitSession:
         session = self._workos.authenticate_with_code(email, code)
         return AuthKitSession(
-            user=self._resolve_account(session, create=True),
+            user=self._resolve_account(session, create=True, repair=True),
             access_token=session.access_token,
             refresh_token=session.refresh_token,
         )
@@ -57,44 +59,57 @@ class AuthKitService:
             # person just proved ownership of an address. Minting an account
             # here would put a wallet behind a credential that never passed
             # through sign_in.
-            user=self._resolve_account(session, create=False),
+            #
+            # `repair=False` for a related reason and a practical one. A
+            # refresh runs about every 300 seconds with nobody watching, and
+            # both repairs are chain work: `_finish_onboarding` funds gas,
+            # drips collateral and sends three approvals, and `_reonboard`
+            # reads a balance off the chain first. Every request the page has
+            # in flight is queued behind the shared refresh while that runs,
+            # and an onboarding that failed once will most likely fail again.
+            # The repair is not lost -- the next sign_in performs it, with a
+            # person at the screen who is already paying that second.
+            user=self._resolve_account(session, create=False, repair=False),
             access_token=session.access_token,
             refresh_token=session.refresh_token,
         )
 
-    def _resolve_account(self, session: WorkOsSession, *, create: bool) -> User:
+    def _resolve_account(
+        self, session: WorkOsSession, *, create: bool, repair: bool
+    ) -> User:
         with self._db.read() as conn:
             user = TableRead.get_user_by_workos_id(conn, session.workos_user_id)
         if user is not None:
-            return self._finish_onboarding(user)
+            return self._repair(user) if repair else user
         if not create:
             raise InvalidCredentialsError("invalid session")
-        return self._create_account(session)
+        return self._create_account(session, repair=repair)
 
-    def _finish_onboarding(self, user: User) -> User:
-        """Onboard a row that has an account but never got a funded wallet.
+    def _repair(self, user: User) -> User:
+        """The two ways an existing row can need chain work, and neither overlaps.
 
-        `_create_account` commits the row (and its WORKOS_USER_ID) before it
-        calls `_onboard`, because onboarding is ~a second of chain round-trips
-        and must not hold the write lock. So a chain that is down or restarting
-        during somebody's first sign-in leaves a committed row with
-        ONBOARDED_AT NULL, and every later sign-in would find it by WorkOS id
-        and hand back a session for a wallet with no gas, no collateral and no
-        approvals -- every order failing at trade time.
+        `ONBOARDED_AT` null means the wallet was never funded at all --
+        `_create_account` commits the row before onboarding it, so a chain that
+        was down during a first sign-in leaves exactly this, and every later
+        sign-in would otherwise hand back a session for a wallet that fails
+        every order.
 
-        `AuthService._maybe_reonboard` cannot repair that one: it returns early
-        precisely when `onboarded_at is None`, because its own repair is for
-        chain *wipes* and it needs the stamp to know the wallet was ever
-        funded. This is the other half, and it is cheap: `onboarded_at` is
-        already on the row we just read, so the healthy path costs nothing.
+        `ONBOARDED_AT` set means the wallet WAS funded, and
+        `AuthService._maybe_reonboard` is the repair for the other failure: the
+        local anvil wipes its state on restart while the database persists, so
+        a funded wallet can find itself empty. That method returns early
+        precisely when `onboarded_at is None`, because it needs the stamp to
+        know the wallet was ever funded -- which is why these are two branches
+        and not one call.
         """
-        if user.onboarded_at is not None:
-            return user
-        log.info(
-            "user %s has no ONBOARDED_AT — finishing onboarding on sign-in",
-            user.user_id,
-        )
-        return self._onboard(user.user_id, user.eth_key)
+        if user.onboarded_at is None:
+            log.info(
+                "user %s has no ONBOARDED_AT — finishing onboarding on sign-in",
+                user.user_id,
+            )
+            return self._onboard(user.user_id, user.eth_key)
+        self._reonboard(user)
+        return user
 
     def _link_existing_account(self, session: WorkOsSession) -> User | None:
         """Adopt an account that predates this address's WORKOS_USER_ID.
@@ -133,12 +148,12 @@ class AuthKitService:
             update={"workos_user_id": session.workos_user_id}
         )
 
-    def _create_account(self, session: WorkOsSession) -> User:
+    def _create_account(self, session: WorkOsSession, *, repair: bool) -> User:
         linked = self._link_existing_account(session)
         if linked is not None:
             # Outside its transaction, like the create path below: a linked row
             # can itself be one whose onboarding never finished.
-            return self._finish_onboarding(linked)
+            return self._repair(linked) if repair else linked
 
         with self._db.write() as conn:
             handle = pick_handle(

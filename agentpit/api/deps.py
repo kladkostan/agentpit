@@ -184,8 +184,14 @@ def get_authkit_service(
     # `_onboard_new_account` is private to `AuthService` and reached anyway:
     # `AuthKitService` takes it as an argument precisely so the two services do
     # not import each other, and a second copy of that work here is the drift
-    # `_onboard_new_account`'s own docstring exists to prevent.
-    return AuthKitService(db=db, workos=workos, onboard=auth._onboard_new_account)
+    # `_onboard_new_account`'s own docstring exists to prevent. `_maybe_reonboard`
+    # is reached the same way and for the same reason.
+    return AuthKitService(
+        db=db,
+        workos=workos,
+        onboard=auth._onboard_new_account,
+        reonboard=auth._maybe_reonboard,
+    )
 
 
 AuthKitServiceDep = Annotated[AuthKitService, Depends(get_authkit_service)]
