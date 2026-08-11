@@ -31,6 +31,7 @@ import {
 import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
+import { claimErrorMessage } from "@/lib/claimError";
 import {
   formatCredits,
   formatCreditsExact,
@@ -587,6 +588,13 @@ function ClaimButton({
       void queryClient.invalidateQueries({
         queryKey: ["positions", userAddress],
       });
+      // The claimed position becomes a closed one -- Biggest Win, P/L and
+      // Predictions all read off `closedPositions`, and without this they'd
+      // sit stale (still counting the position as open/unclaimed) until
+      // whatever next natural refetch happens to invalidate it.
+      void queryClient.invalidateQueries({
+        queryKey: ["closed-positions", userAddress],
+      });
       // Claiming pays out apUSD and spends native gas -- both balances at the
       // top of the page change. Without this they sit stale until whatever
       // next natural refetch happens to invalidate them.
@@ -597,7 +605,9 @@ function ClaimButton({
     },
     onError: (err) => {
       const message =
-        err instanceof ApiError ? err.message : "Failed to claim.";
+        err instanceof ApiError
+          ? claimErrorMessage(err.status, userAddress)
+          : "Failed to claim.";
       toast.error(message);
     },
   });
