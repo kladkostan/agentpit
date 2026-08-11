@@ -35,6 +35,23 @@ export function setAccessTokenGetter(getter: TokenGetter): void {
   tokenGetter = getter;
 }
 
+/**
+ * Auth providers register a refresher so a 401 can be repaired instead of
+ * ending the session. Returns the fresh access token, or null when the
+ * refresh failed and the session really is over.
+ *
+ * The AuthKit access token lives 300 seconds (measured against staging,
+ * 2026-08-11). Without this, a signed-in user is logged out every five
+ * minutes. Registered as a function pointer for the same reason as the token
+ * getter above: no client → context circular import.
+ */
+type TokenRefresher = () => Promise<string | null>;
+let tokenRefresher: TokenRefresher | null = null;
+
+export function setTokenRefresher(refresher: TokenRefresher | null): void {
+  tokenRefresher = refresher;
+}
+
 /** Event name dispatched on window when a 401 hits with a token attached. */
 export const UNAUTHORIZED_EVENT = "agentpit:unauthorized";
 
@@ -49,12 +66,11 @@ export const UNAUTHORIZED_EVENT = "agentpit:unauthorized";
  */
 export type ApiFetchInit = RequestInit & { skipAuthEvent?: boolean | undefined };
 
-export async function apiFetch<T>(
-  path: string,
-  init?: ApiFetchInit,
-): Promise<T> {
-  const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
-  const token = tokenGetter();
+function send(
+  url: string,
+  init: ApiFetchInit | undefined,
+  token: string | null,
+): Promise<Response> {
   const baseHeaders: Record<string, string> = { Accept: "application/json" };
   if (init?.body && typeof init.body === "string") {
     baseHeaders["Content-Type"] = "application/json";
@@ -62,14 +78,48 @@ export async function apiFetch<T>(
   if (token) {
     baseHeaders.Authorization = `Bearer ${token}`;
   }
-
-  const response = await fetch(url, {
+  return fetch(url, {
     ...init,
     headers: {
       ...baseHeaders,
       ...init?.headers,
     },
   });
+}
+
+export async function apiFetch<T>(
+  path: string,
+  init?: ApiFetchInit,
+): Promise<T> {
+  const url = `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  const token = tokenGetter();
+
+  let response = await send(url, init, token);
+
+  if (
+    response.status === 401 &&
+    token &&
+    !init?.skipAuthEvent &&
+    tokenRefresher
+  ) {
+    // The access token expired mid-session. Refresh once and replay, rather
+    // than throwing the user out — a 300-second token otherwise ends the
+    // session every five minutes.
+    //
+    // skipAuthEvent callers are excluded on purpose: `/auth/session` and
+    // `/auth/refresh` answer 401 in normal use, and the refresher is written
+    // in terms of them, so refreshing there would recurse.
+    //
+    // Replaying reuses `init` as given. Every caller in this codebase sends a
+    // string body or none; a stream body would already be consumed and must
+    // not be routed through here.
+    const fresh = await tokenRefresher().catch(() => null);
+    if (fresh) {
+      // Exactly one retry. If the fresh token is rejected too, the 401 falls
+      // through below and ends the session, which is the honest outcome.
+      response = await send(url, init, fresh);
+    }
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
