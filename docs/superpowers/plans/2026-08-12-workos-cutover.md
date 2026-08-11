@@ -14,7 +14,7 @@
 - Backend tests: `.venv/bin/python -m pytest tests -q --ignore=tests/onchain`. **NEVER source `.env`** — the conftest setdefaults get defeated and the live-sync tests flake. The local anvil must be running.
 - **No test may reach the network.** `FakeWorkOsClient` is the double; extend it in step with the protocol.
 - **`X-API-Key` must keep working, unchanged, in every task.** It is checked first in `current_user`, before either token path. Every bot trading today depends on it.
-- **Nothing is deleted in this plan.** `JwtCoder`, `PASSWORD_HASH`, `change_password`, `agentpit/auth/passwords.py`, the Google verifier and `GoogleSignInButton` all stay in the tree. Task 8 makes three routes answer 410; plan 4 deletes the code.
+- **No backend capability is deleted in this plan.** `JwtCoder`, `PASSWORD_HASH`, `change_password`, `agentpit/auth/passwords.py`, the Google verifier, `GoogleSignInButton.tsx`, `googleAuth.ts` and `loginRequest`/`registerRequest` all stay in the tree, so reverting a single commit restores a working legacy sign-in. Task 8 makes three routes answer 410 and takes the password form out of the dialog — that UI is the one thing this plan does remove, because a form posting to a 410 is worse than no form. Plan 4 deletes the rest.
 - UI from `ui/`: `npx vitest run && npm run typecheck && npm run lint && npm run build`. All four must pass. `ui/` vitest runs in node with **no `@testing-library/react`** — components cannot be render-tested, so every real decision lives in a pure helper. `tsconfig` has `exactOptionalPropertyTypes`.
 - Commit messages must **NOT** carry a `Co-Authored-By` trailer.
 - Comments explain *why*, and cite measured facts. Match the surrounding code, which is heavily commented.
