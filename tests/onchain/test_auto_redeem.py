@@ -35,12 +35,20 @@ def _build_admin_and_db():
     return OnchainAdmin(w, c), fresh_test_db()
 
 
-def _onboard_user(db, admin):
+def _onboard_user(db, admin, *, auto_redeem: bool = True):
+    """Onboard a fresh user, opted into auto-redeem by default.
+
+    Every account starts opted out (AUTO_REDEEM_ENABLED defaults FALSE), so a
+    test exercising the auto-redeem loop's happy path has to opt one in
+    explicitly -- this is that. `auto_redeem=False` is for the opposite case:
+    proving a holder who never opted in keeps their tokens.
+    """
     email = f"redeem-{secrets.token_hex(4)}@example.com"
     with db.write() as conn:
         user_id, acct, _api_key = TableWrite.create_user(
             conn, email=email, password_hash="x", handle=None
         )
+        TableWrite.set_auto_redeem(conn, user_id, auto_redeem)
     admin.fund_gas(acct.address, 10**18)
     admin.faucet_drip(acct.address)
     admin.grant_user_approvals(acct)
@@ -117,3 +125,47 @@ def test_auto_redeem_pays_winner_and_flags_market():
 
     # Idempotent: a second pass redeems nobody.
     assert auto_redeem_resolved_markets(db, admin) == 0
+
+
+def test_a_holder_who_has_not_opted_in_keeps_their_tokens():
+    """The other half of the guarantee, proven against the real chain rather
+    than a stub: a holder who never turned auto-redeem on is skipped
+    outright. Their tokens are not moved, their balance is not touched, and
+    the market is not flagged FULLY_REDEEMED -- the winnings just wait."""
+    admin, db = _build_admin_and_db()
+    pm = _pm(secrets.token_hex(4))
+
+    with db.write() as conn:
+        created = create_polymarket_markets_if_needed(conn, [pm], admin)
+    market = created[0]
+    mid = market.market_id
+    yes_token = int(market.erc1155_tokens[0][0])
+    no_token = int(market.erc1155_tokens[1][0])
+
+    user = _onboard_user(db, admin, auto_redeem=False)
+    assert user is not None
+    split_amount = 100_000_000  # 100 apUSD raw
+    PositionService(db, admin).split(user, mid, SplitPositionRequest(amount=split_amount))
+
+    bal_before = admin.usd_balance(user.eth_address)
+    assert admin.ctf_balance(user.eth_address, yes_token) == split_amount
+    assert admin.ctf_balance(user.eth_address, no_token) == split_amount
+
+    fake = _resolved(pm, winner_index=0)  # YES wins
+    with db.write() as conn:
+        mirror_polymarket_resolutions(
+            conn, admin, fetcher=lambda _cid: fake, now=9_999_999_999
+        )
+
+    assert auto_redeem_resolved_markets(db, admin) == 0
+
+    # Nothing moved.
+    assert admin.usd_balance(user.eth_address) == bal_before
+    assert admin.ctf_balance(user.eth_address, yes_token) == split_amount
+    assert admin.ctf_balance(user.eth_address, no_token) == split_amount
+
+    with db.read() as conn:
+        row = TableRead.read_market(conn, mid)
+    assert row is not None
+    assert row.market_state == MarketState.RESOLVED
+    assert row.fully_redeemed is False
