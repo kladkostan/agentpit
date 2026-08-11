@@ -24,6 +24,14 @@ class WorkOsUser:
     email_verified: bool
 
 
+@dataclass(frozen=True)
+class WorkOsSession:
+    workos_user_id: str
+    email: str
+    access_token: str
+    refresh_token: str
+
+
 class WorkOsClient(Protocol):
     def create_user(
         self, *, email: str, password_hash: str | None
@@ -39,6 +47,22 @@ class WorkOsClient(Protocol):
         ...
 
     def find_user_by_email(self, email: str) -> WorkOsUser | None:
+        ...
+
+    def send_magic_auth_code(self, email: str) -> None:
+        """Mail a six-digit code to this address, creating the user if new.
+
+        Returns nothing on purpose. WorkOS hands the code back in the create
+        response -- which means the API key alone is enough to sign in as
+        anybody, without reading mail -- and the only defence available to us
+        is that the value never leaves this method.
+        """
+        ...
+
+    def authenticate_with_code(self, email: str, code: str) -> WorkOsSession:
+        ...
+
+    def refresh_session(self, refresh_token: str) -> WorkOsSession:
         ...
 
 
@@ -85,8 +109,13 @@ class RealWorkOsClient:
     nothing else — that is what the Protocol is for.
     """
 
+    _MAGIC_AUTH_GRANT = "urn:workos:oauth:grant-type:magic-auth:code"
+
     def __init__(self, api_key: str, client_id: str, *, transport=None):
         self._client_id = client_id
+        # Kept beyond the header because /user_management/authenticate wants
+        # the same key again in the BODY, under the name `client_secret`.
+        self._api_key = api_key
         self._http = httpx.Client(
             base_url=API_BASE,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -145,6 +174,42 @@ class RealWorkOsClient:
             return self._to_user(user)
         return None
 
+    def send_magic_auth_code(self, email: str) -> None:
+        # The response body carries the code. It is deliberately discarded.
+        # Measured 2026-08-11: this call returns 201 and CREATES the WorkOS
+        # user when the address is new, so there is no separate sign-up call.
+        self._request("POST", "/user_management/magic_auth", json={"email": email})
+
+    def _authenticate(self, body: dict) -> WorkOsSession:
+        payload = self._request(
+            "POST",
+            "/user_management/authenticate",
+            json={
+                "client_id": self._client_id,
+                # WorkOS names the API key `client_secret` on this endpoint.
+                "client_secret": self._api_key,
+                **body,
+            },
+        )
+        return WorkOsSession(
+            workos_user_id=payload["user"]["id"],
+            email=payload["user"]["email"],
+            access_token=payload["access_token"],
+            refresh_token=payload["refresh_token"],
+        )
+
+    def authenticate_with_code(self, email: str, code: str) -> WorkOsSession:
+        return self._authenticate(
+            {"grant_type": self._MAGIC_AUTH_GRANT, "code": code, "email": email}
+        )
+
+    def refresh_session(self, refresh_token: str) -> WorkOsSession:
+        # Measured: WorkOS does NOT rotate the refresh token, so a client that
+        # refreshes twice concurrently keeps a working credential either way.
+        return self._authenticate(
+            {"grant_type": "refresh_token", "refresh_token": refresh_token}
+        )
+
 
 class FakeWorkOsClient:
     """In-memory double with the same contract, including the idempotency."""
@@ -152,6 +217,9 @@ class FakeWorkOsClient:
     def __init__(self) -> None:
         self._by_email: dict[str, WorkOsUser] = {}
         self._next = 1
+        self._codes: dict[str, str] = {}
+        #: How many codes this double has mailed, for tests that care.
+        self._sessions = 0
 
     def create_user(self, *, email: str, password_hash: str | None) -> WorkOsUser:
         existing = self.find_user_by_email(email)
@@ -168,6 +236,44 @@ class FakeWorkOsClient:
 
     def find_user_by_email(self, email: str) -> WorkOsUser | None:
         return self._by_email.get(email.lower())
+
+    def send_magic_auth_code(self, email: str) -> None:
+        # The real API creates the user on this call; the double must too, or
+        # the first-sign-in path is never exercised offline.
+        self.create_user(email=email, password_hash=None)
+        self._codes[email.lower()] = "515627"
+        self._sessions += 1
+
+    def last_code(self, email: str) -> str:
+        """Test-only: the code the real API would have mailed."""
+        return self._codes[email.lower()]
+
+    def authenticate_with_code(self, email: str, code: str) -> WorkOsSession:
+        if self._codes.get(email.lower()) != code:
+            raise WorkOsError("WorkOS rejected the code")
+        user = self.find_user_by_email(email)
+        assert user is not None
+        return WorkOsSession(
+            workos_user_id=user.workos_user_id,
+            email=user.email,
+            access_token=f"at-{user.workos_user_id}",
+            refresh_token=f"rt-{user.workos_user_id}",
+        )
+
+    def refresh_session(self, refresh_token: str) -> WorkOsSession:
+        if not refresh_token.startswith("rt-"):
+            raise WorkOsError("WorkOS rejected the refresh token")
+        workos_user_id = refresh_token[3:]
+        for user in self._by_email.values():
+            if user.workos_user_id == workos_user_id:
+                return WorkOsSession(
+                    workos_user_id=user.workos_user_id, email=user.email,
+                    access_token=f"at-{workos_user_id}",
+                    # Measured against the real API: the refresh token does not
+                    # rotate, so the caller's existing value stays valid.
+                    refresh_token=refresh_token,
+                )
+        raise WorkOsError("WorkOS rejected the refresh token")
 
 
 def build_workos_client(

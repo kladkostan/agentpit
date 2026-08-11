@@ -1,9 +1,12 @@
+import json
+
 import httpx
 import pytest
 
 from agentpit.auth.workos_client import (
     FakeWorkOsClient,
     WorkOsError,
+    WorkOsSession,
     WorkOsUser,
     build_workos_client,
 )
@@ -170,3 +173,103 @@ def test_the_api_key_never_appears_in_the_error():
     with pytest.raises(WorkOsError) as exc:
         client.find_user_by_email("a@b.com")
     assert "sk_test_123" not in str(exc.value)
+
+
+# --- Magic Auth: send a code, trade it for a session, refresh it ----------
+
+
+def test_send_magic_auth_code_posts_the_address():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = request.read().decode()
+        return httpx.Response(201, json={
+            "id": "magic_auth_01", "user_id": "user_01",
+            "email": "a@b.com", "code": "515627",
+        })
+
+    _real(handler).send_magic_auth_code("a@b.com")
+    assert seen["url"].endswith("/user_management/magic_auth")
+    assert '"email": "a@b.com"' in seen["body"].replace("\n", "")
+
+
+def test_the_returned_code_is_never_exposed():
+    # WorkOS returns the code in the create response, which means anyone
+    # holding the API key can sign in as anyone without reading email. That is
+    # inherent to the key, but the code must not travel any further than this
+    # method: `send_magic_auth_code` returns None on purpose.
+    resp = {"id": "m", "user_id": "u", "email": "a@b.com", "code": "515627"}
+    assert _real(lambda _r: httpx.Response(201, json=resp)).send_magic_auth_code(
+        "a@b.com"
+    ) is None
+
+
+def test_authenticate_with_code_returns_a_session():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.read().decode())
+        return httpx.Response(200, json={
+            "user": {"id": "user_01", "email": "a@b.com", "email_verified": True},
+            "access_token": "at", "refresh_token": "rt",
+            "authentication_method": "MagicAuth",
+        })
+
+    session = _real(handler).authenticate_with_code("a@b.com", "515627")
+    assert session == WorkOsSession(
+        workos_user_id="user_01", email="a@b.com",
+        access_token="at", refresh_token="rt",
+    )
+    # The grant type is a magic string; a typo in it returns a 400 that reads
+    # like a bad code, so pin it.
+    assert seen["body"]["grant_type"] == (
+        "urn:workos:oauth:grant-type:magic-auth:code"
+    )
+    assert seen["body"]["client_id"] == "client_123"
+    assert seen["body"]["client_secret"] == "sk_test_123"
+    assert seen["body"]["code"] == "515627"
+
+
+def test_a_wrong_code_raises_workos_error():
+    client = _real(lambda _r: httpx.Response(400, json={"code": "invalid_code"}))
+    with pytest.raises(WorkOsError):
+        client.authenticate_with_code("a@b.com", "000000")
+
+
+def test_refresh_session_uses_the_refresh_grant():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.read().decode())
+        return httpx.Response(200, json={
+            "user": {"id": "user_01", "email": "a@b.com", "email_verified": True},
+            "access_token": "at2", "refresh_token": "rt2",
+        })
+
+    session = _real(handler).refresh_session("rt")
+    assert session.access_token == "at2" and session.refresh_token == "rt2"
+    assert seen["body"]["grant_type"] == "refresh_token"
+    assert seen["body"]["refresh_token"] == "rt"
+
+
+def test_fake_round_trips_a_code():
+    fake = FakeWorkOsClient()
+    fake.send_magic_auth_code("a@b.com")
+    session = fake.authenticate_with_code("a@b.com", fake.last_code("a@b.com"))
+    assert session.email == "a@b.com"
+    assert session.workos_user_id == fake.find_user_by_email("a@b.com").workos_user_id
+
+
+def test_fake_rejects_a_wrong_code():
+    fake = FakeWorkOsClient()
+    fake.send_magic_auth_code("a@b.com")
+    with pytest.raises(WorkOsError):
+        fake.authenticate_with_code("a@b.com", "000000")
+
+
+def test_fake_creates_the_user_on_first_code_like_the_real_api_does():
+    fake = FakeWorkOsClient()
+    assert fake.find_user_by_email("new@b.com") is None
+    fake.send_magic_auth_code("new@b.com")
+    assert fake.find_user_by_email("new@b.com") is not None
