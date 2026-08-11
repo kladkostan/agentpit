@@ -4,13 +4,16 @@ from fastapi import Depends, Header, HTTPException, status
 
 from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
+from agentpit.auth.workos_client import WorkOsClient
 from agentpit.config import Settings
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
+from agentpit.domain.exceptions import FeatureDisabledError
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.services.account_service import AccountService
 from agentpit.services.agent_service import AgentService
 from agentpit.services.auth_service import AuthService
+from agentpit.services.authkit_service import AuthKitService
 from agentpit.services.balance_service import BalanceService
 from agentpit.services.event_service import EventService
 from agentpit.services.leaderboard_service import LeaderboardService
@@ -45,6 +48,10 @@ def get_google_verifier() -> GoogleTokenVerifier | None:
     raise RuntimeError("get_google_verifier has not been overridden by the app factory")
 
 
+def get_workos_client() -> WorkOsClient | None:
+    raise RuntimeError("get_workos_client has not been overridden by the app factory")
+
+
 def get_current_user() -> User:
     raise RuntimeError("get_current_user has not been overridden by the app factory")
 
@@ -58,6 +65,7 @@ OnchainAdminDep = Annotated[OnchainAdmin, Depends(get_onchain_admin)]
 GoogleVerifierDep = Annotated[
     GoogleTokenVerifier | None, Depends(get_google_verifier)
 ]
+WorkOsClientDep = Annotated[WorkOsClient | None, Depends(get_workos_client)]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 
@@ -161,3 +169,23 @@ AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 OrderServiceDep = Annotated[OrderService, Depends(get_order_service)]
 TradeServiceDep = Annotated[TradeService, Depends(get_trade_service)]
+
+
+# Below `AuthServiceDep` because it depends on it, and these annotations are
+# evaluated at def time.
+def get_authkit_service(
+    db: SessionDep, workos: WorkOsClientDep, auth: AuthServiceDep
+) -> AuthKitService:
+    if workos is None:
+        # No WORKOS_API_KEY: the same shape Google sign-in takes without a
+        # client id (auth_service.py:85). Raised here rather than in each of
+        # the three routes so none of them can forget it.
+        raise FeatureDisabledError("email code sign-in is not configured")
+    # `_onboard_new_account` is private to `AuthService` and reached anyway:
+    # `AuthKitService` takes it as an argument precisely so the two services do
+    # not import each other, and a second copy of that work here is the drift
+    # `_onboard_new_account`'s own docstring exists to prevent.
+    return AuthKitService(db=db, workos=workos, onboard=auth._onboard_new_account)
+
+
+AuthKitServiceDep = Annotated[AuthKitService, Depends(get_authkit_service)]

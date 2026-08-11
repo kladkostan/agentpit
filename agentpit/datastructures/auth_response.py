@@ -16,6 +16,10 @@ class UserPublic(BaseModel):
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    # Present only on the AuthKit paths. The legacy `/register` and `/login`
+    # issue a 24-hour JwtCoder token with nothing to refresh, so they leave
+    # this null rather than growing a second response model.
+    refresh_token: str | None = None
     user: UserPublic
 
 

@@ -1,0 +1,16 @@
+from pydantic import BaseModel, EmailStr, Field
+
+
+class SendCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class CodeSignInRequest(BaseModel):
+    email: EmailStr
+    # Six digits, as WorkOS issues them. Validated here so an obviously
+    # malformed code costs a 422 rather than a round-trip to WorkOS.
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)

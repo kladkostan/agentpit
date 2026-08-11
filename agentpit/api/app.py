@@ -14,6 +14,7 @@ from agentpit.api.deps import (
     get_jwt_coder,
     get_onchain_admin,
     get_settings,
+    get_workos_client,
 )
 from agentpit.api.exception_handlers import register_exception_handlers
 from agentpit.api.routes import (
@@ -36,6 +37,7 @@ from agentpit.api.routes import (
 from agentpit.auth.dependencies import make_current_user_dep
 from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
+from agentpit.auth.workos_client import build_workos_client
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
 from agentpit.db.table_write import TableWrite
@@ -429,6 +431,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # client id the button is absent and the endpoint 503s, which looks
         # exactly like a deploy that forgot the variable. It is one.
         log.info("Google sign-in disabled (set GOOGLE_CLIENT_ID to enable)")
+    # One client per app, like the verifier above: it owns an httpx.Client with
+    # its own connection pool, and a per-request instance would open a new TLS
+    # connection to api.workos.com for every code mailed.
+    workos_client = build_workos_client(settings)
+    if workos_client is None:
+        # Same reason as the Google line above: with no key the three /auth
+        # code routes 503, which is indistinguishable from a broken deploy
+        # unless startup says which it is.
+        log.info(
+            "Email code sign-in disabled (set WORKOS_API_KEY and "
+            "WORKOS_CLIENT_ID to enable)"
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -625,6 +639,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_jwt_coder] = lambda: coder
     app.dependency_overrides[get_onchain_admin] = lambda: onchain_admin
     app.dependency_overrides[get_google_verifier] = lambda: google_verifier
+    app.dependency_overrides[get_workos_client] = lambda: workos_client
     app.dependency_overrides[get_current_user] = current_user_fn
 
     app.add_middleware(
