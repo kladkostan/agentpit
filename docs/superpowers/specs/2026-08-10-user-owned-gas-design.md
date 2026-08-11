@@ -132,20 +132,48 @@ Copy: the button says **Claim**, and so does the toast when it succeeds — one
 name for one action, all the way through. Not "Redeem": that is the contract's
 word, not the user's.
 
-### Credits appear where they block you, not as a second balance
+### Two balances, each named as the currency it is
 
-The account already shows a **Balance** — paper USDC, the money it trades with.
-Putting a credits figure beside it invites exactly the confusion that generates
-support tickets: two balances, and no way to tell which one buys a position.
+The profile shows both, side by side, as the first two cells of the metric row:
 
-Credits get two homes instead:
+```
+┌──────────┬───────────┬───────────┬─────────────┬──────────────┐
+│  apUSD   │  Credits  │ Positions │ Biggest Win │ Predictions  │
+│ $100.0k  │   0.94    │  $75.9k   │   $6,641    │     239      │
+└──────────┴───────────┴───────────┴─────────────┴──────────────┘
+```
 
-- **Settings**, beside the address and the export button — the durable place
-  where facts about the wallet live.
-- **The unclaimed view, conditionally.** Claiming costs about $0.001 in credits.
-  Say nothing when the account can afford it. When it cannot, replace the
-  claim button's helper line with what is missing and how to fix it. An empty
-  wallet is a moment for direction, not a number.
+**The trading balance is labelled `apUSD`, never USDC.** That is not a
+preference — the deployed collateral contract answers `symbol() = "apUSD"`,
+`name() = "Agentpit USD"`, and the backend already calls it that throughout.
+Calling it USDC would be a claim about redeemability that is simply false: this
+token is minted by our own faucet. The first person to believe the label would
+arrive asking why it will not withdraw.
+
+`apUSD` and `Credits` are parallel — both name a currency rather than an
+abstraction, so the pair itself teaches the distinction: one is what you trade
+with, the other is what you pay to transact. `Balance / Credits` would not.
+
+Credits also appear in **Settings**, beside the address and the export button,
+where facts about the wallet live. And in the unclaimed view they appear
+**conditionally**: claiming costs about $0.001, so say nothing while the account
+can afford it, and when it cannot, replace the claim button's helper line with
+what is missing and how to fix it. An empty wallet is a moment for direction,
+not a number.
+
+### The profit chart gives its width to the numbers
+
+`ProfilePage.tsx:176` splits the header `lg:grid-cols-2` — the account card and
+the Profit/Loss chart take half the width each. That weighs one trend line
+equally against everything the account holds.
+
+Make it `lg:grid-cols-3`, the account card spanning two columns and the chart
+one. The chart keeps about 330px, which is ample for a sparkline whose job is
+context rather than analysis.
+
+This is also what makes the fifth metric cell fit. At half width the row is
+about 500px across four cells — 125px each. At two thirds it is about 672px
+across five — 134px each. The cells get *wider* while gaining one.
 
 ### The auto-redeem toggle goes in Settings
 
