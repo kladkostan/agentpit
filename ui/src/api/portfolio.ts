@@ -125,6 +125,13 @@ export function topUpButtonState(
   };
 }
 
+export function claimPositionRequest(conditionId: string): Promise<unknown> {
+  return apiFetch<unknown>("/positions/claim", {
+    method: "POST",
+    body: JSON.stringify({ condition_id: conditionId }),
+  });
+}
+
 export function useTopUp() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   AlertCircle,
   Check,
@@ -16,7 +18,9 @@ import {
   useTopUp,
   useTopUpStatus,
   topUpButtonState,
+  claimPositionRequest,
 } from "@/api/portfolio";
+import { ApiError } from "@/api/client";
 import {
   describeActivity,
   marketHref,
@@ -27,6 +31,7 @@ import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import { formatPnlPct, formatVolume, shortAddress } from "@/lib/format";
+import { positionBucket, unclaimedTotal } from "@/lib/positionBuckets";
 import {
   Card,
   CardContent,
@@ -40,7 +45,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@mui/material";
 
 type ProfileTab = "positions" | "activity";
-type PositionFilter = "active" | "closed";
+type PositionFilter = "active" | "unclaimed" | "closed";
 
 const USD = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -110,7 +115,10 @@ export function ProfilePage() {
   }, [closedData]);
 
   const filteredPositions = useMemo(() => {
-    const base = positionFilter === "closed" ? closedPositions : positions;
+    const base =
+      positionFilter === "closed"
+        ? closedPositions
+        : positions.filter((p) => positionBucket(p) === positionFilter);
     const q = search.trim().toLowerCase();
     if (!q) return base;
     return base.filter((p) => {
@@ -118,6 +126,10 @@ export function ProfilePage() {
       return hay.includes(q);
     });
   }, [positions, closedPositions, positionFilter, search]);
+
+  // What the account has won but not yet claimed, across all open positions
+  // (not just the ones the current filter/search happens to be showing).
+  const unclaimed = useMemo(() => unclaimedTotal(positions), [positions]);
 
   // Biggest realized profit across closed (resolved) positions.
   const biggestWin = useMemo(() => {
@@ -341,6 +353,8 @@ export function ProfilePage() {
               onPositionFilterChange={setPositionFilter}
               search={search}
               onSearchChange={setSearch}
+              unclaimed={unclaimed}
+              userAddress={user.eth_address}
             />
           ) : (
             <ActivityList entries={activityData ?? []} />
@@ -396,14 +410,19 @@ function PositionList({
   onPositionFilterChange,
   search,
   onSearchChange,
+  unclaimed,
+  userAddress,
 }: {
   positions: Position[];
   positionFilter: PositionFilter;
   onPositionFilterChange: (next: PositionFilter) => void;
   search: string;
   onSearchChange: (next: string) => void;
+  unclaimed: number;
+  userAddress: string;
 }) {
   const isClosed = positionFilter === "closed";
+  const isUnclaimed = positionFilter === "unclaimed";
 
   const filterBtn = (key: PositionFilter, label: string) => (
     <button
@@ -425,6 +444,9 @@ function PositionList({
       <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center">
         <div className="flex items-center gap-2">
           {filterBtn("active", "Active")}
+          {unclaimed > 0
+            ? filterBtn("unclaimed", `Unclaimed · ${USD.format(unclaimed)}`)
+            : null}
           {filterBtn("closed", "Closed")}
         </div>
         <div className="relative sm:ml-auto sm:w-[360px]">
@@ -510,12 +532,57 @@ function PositionList({
                     {formatPnlPct(position.percentPnl)}%)
                   </p>
                 </div>
+                {isUnclaimed ? (
+                  <ClaimButton
+                    conditionId={position.conditionId}
+                    userAddress={userAddress}
+                  />
+                ) : null}
               </div>
             );
           })}
         </div>
       )}
     </div>
+  );
+}
+
+/** Collects a won-but-unclaimed position. The row itself carries the
+ *  `conditionId` — never a market id — which is why `/positions/claim`
+ *  resolves it rather than taking one directly. */
+function ClaimButton({
+  conditionId,
+  userAddress,
+}: {
+  conditionId: string;
+  userAddress: string;
+}) {
+  const queryClient = useQueryClient();
+  const claim = useMutation({
+    mutationFn: () => claimPositionRequest(conditionId),
+    onSuccess: () => {
+      toast.success("Claimed.");
+      void queryClient.invalidateQueries({
+        queryKey: ["positions", userAddress],
+      });
+    },
+    onError: (err) => {
+      const message =
+        err instanceof ApiError ? err.message : "Failed to claim.";
+      toast.error(message);
+    },
+  });
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="shrink-0"
+      disabled={claim.isPending}
+      onClick={() => claim.mutate()}
+    >
+      {claim.isPending ? "Claiming…" : "Claim"}
+    </Button>
   );
 }
 
