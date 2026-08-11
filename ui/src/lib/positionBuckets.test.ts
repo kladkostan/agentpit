@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { positionBucket, unclaimedTotal } from "./positionBuckets";
+import {
+  effectivePositionFilter,
+  positionBucket,
+  unclaimedTotal,
+} from "./positionBuckets";
 
 describe("positionBucket", () => {
   it("puts a won-but-unclaimed position in its own bucket", () => {
@@ -28,5 +32,25 @@ describe("unclaimedTotal", () => {
 
   it("is zero for an empty list", () => {
     expect(unclaimedTotal([])).toBe(0);
+  });
+});
+
+describe("effectivePositionFilter", () => {
+  it("falls back to active when unclaimed is selected but there is nothing left to claim", () => {
+    expect(effectivePositionFilter("unclaimed", 0)).toBe("active");
+  });
+
+  it("stays on unclaimed while there is still something to claim", () => {
+    expect(effectivePositionFilter("unclaimed", 40.5)).toBe("unclaimed");
+  });
+
+  it("leaves active alone regardless of the unclaimed total", () => {
+    expect(effectivePositionFilter("active", 0)).toBe("active");
+    expect(effectivePositionFilter("active", 100)).toBe("active");
+  });
+
+  it("leaves closed alone regardless of the unclaimed total", () => {
+    expect(effectivePositionFilter("closed", 0)).toBe("closed");
+    expect(effectivePositionFilter("closed", 100)).toBe("closed");
   });
 });

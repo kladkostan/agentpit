@@ -31,7 +31,11 @@ import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
 import { formatPnlPct, formatVolume, shortAddress } from "@/lib/format";
-import { positionBucket, unclaimedTotal } from "@/lib/positionBuckets";
+import {
+  effectivePositionFilter,
+  positionBucket,
+  unclaimedTotal,
+} from "@/lib/positionBuckets";
 import {
   Card,
   CardContent,
@@ -114,22 +118,27 @@ export function ProfilePage() {
     return [...closedData].sort((a, b) => b.currentValue - a.currentValue);
   }, [closedData]);
 
+  // What the account has won but not yet claimed, across all open positions
+  // (not just the ones the current filter/search happens to be showing).
+  const unclaimed = useMemo(() => unclaimedTotal(positions), [positions]);
+
+  // Claiming the last unclaimed position can drop `unclaimed` to zero while
+  // `positionFilter` is still "unclaimed" — derived, not synced with an
+  // effect, so there's no extra render and no window where the two disagree.
+  const effectiveFilter = effectivePositionFilter(positionFilter, unclaimed);
+
   const filteredPositions = useMemo(() => {
     const base =
-      positionFilter === "closed"
+      effectiveFilter === "closed"
         ? closedPositions
-        : positions.filter((p) => positionBucket(p) === positionFilter);
+        : positions.filter((p) => positionBucket(p) === effectiveFilter);
     const q = search.trim().toLowerCase();
     if (!q) return base;
     return base.filter((p) => {
       const hay = `${p.title} ${p.outcome}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [positions, closedPositions, positionFilter, search]);
-
-  // What the account has won but not yet claimed, across all open positions
-  // (not just the ones the current filter/search happens to be showing).
-  const unclaimed = useMemo(() => unclaimedTotal(positions), [positions]);
+  }, [positions, closedPositions, effectiveFilter, search]);
 
   // Biggest realized profit across closed (resolved) positions.
   const biggestWin = useMemo(() => {
@@ -349,7 +358,7 @@ export function ProfilePage() {
           {tab === "positions" ? (
             <PositionList
               positions={filteredPositions}
-              positionFilter={positionFilter}
+              positionFilter={effectiveFilter}
               onPositionFilterChange={setPositionFilter}
               search={search}
               onSearchChange={setSearch}
