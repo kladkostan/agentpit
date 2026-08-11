@@ -1023,9 +1023,7 @@ def mirror_polymarket_resolutions(
     return resolved_count
 
 
-def auto_redeem_resolved_markets(
-    db, admin: OnchainAdmin, *, gas_topup_wei: int = 10**18
-) -> int:
+def auto_redeem_resolved_markets(db, admin: OnchainAdmin) -> int:
     """Redeem every holder of each RESOLVED, not-yet-fully-redeemed market.
 
     `db` is a DbSession (not a raw connection) because PositionService manages
@@ -1033,6 +1031,12 @@ def auto_redeem_resolved_markets(
     participant accounts (trades + split/merge, including the house bot),
     redeems any with a nonzero on-chain token balance using their custodial
     key, and flags the market FULLY_REDEEMED once no holder remains.
+
+    The holder pays their own gas for the redeem — the house no longer tops
+    anyone up here. A holder without enough native balance simply fails this
+    pass and is retried on the next one; that's correct, because the
+    winnings stay theirs on-chain either way, held by the resolved market
+    until they have gas to claim them.
 
     Returns the number of holder redemptions performed.
     """
@@ -1062,14 +1066,6 @@ def auto_redeem_resolved_markets(
             ):
                 continue
             try:
-                try:
-                    admin.fund_gas(user.eth_address, gas_topup_wei)
-                except Exception:
-                    logger.warning(
-                        "gas top-up failed for %s on market %s (continuing)",
-                        user.eth_address,
-                        market.market_id,
-                    )
                 svc.redeem(user, market.market_id)
                 redeemed += 1
             except Exception:

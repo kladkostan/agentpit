@@ -332,3 +332,28 @@ def test_the_cap_falls_back_to_lifetime_volume_when_24h_volume_is_missing():
     )
     # cap 2 covers the favourite plus the one busier by lifetime volume.
     assert [m["groupItemTitle"] for m in extra] == ["Busy"]
+
+
+# ----- the house stops paying other people's gas -----------------------------
+
+
+def test_the_redeem_loop_never_funds_gas():
+    """Claiming a win costs the holder 91,743 gas. On a chain where that is
+    money, it is theirs to spend — and we were sending a whole coin, 227x the
+    need, before every single claim."""
+    import inspect
+    from agentpit.polymarket import polymarket_sync
+
+    src = inspect.getsource(polymarket_sync.auto_redeem_resolved_markets)
+    assert "fund_gas" not in src
+    assert "gas_topup_wei" not in src
+
+
+def test_the_redeem_loop_takes_no_gas_argument():
+    import inspect
+    from agentpit.polymarket import polymarket_sync
+
+    params = inspect.signature(
+        polymarket_sync.auto_redeem_resolved_markets
+    ).parameters
+    assert "gas_topup_wei" not in params

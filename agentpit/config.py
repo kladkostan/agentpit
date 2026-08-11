@@ -171,8 +171,15 @@ class Settings(BaseSettings):
     )
     operator_private_key: str | None = Field(default=None, validation_alias="PK")
     rpc_url_override: str | None = Field(default=None, validation_alias="RPC_URL")
+    # Gas for the three transactions a new account must send before it can
+    # trade: approve(exchange), approve(ctf), setApprovalForAll(exchange).
+    # Measured at 138,946 gas across all 16 accounts on the production chain.
+    # At SKALE Base's 47.6 gwei that is 0.0066 native; this is 3x that, which
+    # also covers a few later claims at 91,743 gas each. The previous default
+    # was 10**18 — 21,000,000 gas, 150x the need — which cost $0.25 a signup
+    # on a chain where the native coin is bought with USDC.
     signup_gas_grant_wei: int = Field(
-        default=10**18, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
+        default=2 * 10**16, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
     )
     # True while the chain can be wiped out from under the database (a local
     # anvil): a zero native balance then means "the chain forgot this account"
