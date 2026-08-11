@@ -12,7 +12,7 @@ export function TopNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const showSearch = pathname === "/markets" || pathname.startsWith("/events/");
+  const showSearch = pathname.startsWith("/events/");
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
     : undefined;

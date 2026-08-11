@@ -22,6 +22,7 @@ import {
   Sparkles,
   Tag,
   Trophy,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -689,7 +690,21 @@ export function MarketsPage() {
         <div className="space-y-8">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex min-w-[220px] flex-1 items-center gap-3">
+                <label className="group flex w-full max-w-md items-center gap-2.5 rounded-lg bg-muted px-3 py-2 text-muted-foreground transition-colors focus-within:bg-background focus-within:text-foreground focus-within:ring-1 focus-within:ring-border">
+                  <Search className="size-4 text-muted-foreground/70" aria-hidden />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search markets"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                    aria-label="Search markets"
+                  />
+                </label>
+              </div>
+
+              <div className="ml-auto flex flex-wrap items-center gap-3">
                 <div className="relative" ref={sortMenuRef}>
                   <Button
                     type="button"
@@ -734,15 +749,14 @@ export function MarketsPage() {
                   ) : null}
                 </div>
 
+                <span className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <span
+                    aria-hidden
+                    className="size-1.5 animate-pulse-dot rounded-full bg-emerald-500"
+                  />
+                  {activeCount === null ? "—" : activeCount.toLocaleString()} live
+                </span>
               </div>
-
-              <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                <span
-                  aria-hidden
-                  className="size-1.5 animate-pulse-dot rounded-full bg-emerald-500"
-                />
-                {activeCount === null ? "—" : activeCount.toLocaleString()} live
-              </span>
             </div>
           </div>
 

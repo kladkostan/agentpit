@@ -251,6 +251,7 @@ export function EventDetailPage() {
               tokens={selectedMarket.erc1155_tokens}
               outcome={selectedOutcome ?? selectedMarket.erc1155_tokens[0]![1]}
               question={selectedMarket.question}
+              iconUrl={event.icon_url}
               endDate={selectedMarket.end_date}
               isTradingDisabled={NON_TRADEABLE.has(selectedMarket.market_state)}
               {...(disabledReason !== undefined ? { disabledReason } : {})}
