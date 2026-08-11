@@ -183,6 +183,36 @@ export function formatPnlPct(pct: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+const WEI_PER_NATIVE = 1_000_000_000_000_000_000n;
+
+/** "1.23" — a wei string (from `/me/credits`) as a native-coin figure with
+ *  two decimals.
+ *
+ *  BigInt arithmetic throughout, never `Number`: the whole point of sending
+ *  wei as a string is that it can exceed Number's safe integer range, and
+ *  routing it through a float on the way to two decimals would silently
+ *  reintroduce the precision loss the string was chosen to avoid. Rounds
+ *  half up at the second decimal rather than truncating. */
+export function formatCredits(weiString: string): string {
+  // `BigInt("")` returns 0n rather than throwing, so an empty string needs
+  // its own guard before the try/catch below can catch everything else.
+  if (weiString.trim() === "") return "—";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiString);
+  } catch {
+    return "—";
+  }
+  const negative = wei < 0n;
+  if (negative) wei = -wei;
+  const centiUnits =
+    (wei * 100n + WEI_PER_NATIVE / 2n) / WEI_PER_NATIVE;
+  const whole = centiUnits / 100n;
+  const cents = centiUnits % 100n;
+  const body = `${whole}.${cents.toString().padStart(2, "0")}`;
+  return negative ? `-${body}` : body;
+}
+
 /** "0x933B…5215" — an address short enough to sit on one line without
  *  wrapping, keeping both ends so it stays recognisable at a glance. The full
  *  value is never far: every place this renders offers a way to copy it.

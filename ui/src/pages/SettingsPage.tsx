@@ -9,6 +9,7 @@ import {
   updateHandleRequest,
 } from "@/api/auth";
 import { ApiError } from "@/api/client";
+import { useCredits } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { GOOGLE_CLIENT_ID } from "@/lib/googleAuth";
 import { exportErrorMessage } from "@/lib/exportKeyError";
+import { formatCredits } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function SettingsPage() {
@@ -55,6 +57,7 @@ export function SettingsPage() {
                 <p className="mt-1 text-xs text-muted-foreground">
                   Import it into MetaMask to fund this wallet.
                 </p>
+                <CreditsLine />
               </div>
               <ExportKeyButton user={user} />
             </div>
@@ -65,6 +68,18 @@ export function SettingsPage() {
         </Card>
       </div>
     </section>
+  );
+}
+
+/** What pays for a claim, in the same muted style as the MetaMask hint
+ *  above it — the address row is the wallet, and this is what's in it to
+ *  spend on gas. */
+function CreditsLine() {
+  const { data: credits } = useCredits();
+  return (
+    <p className="mt-1 text-xs text-muted-foreground">
+      {credits != null ? `${formatCredits(credits)} credits` : "— credits"}
+    </p>
   );
 }
 

@@ -9,6 +9,7 @@ from agentpit.api.deps import (
     AuthServiceDep,
     BalanceServiceDep,
     CurrentUserDep,
+    OnchainAdminDep,
     SessionDep,
 )
 from agentpit.datastructures.auth_response import UserPublic
@@ -37,6 +38,10 @@ class TopUpWire(BaseModel):
     balance: str
     minted: str
     nextAllowedAt: int
+
+
+class CreditsWire(BaseModel):
+    credits_wei: str
 
 
 @router.get("/me", response_model=UserPublic)
@@ -140,3 +145,13 @@ def top_up_balance(user: CurrentUserDep, service: BalanceServiceDep) -> TopUpWir
         minted=str(result.minted_raw),
         nextAllowedAt=result.next_allowed_at,
     )
+
+
+@router.get("/me/credits", response_model=CreditsWire)
+def get_me_credits(user: CurrentUserDep, admin: OnchainAdminDep) -> CreditsWire:
+    """The wallet's native balance -- what pays for a transaction.
+
+    A string because wei overflows JavaScript's safe integer range, and the
+    front end formats it rather than doing arithmetic on it.
+    """
+    return CreditsWire(credits_wei=str(admin.native_balance(user.eth_address)))

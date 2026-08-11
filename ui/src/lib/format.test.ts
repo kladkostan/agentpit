@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   closeLabel,
   displayTagLabel,
+  formatCredits,
   formatPnlPct,
   formatShortDate,
   shortAddress,
@@ -152,6 +153,39 @@ describe("formatPnlPct", () => {
     // cashPnl / 0 cost is Infinity; the row must still render.
     expect(formatPnlPct(Number.POSITIVE_INFINITY)).toBe("0");
     expect(formatPnlPct(Number.NaN)).toBe("0");
+  });
+});
+
+describe("formatCredits", () => {
+  it("renders a whole native-coin amount with two decimals", () => {
+    expect(formatCredits("1000000000000000000")).toBe("1.00");
+  });
+
+  it("renders zero", () => {
+    expect(formatCredits("0")).toBe("0.00");
+  });
+
+  it("keeps two decimals for a fractional amount", () => {
+    expect(formatCredits("1500000000000000000")).toBe("1.50");
+  });
+
+  it("rounds half up at the second decimal", () => {
+    // 0.005 native rounds to 0.01, not down to 0.00.
+    expect(formatCredits("5000000000000000")).toBe("0.01");
+  });
+
+  it("truncates rather than rounds up when just under the half cent", () => {
+    expect(formatCredits("4999999999999999")).toBe("0.00");
+  });
+
+  it("does not lose precision on a value beyond Number's safe integer range", () => {
+    // 12345.6789 native units, expressed in wei -- well past 2^53.
+    expect(formatCredits("12345678900000000000000")).toBe("12345.68");
+  });
+
+  it("returns an em dash for input that isn't a valid integer string", () => {
+    expect(formatCredits("not-a-number")).toBe("—");
+    expect(formatCredits("")).toBe("—");
   });
 });
 

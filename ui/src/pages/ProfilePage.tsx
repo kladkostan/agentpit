@@ -15,6 +15,7 @@ import {
   usePositions,
   useClosedPositions,
   useUsdcBalance,
+  useCredits,
   useTopUp,
   useTopUpStatus,
   topUpButtonState,
@@ -30,7 +31,12 @@ import {
 import { useAuth } from "@/auth/useAuth";
 import { Sparkline } from "@/components/Sparkline";
 import { getAvatarStyle } from "@/lib/avatarColor";
-import { formatPnlPct, formatVolume, shortAddress } from "@/lib/format";
+import {
+  formatCredits,
+  formatPnlPct,
+  formatVolume,
+  shortAddress,
+} from "@/lib/format";
 import {
   effectivePositionFilter,
   positionBucket,
@@ -97,6 +103,7 @@ export function ProfilePage() {
   const { data: closedData } = useClosedPositions(user?.eth_address);
   const { data: activityData } = useActivity(user?.eth_address);
   const { data: balance } = useUsdcBalance(Boolean(user));
+  const { data: credits } = useCredits(Boolean(user));
   const { data: topUpStatus } = useTopUpStatus(Boolean(user));
   const topUp = useTopUp();
   const avatarStyle = getAvatarStyle(user?.eth_address || user?.email);
@@ -194,8 +201,8 @@ export function ProfilePage() {
   return (
     <section className="mx-auto max-w-5xl space-y-6">
       <h1 className="text-3xl font-semibold tracking-tight">Profile</h1>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card className="h-full rounded-2xl border-border/80">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Card className="h-full rounded-2xl border-border/80 lg:col-span-2">
           <CardContent className="flex h-full flex-col justify-between p-6">
             <div className="flex min-w-0 items-center gap-3">
               <div
@@ -220,11 +227,15 @@ export function ProfilePage() {
                 </p>
               </div>
             </div>
-            <div className="mt-6 grid grid-cols-2 divide-x divide-y rounded-lg border bg-muted/20 sm:grid-cols-4 sm:divide-y-0">
+            <div className="mt-6 grid grid-cols-2 divide-x divide-y rounded-lg border bg-muted/20 sm:grid-cols-5 sm:divide-y-0">
               <TopMetric
-                label="Balance"
+                label="apUSD"
                 value={balance != null ? formatVolume(balance) : "—"}
                 tooltip={balance != null ? USD.format(balance) : undefined}
+              />
+              <TopMetric
+                label="Credits"
+                value={credits != null ? formatCredits(credits) : "—"}
               />
               <TopMetric
                 label="Positions"
@@ -574,6 +585,13 @@ function ClaimButton({
       void queryClient.invalidateQueries({
         queryKey: ["positions", userAddress],
       });
+      // Claiming pays out apUSD and spends native gas -- both balances at the
+      // top of the page change. Without this they sit stale until whatever
+      // next natural refetch happens to invalidate them.
+      void queryClient.invalidateQueries({
+        queryKey: ["balance-allowance", "COLLATERAL"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["credits"] });
     },
     onError: (err) => {
       const message =
