@@ -34,6 +34,7 @@ from agentpit.api.routes import (
     usdc,
     users,
 )
+from agentpit.auth.authkit_tokens import AuthKitVerifier, remote_jwks_resolver
 from agentpit.auth.dependencies import make_current_user_dep
 from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
@@ -418,7 +419,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     coder = JwtCoder(settings)
     onchain_admin = _build_onchain_admin(settings)
-    current_user_fn = make_current_user_dep(coder)
+    # One verifier per app, for the same reason as the Google one below: the
+    # resolver wraps a PyJWKClient that caches the JWKS, and a per-request
+    # instance would re-fetch it from api.workos.com on every request. Building
+    # it opens no connection -- the fetch is lazy, on the first token seen.
+    authkit_verifier = (
+        AuthKitVerifier(
+            client_id=settings.workos_client_id,
+            key_resolver=remote_jwks_resolver(settings.workos_client_id),
+        )
+        if settings.workos_client_id
+        else None
+    )
+    current_user_fn = make_current_user_dep(coder, authkit_verifier)
     # One verifier per app: it caches Google's signing keys, and a per-request
     # instance would re-fetch them on every sign-in.
     google_verifier = (
