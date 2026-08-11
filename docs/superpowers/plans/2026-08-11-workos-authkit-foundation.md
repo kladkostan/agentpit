@@ -6,7 +6,9 @@
 
 **Architecture:** A WorkOS client behind a Protocol so no test reaches the network; AuthKit access tokens verified against the published JWKS and accepted *alongside* the existing `JwtCoder` tokens; a `WORKOS_USER_ID` column linking our row to theirs; a one-shot idempotent script that imports the existing users with their bcrypt hashes intact.
 
-**Tech Stack:** Python 3.13, FastAPI, psycopg3/Postgres, PyJWT (already a dependency, and its `PyJWKClient` does the JWKS fetching), the `workos` Python SDK.
+**Tech Stack:** Python 3.13, FastAPI, psycopg3/Postgres, PyJWT (already a dependency, and its `PyJWKClient` does the JWKS fetching), `httpx` (already a dependency; the WorkOS REST API is called directly rather than through their SDK — see Task 1 Step 1 for why).
+
+**Adds no dependency.** Every version of the `workos` SDK requires `httpx~=0.28` against this repo's `httpx[http2]==0.27.0`, the client underneath the order-book mirror; the current release also wants `cryptography~=50.0` against our `>=42,<47`, which sits under transaction signing. Six REST calls do not justify moving either pin.
 
 **Scope:** This is plan 1 of 2, covering steps 1–3 of `docs/superpowers/specs/2026-08-11-workos-authkit-design.md`. Everything here is additive: after it ships, both token kinds authenticate and every sign-in flow is byte-identical to today. Plan 2 moves registration, sign-in, verification and Google onto AuthKit and then removes the old scheme.
 
@@ -25,38 +27,42 @@
 ### Task 1: The WorkOS client, behind a Protocol
 
 **Files:**
-- Modify: `requirements.txt`
 - Modify: `agentpit/config.py`
 - Create: `agentpit/auth/workos_client.py`
 - Create: `tests/auth/test_workos_client.py`
 
 **Interfaces:**
 - Consumes: `Settings` from `agentpit/config.py`.
-- Produces: `WorkOsClient` (Protocol), `RealWorkOsClient`, `FakeWorkOsClient`, `WorkOsUser`, and `build_workos_client(settings) -> WorkOsClient | None`. Later tasks and plan 2 depend on these exact names.
+- Produces: `WorkOsClient` (Protocol), `RealWorkOsClient`, `FakeWorkOsClient`, `WorkOsUser`, `WorkOsError`, and `build_workos_client(settings, *, transport=None) -> WorkOsClient | None`. Later tasks and plan 2 depend on these exact names.
 
-- [ ] **Step 1: Install the SDK and pin what you actually got**
+- [ ] **Step 1: Add no dependency at all — understand why before writing code**
+
+**Do not install the `workos` SDK.** `requirements.txt` is not modified by this task.
+
+Every published version of that SDK (checked on PyPI: 6.2.0 through 10.1.1, the current release) declares `httpx~=0.28`, while this repo pins `httpx[http2]==0.27.0`. There is no version of the SDK compatible with our pin. Taking it would mean bumping `httpx` under `agentpit/liquidity/feed.py` and the Polymarket sync — the most load-bearing HTTP in the product, the code that keeps the order-book mirror alive. The current release additionally wants `cryptography~=50.0` against our `>=42,<47`, and that library sits under eth-account's transaction signing.
+
+WorkOS is a plain JSON REST API and we need six endpoints across both plans. `httpx` is already here. So `RealWorkOsClient` calls the API directly, and the Protocol boundary — which exists precisely so the implementation is swappable — means adopting the SDK later is one class, not a migration.
+
+Confirm the two pins are untouched before you start, so a later `pip install` of something else cannot be blamed on this task:
 
 ```bash
 cd /Users/yavorsky/dev/agentpit
-.venv/bin/pip install workos
-.venv/bin/pip show workos | head -2
+.venv/bin/pip show httpx cryptography | grep -E "^Name|^Version"
 ```
 
-The code below targets the v6 client API (`WorkOSClient`, `client.user_management`, `PasswordHashed`). If `pip show` reports a major version other than 6, **stop and report it** rather than adapting the code — the method surface changed at v6 and guessing would produce code that imports cleanly and fails at runtime.
-
-Append the exact version you installed to `requirements.txt`, beside the other auth dependencies:
-
-```
-workos==<the version pip reported>
-```
+Expected: httpx 0.27.0, cryptography 46.0.7. If they differ, stop and report — the environment has drifted from what this plan was written against.
 
 - [ ] **Step 2: Write the failing test**
 
 Create `tests/auth/test_workos_client.py`:
 
 ```python
+import httpx
+import pytest
+
 from agentpit.auth.workos_client import (
     FakeWorkOsClient,
+    WorkOsError,
     WorkOsUser,
     build_workos_client,
 )
@@ -100,6 +106,129 @@ def test_fake_create_is_idempotent_on_email():
     first = fake.create_user(email="a@b.com", password_hash=None)
     second = fake.create_user(email="a@b.com", password_hash=None)
     assert first.workos_user_id == second.workos_user_id
+
+
+# --- the REAL client, driven over a stub transport -----------------------
+#
+# These matter more than the fake's tests. A double can only prove the
+# contract; only these prove the code that will actually talk to WorkOS --
+# its URLs, its auth header, its request body and its parsing. httpx's
+# MockTransport runs the real client end to end without a socket.
+
+
+def _real(handler):
+    return build_workos_client(
+        _settings(), transport=httpx.MockTransport(handler)
+    )
+
+
+def test_real_client_creates_a_user_with_the_bcrypt_hash():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["method"] = request.method
+        seen["auth"] = request.headers.get("authorization")
+        seen["body"] = request.read()
+        return httpx.Response(
+            201,
+            json={"id": "user_01", "email": "a@b.com", "email_verified": True},
+        )
+
+    client = _real(handler)
+    user = client.create_user(email="a@b.com", password_hash="$2b$12$abc")
+
+    assert user == WorkOsUser(
+        workos_user_id="user_01", email="a@b.com", email_verified=True
+    )
+    assert seen["method"] == "POST"
+    assert seen["url"].endswith("/user_management/users")
+    assert seen["auth"] == "Bearer sk_test_123"
+    body = seen["body"].decode()
+    # The hash travels as an imported foreign hash, which is the entire point:
+    # get this pair wrong and every migrated account is locked out of its own
+    # password with no error anywhere.
+    assert '"password_hash": "$2b$12$abc"' in body.replace("\n", "")
+    assert '"password_hash_type": "bcrypt"' in body.replace("\n", "")
+
+
+def test_real_client_omits_the_password_fields_when_there_is_no_hash():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        return httpx.Response(
+            201, json={"id": "user_02", "email": "g@b.com", "email_verified": True}
+        )
+
+    _real(handler).create_user(email="g@b.com", password_hash=None)
+
+    # A Google-sourced account has no password. Sending `password_hash: null`
+    # is not the same request as omitting it, and the API is entitled to
+    # reject it.
+    assert "password_hash" not in seen["body"]
+
+
+def test_real_client_finds_an_existing_user_by_email():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert "email=a%40b.com" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "user_03", "email": "a@b.com", "email_verified": True}
+                ]
+            },
+        )
+
+    found = _real(handler).find_user_by_email("a@b.com")
+    assert found is not None and found.workos_user_id == "user_03"
+
+
+def test_real_client_returns_none_for_an_unknown_email():
+    found = _real(lambda _r: httpx.Response(200, json={"data": []})).find_user_by_email(
+        "nobody@b.com"
+    )
+    assert found is None
+
+
+def test_real_client_create_is_idempotent_on_email():
+    # Same contract the fake promises, proven against the real code path: the
+    # migration script re-runs, and a second call must not mint a second
+    # identity for one person.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "user_04", "email": "a@b.com", "email_verified": True}
+                    ]
+                },
+            )
+        raise AssertionError("must not POST when the user already exists")
+
+    user = _real(handler).create_user(email="a@b.com", password_hash="$2b$12$x")
+    assert user.workos_user_id == "user_04"
+
+
+def test_an_api_error_becomes_a_workos_error():
+    # The migration script catches per account and continues; it can only do
+    # that if failures arrive as one predictable type rather than as whatever
+    # httpx felt like raising.
+    client = _real(lambda _r: httpx.Response(422, json={"message": "bad"}))
+    with pytest.raises(WorkOsError):
+        client.create_user(email="a@b.com", password_hash=None)
+
+
+def test_the_api_key_never_appears_in_the_error():
+    # A traceback from this client can reach logs. The bearer token must not
+    # ride along in it.
+    client = _real(lambda _r: httpx.Response(500, text="boom"))
+    with pytest.raises(WorkOsError) as exc:
+        client.find_user_by_email("a@b.com")
+    assert "sk_test_123" not in str(exc.value)
 ```
 
 - [ ] **Step 3: Run it and watch it fail**
@@ -145,6 +274,8 @@ what the migration script needs.
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+
 from agentpit.config import Settings
 
 
@@ -173,45 +304,89 @@ class WorkOsClient(Protocol):
         ...
 
 
-class RealWorkOsClient:
-    def __init__(self, api_key: str, client_id: str):
-        from workos import WorkOSClient
+class WorkOsError(RuntimeError):
+    """Anything the WorkOS API refused or failed to answer.
 
-        self._client = WorkOSClient(api_key=api_key, client_id=client_id)
+    One type for every failure, deliberately: the migration script catches per
+    account and carries on, and it can only do that if it knows what to catch.
+    The message never carries the request — the bearer token lives in the
+    headers and a traceback from here can reach a log.
+    """
+
+
+API_BASE = "https://api.workos.com"
+
+
+class RealWorkOsClient:
+    """The WorkOS REST API over the httpx we already have.
+
+    Not the `workos` SDK, and the reason is a pin: every published version of
+    it requires `httpx~=0.28` while this repo runs `httpx[http2]==0.27.0`, the
+    client underneath the order-book mirror and the Polymarket sync. The
+    current release also wants `cryptography~=50.0` against our `<47`, which
+    sits under eth-account's signing. Six REST calls are not worth moving
+    either. If the SDK ever becomes worth it, it replaces this class and
+    nothing else — that is what the Protocol is for.
+    """
+
+    def __init__(self, api_key: str, client_id: str, *, transport=None):
+        self._client_id = client_id
+        self._http = httpx.Client(
+            base_url=API_BASE,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15.0,
+            transport=transport,
+        )
+
+    def _request(self, method: str, path: str, **kwargs) -> dict:
+        try:
+            response = self._http.request(method, path, **kwargs)
+        except httpx.HTTPError as exc:
+            # Bare `exc` would be fine, but chaining keeps the cause visible in
+            # a traceback while the message stays ours.
+            raise WorkOsError(f"WorkOS request failed: {method} {path}") from exc
+        if response.status_code >= 400:
+            # The body may name the field WorkOS objected to, which is what
+            # makes a failed migration diagnosable. The request is not
+            # included: it carries the hash, and the headers carry the key.
+            raise WorkOsError(
+                f"WorkOS {method} {path} returned {response.status_code}: "
+                f"{response.text[:500]}"
+            )
+        return response.json()
+
+    @staticmethod
+    def _to_user(payload: dict) -> WorkOsUser:
+        return WorkOsUser(
+            workos_user_id=payload["id"],
+            email=payload["email"],
+            email_verified=bool(payload.get("email_verified")),
+        )
 
     def create_user(self, *, email: str, password_hash: str | None) -> WorkOsUser:
-        from workos.types.user_management import PasswordHashed
-
         existing = self.find_user_by_email(email)
         if existing is not None:
             # Idempotent by construction: the migration script is re-runnable
             # and a second call for the same address must not mint a second
             # identity for one person.
             return existing
-        password = (
-            PasswordHashed(password_hash=password_hash, password_hash_type="bcrypt")
-            if password_hash
-            else None
-        )
-        created = self._client.user_management.create_user(
-            email=email,
-            email_verified=True,
-            password=password,
-        )
-        return WorkOsUser(
-            workos_user_id=created.id,
-            email=created.email,
-            email_verified=bool(created.email_verified),
+        body: dict[str, object] = {"email": email, "email_verified": True}
+        if password_hash:
+            # Omitted entirely rather than sent as null when absent: a
+            # Google-sourced account never had a password, and `null` is a
+            # different request from silence.
+            body["password_hash"] = password_hash
+            body["password_hash_type"] = "bcrypt"
+        return self._to_user(
+            self._request("POST", "/user_management/users", json=body)
         )
 
     def find_user_by_email(self, email: str) -> WorkOsUser | None:
-        page = self._client.user_management.list_users(email=email, limit=1)
-        for user in page.data:
-            return WorkOsUser(
-                workos_user_id=user.id,
-                email=user.email,
-                email_verified=bool(user.email_verified),
-            )
+        page = self._request(
+            "GET", "/user_management/users", params={"email": email, "limit": 1}
+        )
+        for user in page.get("data") or []:
+            return self._to_user(user)
         return None
 
 
@@ -239,16 +414,25 @@ class FakeWorkOsClient:
         return self._by_email.get(email.lower())
 
 
-def build_workos_client(settings: Settings) -> WorkOsClient | None:
+def build_workos_client(
+    settings: Settings, *, transport=None
+) -> WorkOsClient | None:
     """The configured client, or None when WorkOS is not set up.
 
     None is a first-class answer, not a failure: an environment without
     WORKOS_API_KEY is every developer machine until the account exists, and
     startup must not depend on it.
+
+    `transport` exists so tests can drive the REAL client over
+    `httpx.MockTransport`. Without it the only code ever exercised offline is
+    the double, and the double cannot be wrong about a URL, a header or a
+    request body — the three things that are actually easy to get wrong here.
     """
     if not settings.workos_api_key or not settings.workos_client_id:
         return None
-    return RealWorkOsClient(settings.workos_api_key, settings.workos_client_id)
+    return RealWorkOsClient(
+        settings.workos_api_key, settings.workos_client_id, transport=transport
+    )
 ```
 
 - [ ] **Step 6: Create the test package marker if it is missing**
@@ -263,7 +447,7 @@ ls tests/auth/__init__.py 2>/dev/null || (mkdir -p tests/auth && touch tests/aut
 .venv/bin/python -m pytest tests/auth/test_workos_client.py -q
 ```
 
-Expected: 4 passed.
+Expected: 11 passed.
 
 - [ ] **Step 8: Run the whole suite**
 
@@ -276,9 +460,11 @@ Expected: green. Report the exact summary line.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add requirements.txt agentpit/config.py agentpit/auth/workos_client.py tests/auth/
-git commit -m "feat(auth): the WorkOS surface agentpit uses, behind a protocol"
+git add agentpit/config.py agentpit/auth/workos_client.py tests/auth/
+git commit -m "feat(auth): the WorkOS surface agentpit uses, over the httpx we have"
 ```
+
+`requirements.txt` is deliberately absent from that `git add` — this task adds no dependency. If `git status` shows it modified, something installed a package: revert it and report.
 
 ---
 
