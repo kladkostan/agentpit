@@ -215,7 +215,7 @@ class TableRead:
 
     _USER_COLS = (
         "USER_ID, EMAIL, HANDLE, ETH_ADDRESS, ETH_PRIVATE_KEY, "
-        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT, "
+        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT, WORKOS_USER_ID, "
         "(PASSWORD_HASH IS NOT NULL) AS HAS_PASSWORD, "
         "(AUTO_REDEEM_ENABLED) AS AUTO_REDEEM"
     )
@@ -236,6 +236,7 @@ class TableRead:
             is_bot=bool(row["IS_BOT"]),
             has_password=bool(row["HAS_PASSWORD"]),
             auto_redeem=bool(row["AUTO_REDEEM"]),
+            workos_user_id=row["WORKOS_USER_ID"],
         )
 
     @staticmethod
@@ -280,6 +281,22 @@ class TableRead:
         row = db.execute(
             f"SELECT {TableRead._USER_COLS} FROM users WHERE GOOGLE_SUB = %s LIMIT 1",
             (google_sub,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
+    def get_user_by_workos_id(
+        db: psycopg.Connection, workos_user_id: str
+    ) -> "User | None":
+        """The account this WorkOS identity belongs to, matched exactly.
+
+        Deliberately not case-insensitive, unlike `get_user_by_email_ci`: an
+        address is something a person types and gets wrong, while this is an
+        opaque id we stored ourselves.
+        """
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE WORKOS_USER_ID = %s",
+            (workos_user_id,),
         ).fetchone()
         return TableRead._row_to_user(row) if row else None
 

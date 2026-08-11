@@ -28,6 +28,11 @@ class User(BaseModel):
     # to pass it. AUTO_REDEEM_ENABLED defaults FALSE at the column, so every
     # existing account opts out until it says otherwise.
     auto_redeem: bool
+    # The WorkOS AuthKit identity for this account, once it has one. Defaulted,
+    # unlike the two above, because a missing value fails CLOSED here -- an
+    # account with no WorkOS id simply cannot be found by WorkOS id, which is
+    # exactly what an unmigrated row should do.
+    workos_user_id: str | None = None
 
     def model_post_init(self, __context):
         if self.handle is not None:

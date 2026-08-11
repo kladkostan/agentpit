@@ -155,6 +155,17 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
+    def set_workos_user_id(
+        db: psycopg.Connection, user_id: str, workos_user_id: str
+    ) -> bool:
+        """Link this account to its WorkOS identity. False when no row matched."""
+        cur = db.execute(
+            "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",
+            (workos_user_id, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def set_last_topup_at(db: psycopg.Connection, user_id: str, at: int | None) -> None:
         """Unconditional write. Used to release a claim after a failed mint —
         `at` may be the prior (possibly None) value being restored."""

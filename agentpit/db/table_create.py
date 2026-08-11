@@ -156,7 +156,8 @@ class TableCreate:
                 ONBOARDED_AT    BIGINT,
                 CREATED_AT      BIGINT NOT NULL,
                 IS_BOT          INTEGER NOT NULL DEFAULT 0,
-                GOOGLE_SUB      TEXT
+                GOOGLE_SUB      TEXT,
+                WORKOS_USER_ID  TEXT
             )
             """
         )
@@ -185,6 +186,7 @@ class TableCreate:
             ("KEY_EXPORTED_AT", "BIGINT"),
             ("KEY_EXPORT_ATTEMPT_AT", "BIGINT"),
             ("AUTO_REDEEM_ENABLED", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("WORKOS_USER_ID", "TEXT"),
         ]
         for col, col_type in additions:
             conn.execute(
@@ -200,6 +202,14 @@ class TableCreate:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub "
             "ON users(GOOGLE_SUB)"
+        )
+        # The WorkOS `user_...` id, the same way: one of theirs is one of ours.
+        # No partial index is needed -- Postgres treats NULLs as distinct in a
+        # unique index, so every not-yet-migrated row coexists happily while no
+        # two rows can ever share one WorkOS identity.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_workos_user_id "
+            "ON users(WORKOS_USER_ID)"
         )
 
     @staticmethod
