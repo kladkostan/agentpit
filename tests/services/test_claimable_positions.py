@@ -15,13 +15,12 @@ import uuid
 import pytest
 
 from agentpit.auth.passwords import hash_password
-from agentpit.config import Settings
 from agentpit.datastructures.condition_id import ConditionId
 from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
-from agentpit.db.session import DbSession
 from agentpit.db.table_write import TableWrite
 from agentpit.services.account_service import AccountService
+from tests.db_helpers import fresh_test_db
 
 
 def _hex32(seed: str) -> str:
@@ -65,7 +64,7 @@ def _make_position(email: str, seed: str, *, resolved_outcome: int | None, held_
 
     Returns the single `PositionWire` `list_positions` produces for it.
     """
-    db = DbSession(Settings().database_url)
+    db = fresh_test_db()
     # `list_positions` does `int(token_id)`, so these must parse as ints --
     # unlike the string ids `test_closed_positions.py` uses, which never hits
     # that path.
@@ -140,3 +139,5 @@ def test_an_open_position_keeps_its_market_price(open_position):
 def test_the_losing_side_of_a_resolved_market_is_not_claimable(losing_position):
     """Holding the outcome that lost is worth nothing and claims nothing."""
     assert losing_position.redeemable is False
+    assert losing_position.curPrice == 0.0
+    assert losing_position.currentValue == 0.0
