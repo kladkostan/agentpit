@@ -40,6 +40,21 @@ class Settings(BaseSettings):
     sync_event_max_outcomes: int = Field(
         default=12, validation_alias="SYNC_EVENT_MAX_OUTCOMES"
     )
+    # Drop the two upstream series that regenerate faster than anyone reads
+    # them: the daily temperature markets (49 cities x ~3.4 thresholds = ~166
+    # born every day, median life 55.9h -- 11% of the standing catalogue but 23%
+    # of every market ever created and resolved) and the sports prop tail
+    # (spreads, totals, team totals, per-half, per-map, nrfi -- all hung off a
+    # game we already carry). Together they are 89% of new market creations, and
+    # each creation costs prepareCondition + registerToken + a first
+    # splitPosition on chain with a reportPayouts at the end: ~870M gas/day,
+    # real money once the chain moves to SKALE on Base. Decided by upstream
+    # fields only (feeType / sportsMarketType), never by parsing slugs --
+    # see `_is_churn_series`. True is the decision already made; the flag exists
+    # so it can be reversed without a code change.
+    sync_exclude_churn_series: bool = Field(
+        default=True, validation_alias="AGENTPIT_SYNC_EXCLUDE_CHURN_SERIES"
+    )
     resolution_mirror_enabled: bool | None = Field(
         default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
     )

@@ -11,6 +11,7 @@ from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
     _is_market_over,
     _normalize_market_fields,
+    _passes_market_filters,
     _polymarket_to_erc1155_tokens,
     build_create_market_request_from_json,
     create_polymarket_markets_if_needed,
@@ -357,3 +358,100 @@ def test_the_redeem_loop_takes_no_gas_argument():
         polymarket_sync.auto_redeem_resolved_markets
     ).parameters
     assert "gas_topup_wei" not in params
+
+
+# ----- the series that regenerate faster than anyone reads them --------------
+
+
+def _candidate(**over):
+    """A market that clears every OTHER filter, so only the churn check can
+    reject it.
+
+    Built in camelCase and pushed through `_normalize_market_fields`, the way
+    upstream payloads actually arrive: `_passes_market_filters` reads snake_case
+    only, so this covers the normalization path too.
+    """
+    m = {
+        "conditionId": "0x" + "cd" * 32,
+        "question": "Highest temperature in Munich on June 10?",
+        "endDate": "2099-01-01T00:00:00Z",
+        "liquidity": "19002",
+        "volumeNum": "76722445",
+        "closed": False,
+        "active": True,
+        "archived": False,
+        "acceptingOrders": True,
+    }
+    m.update(over)
+    return m
+
+
+def _kept(*, exclude_churn_series=True, **over):
+    """Does this market survive the catalogue filter?"""
+    m = _normalize_market_fields(_candidate(**over))
+    return _passes_market_filters(
+        m,
+        liquidity_threshold=0,
+        closed=False,
+        archived=False,
+        exclude_churn_series=exclude_churn_series,
+    )
+
+
+def test_a_daily_temperature_market_is_dropped_by_its_fee_type():
+    """49 cities x ~3.4 thresholds = ~166 born every day, median life 55.9h:
+    23% of every market we have ever created and resolved on chain."""
+    assert _kept(feeType="weather_fees") is False
+
+
+def test_the_daily_temperature_tag_alone_is_enough():
+    """The tag is an independent signal, so a weather market whose feeType
+    upstream ever renames is still recognised."""
+    assert (
+        _kept(
+            tags=[
+                {"slug": "weather", "label": "Weather"},
+                {"slug": "daily-temperature", "label": "Daily Temperature"},
+                {"slug": "munich", "label": "Munich"},
+            ]
+        )
+        is False
+    )
+
+
+def test_a_sports_prop_is_dropped():
+    """Spreads and team totals hang off a game we already carry."""
+    for prop in ("spreads", "team_totals"):
+        assert (
+            _kept(feeType="sports_fees_v2", sportsMarketType=prop) is False
+        ), prop
+
+
+def test_the_game_itself_is_kept():
+    """moneyline IS the game — the one sportsMarketType worth a condition."""
+    assert _kept(feeType="sports_fees_v2", sportsMarketType="moneyline") is True
+
+
+def test_a_market_carrying_neither_field_is_kept():
+    """Older Gamma shapes and every fixture send neither field. Absence must
+    never exclude: this drops only on positive evidence."""
+    assert _kept() is True
+
+
+def test_a_crypto_market_is_kept():
+    """crypto_fees_v2 was 101 of a live 400-market sample and carries no
+    sportsMarketType at all."""
+    assert _kept(feeType="crypto_fees_v2") is True
+
+
+def test_malformed_tags_never_raise():
+    """`tags` is whatever upstream sent — null without include_tag=true, a bare
+    string, entries that aren't dicts. A discovery filter that raises here would
+    kill the whole sync pass."""
+    for tags in (None, "daily-temperature", ["daily-temperature"], [None, 3]):
+        assert _kept(tags=tags) is True, tags
+
+
+def test_the_flag_switches_the_exclusion_back_off():
+    """The operator can reverse the decision without a code change."""
+    assert _kept(feeType="weather_fees", exclude_churn_series=False) is True

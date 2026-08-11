@@ -155,6 +155,12 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "archived", ["isArchived"])
     _coalesce_key(market, "liquidity", ["liquidityNum", "liquidityClob"])
     _coalesce_key(market, "accepting_orders", ["acceptingOrders"])
+    # The two fields `_is_churn_series` reads. `_passes_market_filters` runs on
+    # already-normalized markets and looks up snake_case keys only, so without
+    # these the camelCase originals would be invisible to it and every churn
+    # market would sail through.
+    _coalesce_key(market, "fee_type", ["feeType"])
+    _coalesce_key(market, "sports_market_type", ["sportsMarketType"])
 
     # Normalize bool-ish fields that may arrive as strings.
     for key in ("active", "closed", "archived", "accepting_orders"):
@@ -208,16 +214,79 @@ def _is_market_over(market: dict) -> bool:
     return not accepting
 
 
+#: Upstream's own name for the daily-temperature fee schedule. 1 market of a
+#: live 400-market sample carried it, and nothing else does.
+WEATHER_FEE_TYPE = "weather_fees"
+#: The tag every daily-temperature market carries alongside `weather_fees`
+#: ([weather, recurring, hide-from-new, daily-temperature, munich, ...]). Kept
+#: as a second, independent signal: either one alone is enough.
+WEATHER_TAG = "daily-temperature"
+#: The ONLY sportsMarketType worth a condition on chain: the game itself.
+HEADLINE_SPORTS_MARKET_TYPE = "moneyline"
+
+
+def _is_churn_series(m: dict) -> bool:
+    """Is this market part of a series that regenerates faster than it is read?
+
+    Two upstream fields decide it, and no slug is parsed: `feeType` names the
+    daily temperature series, and `sportsMarketType` separates a game from the
+    props hung off it. Both are absent from older Gamma shapes and from
+    fixtures, and absence means KEEP -- this excludes only on positive evidence.
+
+    Measured on production: 49 cities x ~3.4 thresholds = ~166 daily temperature
+    markets born every day with a median life of 55.9h -- 11% of the standing
+    catalogue but 23% of every market ever created and resolved. Add the sports
+    prop tail (spreads, totals, per-half, per-map, nrfi -- all hung off a game we
+    already carry) and the two series are 89% of new creations, ~870M gas/day in
+    prepareCondition + registerToken + splitPosition + reportPayouts.
+
+    `moneyline` is an allow-list of one, deliberately: `sportsMarketType` is an
+    open vocabulary upstream keeps extending (round_handicap_game_3 and
+    both_teams_to_score_second_half are recent arrivals), so a deny-list would
+    admit whatever prop type Polymarket invents next month and only exclude it
+    once somebody noticed the gas bill. Allow-listing the game means a new prop
+    type is excluded on arrival, and the cost of being wrong is one keeper
+    missing until this constant grows -- not an unbounded new series on chain.
+    """
+    if m.get("fee_type") == WEATHER_FEE_TYPE:
+        return True
+    # `tags` is whatever upstream sent: None when include_tag=true was omitted,
+    # occasionally a JSON string, and its entries are not guaranteed to be
+    # dicts. A discovery filter must never raise on a malformed payload, so
+    # every shape that isn't a dict-with-a-slug is simply skipped.
+    tags = m.get("tags")
+    if isinstance(tags, list):
+        for tag in tags:
+            if isinstance(tag, dict) and tag.get("slug") == WEATHER_TAG:
+                return True
+    sports_market_type = m.get("sports_market_type")
+    if sports_market_type and sports_market_type != HEADLINE_SPORTS_MARKET_TYPE:
+        return True
+    return False
+
+
 def _passes_market_filters(
-    m: dict, *, liquidity_threshold: float, closed: bool, archived: bool
+    m: dict,
+    *,
+    liquidity_threshold: float,
+    closed: bool,
+    archived: bool,
+    exclude_churn_series: bool = True,
 ) -> bool:
     """Does this ALREADY-NORMALIZED market belong in the catalogue?
 
     The single copy of that question. The primary window and the sibling pass
     both call it, so a market cannot be admitted through one path and rejected
     through the other.
+
+    `exclude_churn_series` defaults to True precisely because both call sites go
+    through here: a keyword with a default cannot be silently skipped by a call
+    site that forgot it, which is the whole reason the check lives here and not
+    in either caller.
     """
     if not m.get("condition_id"):
+        return False
+    if exclude_churn_series and _is_churn_series(m):
         return False
     # Use the stronger of orderbook depth ("liquidity") and cumulative trade
     # volume ("volumeNum"). Multi-outcome favourites have shallow books on the
@@ -249,6 +318,7 @@ def fetch_all_polymarket_markets(
     liquidity_threshold: float = 1000000,
     order: str | None = None,
     max_markets: int | None = None,
+    exclude_churn_series: bool = True,
 ) -> list[dict]:
     """
     Fetch all markets from Polymarket's Gamma API, paginating through all pages.
@@ -258,6 +328,11 @@ def fetch_all_polymarket_markets(
         closed: If True, include closed/resolved markets.
         active: If False, include inactive markets.
         archived: If True, include archived markets.
+        exclude_churn_series: drop the daily-temperature and sports-prop series
+            (see `_is_churn_series`). This module is called from library code
+            and from tests, neither of which can reach Settings, so the value
+            arrives as an argument — `AGENTPIT_SYNC_EXCLUDE_CHURN_SERIES` is
+            read once in the API layer and threaded down.
 
     Returns:
         A list of raw market dicts from the Polymarket API.
@@ -319,6 +394,7 @@ def fetch_all_polymarket_markets(
                 liquidity_threshold=liquidity_threshold,
                 closed=closed,
                 archived=archived,
+                exclude_churn_series=exclude_churn_series,
             ):
                 filtered_data.append(m)
 
@@ -385,6 +461,7 @@ def fetch_event_siblings(
     liquidity_threshold: float,
     host: str = POLYMARKET_GAMMA_URL,
     fetcher=None,
+    exclude_churn_series: bool = True,
 ) -> list[dict]:
     """The other outcomes of the events `pm_markets` belong to.
 
@@ -409,7 +486,11 @@ def fetch_event_siblings(
     the orphan-wrap gives it a singleton, same reasoning as `pinned.py`).
 
     Returns only markets NOT already in `pm_markets`, so a market that
-    qualified on its own merit can never be displaced by the cap.
+    qualified on its own merit can never be displaced by the cap. The sibling
+    outcomes of a game event are exactly where the sports prop tail hangs, so
+    `exclude_churn_series` is threaded through here too — the whole point of
+    putting the check in `_passes_market_filters` is that this pass and the
+    primary window answer the question identically.
     """
     fetch = fetcher or _fetch_events_by_id
     have = {m.get("condition_id") or m.get("conditionId") for m in pm_markets}
@@ -465,6 +546,7 @@ def fetch_event_siblings(
                     liquidity_threshold=liquidity_threshold,
                     closed=False,
                     archived=False,
+                    exclude_churn_series=exclude_churn_series,
                 ):
                     continue
                 if group is not None:
@@ -772,6 +854,7 @@ def fetch_and_sync_polymarket_markets(
     max_markets: int = 300,
     liquidity_min: float = 0.0,
     event_max_outcomes: int = 0,
+    exclude_churn_series: bool = True,
 ) -> list[Market]:
     """Discover + locally create the trending Polymarket markets.
 
@@ -786,6 +869,10 @@ def fetch_and_sync_polymarket_markets(
             market that qualified in the primary window; 0 disables the pass
             (the default, so existing callers keep making no extra network
             calls).
+        exclude_churn_series: forwarded to BOTH passes below, so the
+            daily-temperature and sports-prop series are dropped whichever way
+            a market would have entered. Comes from
+            `Settings.sync_exclude_churn_series` at the API layer.
     """
     pm_markets = fetch_all_polymarket_markets(
         host,
@@ -794,6 +881,7 @@ def fetch_and_sync_polymarket_markets(
         # rejected with HTTP 422 "order fields are not valid".
         order="volume24hr",
         max_markets=max_markets,
+        exclude_churn_series=exclude_churn_series,
     )
     if event_max_outcomes > 0:
         siblings = fetch_event_siblings(
@@ -801,6 +889,7 @@ def fetch_and_sync_polymarket_markets(
             cap=event_max_outcomes,
             liquidity_threshold=liquidity_min,
             host=host,
+            exclude_churn_series=exclude_churn_series,
         )
         logger.info(
             "event expansion added %d sibling markets to %d primary",
