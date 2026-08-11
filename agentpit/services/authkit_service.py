@@ -12,6 +12,8 @@ difference is whether `WORKOS_USER_ID` already matches a row.
 import logging
 from dataclasses import dataclass
 
+from psycopg.errors import UniqueViolation
+
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -155,14 +157,39 @@ class AuthKitService:
             # can itself be one whose onboarding never finished.
             return self._repair(linked) if repair else linked
 
-        with self._db.write() as conn:
-            handle = pick_handle(
-                taken=lambda candidate: TableRead.handle_taken(conn, candidate)
-            )
-            user_id, acct, _api_key = TableWrite.create_user(
-                conn, email=session.email, password_hash=None, handle=handle
-            )
-            TableWrite.set_workos_user_id(conn, user_id, session.workos_user_id)
+        try:
+            with self._db.write() as conn:
+                handle = pick_handle(
+                    taken=lambda candidate: TableRead.handle_taken(conn, candidate)
+                )
+                user_id, acct, _api_key = TableWrite.create_user(
+                    conn, email=session.email, password_hash=None, handle=handle
+                )
+                TableWrite.set_workos_user_id(
+                    conn, user_id, session.workos_user_id
+                )
+        except UniqueViolation:
+            # Another first sign-in for this same address committed between
+            # `_link_existing_account`'s lookup and this insert. `EMAIL` and
+            # `WORKOS_USER_ID` are both unique, so either can be the one that
+            # fired; read back by identity first and fall back to the address.
+            #
+            # The loser gets the winner's account, which is the right answer:
+            # one person, one wallet. The row may still have ONBOARDED_AT null
+            # because the winner onboards outside its transaction -- that is
+            # the condition `_repair` exists for, and the next sign-in closes
+            # it.
+            log.info("lost a create race for %s — adopting the winner's row", session.email)
+            with self._db.read() as conn:
+                winner = TableRead.get_user_by_workos_id(
+                    conn, session.workos_user_id
+                ) or TableRead.get_user_by_email_ci(conn, session.email)
+            if winner is None:
+                # The violation was something else entirely -- a handle
+                # collision, say. Re-raising keeps a real bug visible instead
+                # of turning it into a confusing None.
+                raise
+            return winner
 
         # Outside the transaction: onboarding is ~a second of chain round-trips
         # and must not hold a write lock, exactly as AuthService.register does it.

@@ -358,6 +358,63 @@ def test_sign_in_runs_the_chain_wipe_repair_for_an_onboarded_account():
     assert first.user.user_id == second.user.user_id
 
 
+def test_a_lost_race_on_a_new_address_returns_the_winner_s_account():
+    # Two first sign-ins for one address arrive together: both miss the
+    # WORKOS_USER_ID lookup, both reach create_user, and one takes a
+    # UniqueViolation on EMAIL. Unhandled it is a 500 -- a person told the
+    # service is broken while their account was in fact created.
+    workos = FakeWorkOsClient()
+    svc, db = _service(workos)
+    svc.send_code("race@example.com")
+    code = workos.last_code("race@example.com")
+    created = workos.find_user_by_email("race@example.com")
+
+    # Stand in for the request that won: the row and its identity already
+    # exist by the time our insert runs.
+    with db.write() as conn:
+        user_id, _acct, _key = TableWrite.create_user(
+            conn, email="race@example.com", password_hash=None, handle=None
+        )
+        TableWrite.set_workos_user_id(conn, user_id, created.workos_user_id)
+
+    session = svc.sign_in("race@example.com", code)
+
+    assert session.user.user_id == user_id
+
+
+def test_a_row_that_appears_after_the_link_lookup_is_adopted_not_500(monkeypatch):
+    # The window `_link_existing_account` cannot close: it looks, finds
+    # nothing, and the winner commits before our insert runs. Simulated by
+    # creating the row from inside the lookup itself.
+    workos = FakeWorkOsClient()
+    svc, db = _service(workos)
+    svc.send_code("late@example.com")
+    code = workos.last_code("late@example.com")
+    created = workos.find_user_by_email("late@example.com")
+
+    original = svc._link_existing_account
+    winner = {}
+
+    def _link_then_race(session):
+        result = original(session)
+        if not winner:
+            with db.write() as conn:
+                user_id, _acct, _key = TableWrite.create_user(
+                    conn, email=session.email, password_hash=None, handle=None
+                )
+                TableWrite.set_workos_user_id(
+                    conn, user_id, created.workos_user_id
+                )
+            winner["user_id"] = user_id
+        return result
+
+    monkeypatch.setattr(svc, "_link_existing_account", _link_then_race)
+
+    session = svc.sign_in("late@example.com", code)
+
+    assert session.user.user_id == winner["user_id"]
+
+
 def test_refresh_never_runs_the_chain_wipe_repair():
     workos, reonboarder = FakeWorkOsClient(), _Reonboarder()
     svc, _db = _service(workos, reonboarder=reonboarder)
