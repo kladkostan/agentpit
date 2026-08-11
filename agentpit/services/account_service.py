@@ -67,9 +67,19 @@ class AccountService:
                 if bal <= 0:
                     continue
                 size = bal / 1_000_000
+                redeemable = (
+                    mkt.market_state == MarketState.RESOLVED
+                    and mkt.resolved_outcome == idx
+                )
                 with self._db.read() as conn:
                     avg_price = self._avg_fill_price(conn, user.api_key, token_id)
-                    cur_price = self._cur_price(conn, token_id)
+                    # A won outcome pays exactly $1 a share. Its market has no
+                    # live book any more, so `_cur_price` would fall through to
+                    # the last trade print and show settled money at whatever
+                    # it last changed hands for.
+                    cur_price = (
+                        1.0 if redeemable else self._cur_price(conn, token_id)
+                    )
                 initial_value = avg_price * size
                 current_value = cur_price * size
                 cash_pnl = current_value - initial_value
@@ -77,10 +87,6 @@ class AccountService:
                 opp_idx = 1 - idx if len(tokens) == 2 else idx
                 opp_token, opp_label = (
                     tokens[opp_idx] if len(tokens) == 2 else (token_id, label)
-                )
-                redeemable = (
-                    mkt.market_state == MarketState.RESOLVED
-                    and mkt.resolved_outcome == idx
                 )
                 out.append(
                     PositionWire(
