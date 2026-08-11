@@ -672,15 +672,18 @@ function CentsStepper({
       >
         -
       </button>
-      <input
-        type="text"
-        inputMode="numeric"
-        value={cents}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="w-12 bg-transparent text-center text-[14px] font-semibold tabular-nums text-muted-foreground outline-none"
-      />
-      <span className="text-[14px] text-muted-foreground">¢</span>
+      <span className="inline-flex items-center gap-0.5">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={cents}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          size={Math.max(1, cents.length || 1)}
+          className={`bg-transparent text-center text-[14px] font-semibold tabular-nums outline-none ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}
+        />
+        <span className={`text-[14px] font-semibold ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}>¢</span>
+      </span>
       <button
         type="button"
         onClick={() => onStep(1)}
@@ -713,7 +716,7 @@ function SharesInput({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       placeholder="0"
-      className="h-10 w-[148px] rounded-xl border border-border bg-background px-4 text-right text-[14px] font-semibold tabular-nums text-muted-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60"
+      className={`h-10 w-[148px] rounded-xl border border-border bg-background px-4 text-right text-[14px] font-semibold tabular-nums outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 ${value && value !== "0" ? "text-foreground" : "text-muted-foreground"}`}
     />
   );
 }
