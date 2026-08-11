@@ -162,6 +162,17 @@ class Settings(BaseSettings):
         # looking configured -- instead of the intended "off".
         return value.strip()
 
+    # WorkOS AuthKit. An absent api key means the feature is simply not
+    # present, the same shape as GOOGLE_CLIENT_ID above -- nothing raises at
+    # startup and every AuthKit path answers as unconfigured. The authkit
+    # domain is the issuer that signs access tokens and publishes the JWKS;
+    # it is NOT api.workos.com.
+    workos_api_key: str = Field(default="", validation_alias="WORKOS_API_KEY")
+    workos_client_id: str = Field(default="", validation_alias="WORKOS_CLIENT_ID")
+    workos_authkit_domain: str = Field(
+        default="", validation_alias="WORKOS_AUTHKIT_DOMAIN"
+    )
+
     leaderboard_interval_seconds: int = Field(
         default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"
     )
