@@ -5,6 +5,7 @@ import {
   isCompleteCode,
   normaliseCode,
   RESEND_COOLDOWN_SECONDS,
+  refreshFailureEndsSession,
   resendSecondsLeft,
   sendCodeErrorMessage,
   signInErrorMessage,
@@ -198,5 +199,32 @@ describe("sendCodeErrorMessage", () => {
     expect(sendCodeErrorMessage(500)).toBe(
       "Could not send the code. Try again in a moment.",
     );
+  });
+});
+
+describe("refreshFailureEndsSession", () => {
+  it("ends the session when the server rejects the refresh token", () => {
+    expect(refreshFailureEndsSession(401)).toBe(true);
+  });
+
+  it("keeps the session through an outage", () => {
+    // 503 is the status the backend added specifically to mean "this is our
+    // problem, not your credential". Logging out on it deletes a refresh
+    // token that was never invalid, and WorkOS does not rotate them, so the
+    // copy in storage is the only copy.
+    expect(refreshFailureEndsSession(503)).toBe(false);
+    expect(refreshFailureEndsSession(500)).toBe(false);
+    expect(refreshFailureEndsSession(502)).toBe(false);
+  });
+
+  it("keeps the session when the request never reached the server", () => {
+    // statusOf() answers 0 for a dropped connection or an offline browser.
+    expect(refreshFailureEndsSession(0)).toBe(false);
+  });
+
+  it("keeps the session on a 400", () => {
+    // A failed on-chain onboarding retry answers 400. It is a bad minute for
+    // the chain, not evidence about the credential.
+    expect(refreshFailureEndsSession(400)).toBe(false);
   });
 });

@@ -123,14 +123,14 @@ class AuthKitService:
                 # account that no longer exists.
                 log.warning("workos link found no row for user %s", existing.user_id)
                 raise InvalidCredentialsError("invalid session")
-        # `existing` was read before that write, so reflect both halves of it
-        # locally rather than re-reading the row -- otherwise the session this
-        # call issues claims a password that no longer exists.
+        # `existing` was read before the stamp, so reflect it locally rather
+        # than re-reading the row. Only the identity changed: the password is
+        # deliberately left in place (see `TableWrite.link_workos_identity`),
+        # and `has_password` must keep saying so -- the UI routes key export by
+        # that flag, so a false here is the same dead end as clearing the hash,
+        # reached through the payload instead of the database.
         return existing.model_copy(
-            update={
-                "workos_user_id": session.workos_user_id,
-                "has_password": False,
-            }
+            update={"workos_user_id": session.workos_user_id}
         )
 
     def _create_account(self, session: WorkOsSession) -> User:

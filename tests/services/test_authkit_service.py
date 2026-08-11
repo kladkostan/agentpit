@@ -154,12 +154,23 @@ def test_a_legacy_password_row_is_adopted_rather_than_duplicated():
     assert rows == 1
 
 
-def test_adopting_a_legacy_row_takes_its_password_with_it():
-    # Nobody ever verified that whoever set that password owns the address --
-    # registration takes any address on trust. Leaving the hash would leave
-    # them a working /login credential (and, because key export gates on having
-    # a password, a way to export the key) on the account whose real owner just
-    # signed in to it.
+def test_adopting_a_legacy_row_leaves_its_password_alone():
+    """Adoption must not strip the hash — not yet, and not like this.
+
+    Clearing it is the eventual intent, and the reasoning is sound: nobody ever
+    verified that whoever set that password owns the address, while a mailed
+    code proves it. But `export_private_key` picks its second factor by what
+    the account HAS. A hash means "prove the password"; no hash means "prove
+    the Google identity". Strip the hash from an account that never had a
+    Google identity — the shape of all 17 production accounts — and neither
+    branch can ever be satisfied again. The holder loses access to the private
+    key of their own wallet, on their first mailed-code sign-in, permanently,
+    because the hash is not recoverable.
+
+    The replacement factor is re-authentication by mailed code, one mechanism
+    for every account. It lands in plan 3 alongside dropping the column. Until
+    something can take the password's place, the password stays.
+    """
     workos, onboarder = FakeWorkOsClient(), _Onboarder()
     svc, db = _service(workos, onboarder)
     user_id = _legacy_password_row(db, "bob@corp.com")
@@ -167,11 +178,11 @@ def test_adopting_a_legacy_row_takes_its_password_with_it():
     svc.send_code("bob@corp.com")
     session = svc.sign_in("bob@corp.com", workos.last_code("bob@corp.com"))
 
+    assert session.user.user_id == user_id
     with db.read() as conn:
-        assert TableRead.get_password_hash_by_userid(conn, user_id) is None
-    # The row was read before that write, so the session must not still claim
-    # a password that no longer exists.
-    assert session.user.has_password is False
+        assert TableRead.get_password_hash_by_userid(conn, user_id) is not None
+    # And the session says so, because that flag is what routes the export.
+    assert session.user.has_password is True
 
 
 def test_a_legacy_row_is_matched_case_insensitively():

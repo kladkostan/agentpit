@@ -178,18 +178,29 @@ class TableWrite:
     ) -> bool:
         """Hand an existing account to a WorkOS identity. False when no row matched.
 
-        The password goes with the stamp, in one statement, for exactly the
-        reason `link_google_identity` above gives: registration takes any
-        address on trust, so a password already sitting on this row is no
-        evidence that whoever set it owns the address. The mailed code is. If
-        the hash survived, whoever registered a stranger's address would keep
-        a working /login credential -- and, since `export_private_key` gates on
-        having a password, a way to export the key -- on the account its real
-        owner just signed in to.
+        **The password is deliberately left alone**, and this is not the same
+        call as `link_google_identity` above, which clears it.
+
+        The argument for clearing is good and will be acted on: registration
+        takes any address on trust, so a password sitting on a row is no
+        evidence that whoever set it owns the address, while a mailed code is.
+        Clearing it here, today, strands the account instead. `export_private_key`
+        picks its second factor by what the account HAS -- a hash means "prove
+        the password", no hash means "prove the Google identity" -- so a
+        password account whose hash is nulled satisfies neither branch and can
+        never export its own key again. All 17 production accounts are that
+        shape, the damage lands on their first code sign-in, and it is not
+        reversible: the hash is gone.
+
+        The spec's answer is a third factor -- re-authenticate by mailing a
+        code, one mechanism for every account -- and it arrives in plan 3
+        together with dropping PASSWORD_HASH entirely. Clearing the hash before
+        that exists removes a credential while the thing meant to replace it
+        does not. Until then the row keeps its password, which is exactly the
+        situation before this feature existed.
         """
         cur = db.execute(
-            "UPDATE users SET WORKOS_USER_ID = %s, PASSWORD_HASH = NULL "
-            "WHERE USER_ID = %s",
+            "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",
             (workos_user_id, user_id),
         )
         return cur.rowcount > 0

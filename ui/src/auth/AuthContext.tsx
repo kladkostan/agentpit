@@ -22,6 +22,10 @@ import {
   setTokenRefresher,
   UNAUTHORIZED_EVENT,
 } from "@/api/client";
+import {
+  refreshFailureEndsSession,
+  statusOf,
+} from "@/components/auth/codeFlow";
 import { AuthContext, type AuthValue, type DialogMode } from "./context";
 import { showWelcomeToast } from "./welcomeToast";
 
@@ -109,10 +113,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         persistRefreshToken(resp.refresh_token);
         setUser(resp.user);
         return resp.access_token;
-      } catch {
-        // The refresh token is dead too (revoked, or the user signed out
-        // elsewhere). This is the one real end of a session.
-        logout();
+      } catch (err) {
+        // Only a rejection of the credential itself ends the session. An
+        // outage must not: WorkOS does not rotate refresh tokens, so the copy
+        // in storage is the only copy, and deleting it on a 503 sends
+        // everybody who was signed in at that moment back to their inbox.
+        if (refreshFailureEndsSession(statusOf(err))) {
+          logout();
+        }
         return null;
       } finally {
         refreshInFlight.current = null;

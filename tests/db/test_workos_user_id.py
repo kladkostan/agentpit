@@ -41,11 +41,17 @@ def test_the_migration_writer_leaves_the_password_alone():
 
 
 def test_linking_stamps_the_identity_and_drops_the_password():
-    # The sign-in writer, unlike the migration one above. Registration takes
-    # any address on trust, so the password on the row is no evidence that
-    # whoever set it owns the address -- the mailed code is. Leaving the hash
-    # would keep /login (and, through it, the key export that gates on having
-    # a password) working for whoever registered a stranger's address.
+    # The sign-in writer, unlike the migration one above. It stamps the
+    # identity and LEAVES THE PASSWORD ALONE.
+    #
+    # Clearing it is the eventual intent -- registration takes any address on
+    # trust while a mailed code proves it -- but `export_private_key` chooses
+    # its second factor by what the account has: a hash means "prove the
+    # password", no hash means "prove the Google identity". Nulling the hash on
+    # a password account leaves neither branch satisfiable, so the holder can
+    # never export their own key again, and the hash is gone for good. All 17
+    # production accounts are that shape. The replacement factor (re-auth by
+    # mailed code) lands in plan 3 together with dropping the column.
     db = DbSession(Settings().database_url)
     with db.write() as conn:
         user_id, _acct, _api_key = TableWrite.create_user(
@@ -56,7 +62,29 @@ def test_linking_stamps_the_identity_and_drops_the_password():
     with db.read() as conn:
         found = TableRead.get_user_by_workos_id(conn, "user_linked")
         assert found is not None and found.user_id == user_id
-        assert TableRead.get_password_hash_by_userid(conn, user_id) is None
+        assert TableRead.get_password_hash_by_userid(conn, user_id) == "$2b$12$x"
+
+
+def test_adoption_leaves_key_export_reachable():
+    """The consequence the invariant above exists for, asserted end to end.
+
+    `export_private_key` branches on the presence of a hash. If adoption
+    removed it from a non-Google account, both branches would refuse and the
+    wallet's own key would be permanently unreachable.
+    """
+    db = DbSession(Settings().database_url)
+    with db.write() as conn:
+        user_id, _acct, _api_key = TableWrite.create_user(
+            conn, email="export@example.com", password_hash="$2b$12$y", handle=None
+        )
+        TableWrite.link_workos_identity(conn, user_id, "user_export")
+
+    with db.read() as conn:
+        user = TableRead.get_user_by_workos_id(conn, "user_export")
+        assert user is not None
+        # Truthy `has_password` is what routes the export to the password
+        # factor; false on an account with no GOOGLE_SUB is the dead end.
+        assert user.has_password is True
 
 
 def test_linking_a_missing_row_reports_false():

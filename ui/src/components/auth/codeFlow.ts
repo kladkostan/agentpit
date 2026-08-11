@@ -104,3 +104,27 @@ export function sendCodeErrorMessage(status: number): string {
   }
   return "Could not send the code. Try again in a moment.";
 }
+
+/**
+ * Does a failed token refresh mean the session is over?
+ *
+ * Only when the server rejected the credential itself. `POST /auth/refresh`
+ * runs about every 300 seconds for every signed-in person, so this decides
+ * what a bad minute upstream costs them.
+ *
+ * A refresh token is a long-lived credential we cannot get back once it is
+ * deleted: WorkOS does not rotate it, so the copy in storage is the only copy.
+ * Treating an outage as a dead credential therefore does not merely interrupt
+ * a session — it destroys the thing that would have resumed it, and the person
+ * has to go back to their inbox. A 30-second WorkOS blip would do that to
+ * everybody signed in at the time, all at once.
+ *
+ * So: 401 ends it, because that is the server saying this token is no good.
+ * Everything else — 503 (WorkOS unreachable, or this deployment has no keys),
+ * any 5xx, a 400 from a failed onboarding retry, and 0 for a dropped
+ * connection — leaves the token where it is. The request that triggered the
+ * refresh still fails; the next one, a moment later, succeeds.
+ */
+export function refreshFailureEndsSession(status: number): boolean {
+  return status === 401;
+}
