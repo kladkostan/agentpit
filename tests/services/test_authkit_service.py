@@ -5,6 +5,7 @@ from agentpit.config import Settings
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
+from agentpit.domain.exceptions import InvalidCredentialsError, OnboardingError
 from agentpit.services.authkit_service import AuthKitService
 
 
@@ -25,6 +26,23 @@ class _Onboarder:
         with DbSession(Settings().database_url).write() as conn:
             TableWrite.mark_user_onboarded(conn, user_id)
             return TableRead.get_user_by_userid(conn, user_id)
+
+
+class _FlakyOnboarder(_Onboarder):
+    """Onboarding that fails its first `failures` calls, as a restarting anvil
+    makes the real one fail: `AuthService._onboard_new_account` turns any chain
+    exception into `OnboardingError`, after the row has already committed."""
+
+    def __init__(self, failures: int = 1):
+        super().__init__()
+        self._failures = failures
+
+    def __call__(self, user_id, acct):
+        if self._failures > 0:
+            self._failures -= 1
+            self.calls.append(user_id)
+            raise OnboardingError("chain is restarting")
+        return super().__call__(user_id, acct)
 
 
 def _service(workos=None, onboarder=None):
@@ -81,6 +99,11 @@ def test_an_account_migrated_by_workos_user_id_is_found_not_recreated():
         user_id, _acct, _key = TableWrite.create_user(
             conn, email="old@example.com", password_hash="$2b$12$x", handle=None
         )
+        # An account the migration touched is one that registered and onboarded
+        # long ago. Without the stamp this row is not a migrated account but a
+        # stranded one, which sign-in is now expected to finish onboarding —
+        # see test_onboarding_that_failed_on_the_first_sign_in_is_finished_later.
+        TableWrite.mark_user_onboarded(conn, user_id)
     created = workos.create_user(email="old@example.com", password_hash=None)
     with db.write() as conn:
         TableWrite.set_workos_user_id(conn, user_id, created.workos_user_id)
@@ -90,6 +113,123 @@ def test_an_account_migrated_by_workos_user_id_is_found_not_recreated():
 
     assert session.user.user_id == user_id
     assert onboarder.calls == []  # already had a wallet
+
+
+def _legacy_password_row(db, email: str) -> str:
+    """A row as `/register` leaves one: a password, no WORKOS_USER_ID, onboarded.
+
+    `/register` stays live through this plan, so these keep appearing right up
+    until plan 3, and their owners then sign in by code for the first time.
+    """
+    with db.write() as conn:
+        user_id, _acct, _key = TableWrite.create_user(
+            conn, email=email, password_hash="$2b$12$x", handle=None
+        )
+        TableWrite.mark_user_onboarded(conn, user_id)
+    return user_id
+
+
+def test_a_legacy_password_row_is_adopted_rather_than_duplicated():
+    # `create_user` would hit `EMAIL TEXT NOT NULL UNIQUE` and turn every
+    # sign-in by this person into a 500 -- or, without the constraint, hand
+    # them a second wallet and hide the positions they already hold.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    user_id = _legacy_password_row(db, "bob@corp.com")
+
+    svc.send_code("bob@corp.com")
+    session = svc.sign_in("bob@corp.com", workos.last_code("bob@corp.com"))
+
+    assert session.user.user_id == user_id
+    assert onboarder.calls == []  # it already has a wallet
+    with db.read() as conn:
+        linked = TableRead.get_user_by_workos_id(
+            conn, workos.find_user_by_email("bob@corp.com").workos_user_id
+        )
+        rows = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE LOWER(EMAIL) = %s",
+            ("bob@corp.com",),
+        ).fetchone()["n"]
+    assert linked is not None and linked.user_id == user_id
+    assert rows == 1
+
+
+def test_adopting_a_legacy_row_takes_its_password_with_it():
+    # Nobody ever verified that whoever set that password owns the address --
+    # registration takes any address on trust. Leaving the hash would leave
+    # them a working /login credential (and, because key export gates on having
+    # a password, a way to export the key) on the account whose real owner just
+    # signed in to it.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    user_id = _legacy_password_row(db, "bob@corp.com")
+
+    svc.send_code("bob@corp.com")
+    session = svc.sign_in("bob@corp.com", workos.last_code("bob@corp.com"))
+
+    with db.read() as conn:
+        assert TableRead.get_password_hash_by_userid(conn, user_id) is None
+    # The row was read before that write, so the session must not still claim
+    # a password that no longer exists.
+    assert session.user.has_password is False
+
+
+def test_a_legacy_row_is_matched_case_insensitively():
+    # Registration stores the address as typed; WorkOS reports a normalised
+    # one. This is the one place that difference would mint a second wallet.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    user_id = _legacy_password_row(db, "Alice@Corp.com")
+
+    svc.send_code("alice@corp.com")
+    session = svc.sign_in("alice@corp.com", workos.last_code("alice@corp.com"))
+
+    assert session.user.user_id == user_id
+    assert onboarder.calls == []
+
+
+def test_onboarding_that_failed_on_the_first_sign_in_is_finished_later():
+    # The row and its WORKOS_USER_ID commit before onboarding runs -- chain
+    # round-trips must not hold the write lock -- so a chain that is down
+    # during somebody's first sign-in strands them with a wallet holding no
+    # gas, no collateral and no approvals. Every later sign-in would find that
+    # row by WorkOS id, and `AuthService._maybe_reonboard` bails precisely when
+    # ONBOARDED_AT is NULL, so nothing else repairs it.
+    workos, onboarder = FakeWorkOsClient(), _FlakyOnboarder()
+    svc, db = _service(workos, onboarder)
+
+    svc.send_code("new@example.com")
+    with pytest.raises(OnboardingError):
+        svc.sign_in("new@example.com", workos.last_code("new@example.com"))
+    with db.read() as conn:
+        stranded = TableRead.get_user_by_email_ci(conn, "new@example.com")
+    assert stranded is not None and stranded.onboarded_at is None
+
+    svc.send_code("new@example.com")
+    session = svc.sign_in("new@example.com", workos.last_code("new@example.com"))
+
+    assert session.user.user_id == stranded.user_id  # the same row, not a second
+    assert session.user.onboarded_at is not None
+    assert onboarder.calls == [stranded.user_id, stranded.user_id]
+
+
+def test_a_stranded_legacy_row_is_finished_on_adoption_too():
+    # Same repair on the other door in: a /register whose own onboarding failed
+    # leaves a password row with no wallet, and adopting it must not hand back
+    # a session for one.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    with db.write() as conn:
+        user_id, _acct, _key = TableWrite.create_user(
+            conn, email="bob@corp.com", password_hash="$2b$12$x", handle=None
+        )
+
+    svc.send_code("bob@corp.com")
+    session = svc.sign_in("bob@corp.com", workos.last_code("bob@corp.com"))
+
+    assert session.user.user_id == user_id
+    assert session.user.onboarded_at is not None
+    assert onboarder.calls == [user_id]
 
 
 def test_a_wrong_code_creates_nothing():
@@ -124,5 +264,8 @@ def test_refresh_for_an_identity_with_no_local_row_is_refused():
     workos = FakeWorkOsClient()
     svc, _db = _service(workos)
     created = workos.create_user(email="ghost@example.com", password_hash=None)
-    with pytest.raises(Exception):
+    # The refusal by name, not `Exception`: with the broad one an AttributeError
+    # from a renamed field would pass just as happily, and the claim above --
+    # that this is a refusal rather than a crash -- would go unpinned.
+    with pytest.raises(InvalidCredentialsError):
         svc.refresh(f"rt-{created.workos_user_id}")

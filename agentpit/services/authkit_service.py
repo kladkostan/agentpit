@@ -66,27 +66,81 @@ class AuthKitService:
         with self._db.read() as conn:
             user = TableRead.get_user_by_workos_id(conn, session.workos_user_id)
         if user is not None:
-            return user
+            return self._finish_onboarding(user)
         if not create:
             raise InvalidCredentialsError("invalid session")
         return self._create_account(session)
 
-    def _create_account(self, session: WorkOsSession) -> User:
+    def _finish_onboarding(self, user: User) -> User:
+        """Onboard a row that has an account but never got a funded wallet.
+
+        `_create_account` commits the row (and its WORKOS_USER_ID) before it
+        calls `_onboard`, because onboarding is ~a second of chain round-trips
+        and must not hold the write lock. So a chain that is down or restarting
+        during somebody's first sign-in leaves a committed row with
+        ONBOARDED_AT NULL, and every later sign-in would find it by WorkOS id
+        and hand back a session for a wallet with no gas, no collateral and no
+        approvals -- every order failing at trade time.
+
+        `AuthService._maybe_reonboard` cannot repair that one: it returns early
+        precisely when `onboarded_at is None`, because its own repair is for
+        chain *wipes* and it needs the stamp to know the wallet was ever
+        funded. This is the other half, and it is cheap: `onboarded_at` is
+        already on the row we just read, so the healthy path costs nothing.
+        """
+        if user.onboarded_at is not None:
+            return user
+        log.info(
+            "user %s has no ONBOARDED_AT — finishing onboarding on sign-in",
+            user.user_id,
+        )
+        return self._onboard(user.user_id, user.eth_key)
+
+    def _link_existing_account(self, session: WorkOsSession) -> User | None:
+        """Adopt an account that predates this address's WORKOS_USER_ID.
+
+        None when there is no such row. Otherwise the row, with the identity
+        stamped on it -- an account the migration missed, or one made by
+        `/register` before this shipped. Linking beats creating: a second row
+        is a second wallet and a person whose positions have disappeared.
+        Case-insensitive for the same reason `get_user_by_email_ci` exists:
+        WorkOS reports a normalised address, ours was stored as typed.
+        """
         with self._db.write() as conn:
-            # An address that predates WORKOS_USER_ID -- an account the
-            # migration missed, or one made before this shipped. Linking beats
-            # creating: a second row is a second wallet and a person whose
-            # positions have disappeared. Case-insensitive for the same reason
-            # `get_user_by_email_ci` exists: WorkOS reports a normalised
-            # address, ours was stored as typed.
             existing = TableRead.get_user_by_email_ci(conn, session.email)
-            if existing is not None:
-                TableWrite.set_workos_user_id(
-                    conn, existing.user_id, session.workos_user_id
-                )
-                return existing.model_copy(
-                    update={"workos_user_id": session.workos_user_id}
-                )
+            if existing is None:
+                return None
+            # The password on that row goes with the link -- see
+            # `TableWrite.link_workos_identity` for why. Nobody ever verified
+            # that whoever set it owns this address; the code we just mailed is
+            # the only proof of ownership in play, so it takes the account
+            # whole.
+            if not TableWrite.link_workos_identity(
+                conn, existing.user_id, session.workos_user_id
+            ):
+                # The row went away between the read above and this write.
+                # Issuing a session for it would hand back credentials for an
+                # account that no longer exists.
+                log.warning("workos link found no row for user %s", existing.user_id)
+                raise InvalidCredentialsError("invalid session")
+        # `existing` was read before that write, so reflect both halves of it
+        # locally rather than re-reading the row -- otherwise the session this
+        # call issues claims a password that no longer exists.
+        return existing.model_copy(
+            update={
+                "workos_user_id": session.workos_user_id,
+                "has_password": False,
+            }
+        )
+
+    def _create_account(self, session: WorkOsSession) -> User:
+        linked = self._link_existing_account(session)
+        if linked is not None:
+            # Outside its transaction, like the create path below: a linked row
+            # can itself be one whose onboarding never finished.
+            return self._finish_onboarding(linked)
+
+        with self._db.write() as conn:
             handle = pick_handle(
                 taken=lambda candidate: TableRead.handle_taken(conn, candidate)
             )

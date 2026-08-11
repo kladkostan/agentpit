@@ -158,9 +158,38 @@ class TableWrite:
     def set_workos_user_id(
         db: psycopg.Connection, user_id: str, workos_user_id: str
     ) -> bool:
-        """Link this account to its WorkOS identity. False when no row matched."""
+        """Link this account to its WorkOS identity. False when no row matched.
+
+        Leaves PASSWORD_HASH alone: this is the writer the migration script
+        uses to backfill ids for accounts nobody has signed into yet, and
+        those accounts must keep logging in with their password until plan 3
+        removes that door. `link_workos_identity` below is the one to use when
+        somebody has just proved they own the address.
+        """
         cur = db.execute(
             "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",
+            (workos_user_id, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def link_workos_identity(
+        db: psycopg.Connection, user_id: str, workos_user_id: str
+    ) -> bool:
+        """Hand an existing account to a WorkOS identity. False when no row matched.
+
+        The password goes with the stamp, in one statement, for exactly the
+        reason `link_google_identity` above gives: registration takes any
+        address on trust, so a password already sitting on this row is no
+        evidence that whoever set it owns the address. The mailed code is. If
+        the hash survived, whoever registered a stranger's address would keep
+        a working /login credential -- and, since `export_private_key` gates on
+        having a password, a way to export the key -- on the account its real
+        owner just signed in to.
+        """
+        cur = db.execute(
+            "UPDATE users SET WORKOS_USER_ID = %s, PASSWORD_HASH = NULL "
+            "WHERE USER_ID = %s",
             (workos_user_id, user_id),
         )
         return cur.rowcount > 0
