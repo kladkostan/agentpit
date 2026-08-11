@@ -1036,7 +1036,12 @@ def auto_redeem_resolved_markets(db, admin: OnchainAdmin) -> int:
     A holder who has not set AUTO_REDEEM_ENABLED is skipped outright, and a
     market with such a holder still sitting on tokens never gets marked
     FULLY_REDEEMED -- the winnings do not move or expire, they just wait for
-    that account to claim them itself.
+    that account to claim them itself. Bot accounts (`User.is_bot`) are the
+    exception: they are always redeemed regardless of the flag, since a bot
+    has no one to ask for consent and no interface to ask from -- the house's
+    own accounts (e.g. the liquidity mirror) would otherwise sit on winning
+    tokens and locked collateral in every resolved market forever, and
+    `still_held` below would never let FULLY_REDEEMED get set.
 
     The holder pays their own gas for the redeem — the house no longer tops
     anyone up here. A holder without enough native balance simply fails this
@@ -1067,9 +1072,11 @@ def auto_redeem_resolved_markets(db, admin: OnchainAdmin) -> int:
                 user = TableRead.get_user_by_api_key(conn, api_key)
             if user is None:
                 continue
-            if not user.auto_redeem:
+            if not (user.is_bot or user.auto_redeem):
                 # Settlement is still theirs to trigger. The winnings do not
-                # move or expire; they wait behind a button.
+                # move or expire; they wait behind a button. A bot has no one
+                # to ask for consent and no interface to ask from, so the
+                # opt-in does not reach the house's own accounts.
                 continue
             if not any(
                 admin.ctf_balance(user.eth_address, tid) > 0 for tid in token_ints

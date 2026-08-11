@@ -101,3 +101,81 @@ def test_no_gas_is_ever_sent(db_with_a_won_position):
     db, admin = db_with_a_won_position(auto_redeem=True)
     auto_redeem_resolved_markets(db, admin)
     assert not admin.fund_gas.called
+
+
+def test_the_bot_is_claimed_for_while_the_opted_out_human_beside_it_is_not(
+    monkeypatch,
+):
+    """C1: the opt-in gate must discriminate, not skip everyone alike.
+
+    Both holders sit in the *same* resolved market, both hold the winning
+    token, and neither has AUTO_REDEEM_ENABLED set. The bot (e.g. the
+    liquidity mirror, which is a maker on essentially every trade) has no
+    one to ask for consent, so it is claimed for regardless. The human is
+    opted out and stays skipped. A test that only ever builds one of these
+    accounts cannot show the gate discriminates between them -- both must be
+    present in the same pass.
+    """
+    db = fresh_test_db()
+    yes_token = str(int.from_bytes(secrets.token_bytes(8), "big"))
+    no_token = str(int.from_bytes(secrets.token_bytes(8), "big"))
+
+    with db.write() as conn:
+        row = conn.execute(
+            "INSERT INTO markets (CONDITION_ID, QUESTION, SLUG, DESCRIPTION, "
+            "ERC1155_TOKENS, START_DATE, MARKET_STATE, RESOLVED_OUTCOME) "
+            "VALUES (%s, 'Already won?', %s, 'd', %s, 100, 'RESOLVED', 0) "
+            "RETURNING MARKET_ID",
+            (
+                f"0x{secrets.token_hex(32)}",
+                f"already-won-{secrets.token_hex(4)}",
+                json.dumps([[yes_token, "YES"], [no_token, "NO"]]),
+            ),
+        ).fetchone()
+        market_id = row["MARKET_ID"]
+
+        bot_user_id, bot_acct, bot_api_key = TableWrite.create_user(
+            conn,
+            email=f"bot-{secrets.token_hex(4)}@example.com",
+            password_hash="x",
+            handle=None,
+        )
+        TableWrite.set_auto_redeem(conn, bot_user_id, False)
+        TableWrite.mark_user_as_bot(conn, bot_api_key)
+
+        human_user_id, _acct, human_api_key = TableWrite.create_user(
+            conn,
+            email=f"human-{secrets.token_hex(4)}@example.com",
+            password_hash="x",
+            handle=None,
+        )
+        TableWrite.set_auto_redeem(conn, human_user_id, False)
+
+        # Bot as maker, human as taker on the winning token -- the shape the
+        # mirror actually appears in: a counterparty on the other side of
+        # (essentially) every trade.
+        conn.execute(
+            "INSERT INTO trades (TRADE_ID, ASSET_ID, TAKER_API_KEY, "
+            "MAKER_API_KEY, STATUS, MATCH_TIME) VALUES (%s, %s, %s, %s, "
+            "'MATCHED', 1)",
+            (secrets.token_hex(8), yes_token, human_api_key, bot_api_key),
+        )
+
+    def _ctf_balance(_address, token_id):
+        return 100 if str(token_id) == yes_token else 0
+
+    admin = MagicMock()
+    admin.ctf_balance.side_effect = _ctf_balance
+
+    redeemed_for: list[str] = []
+    monkeypatch.setattr(
+        PositionService,
+        "redeem",
+        lambda self, user, market_id: redeemed_for.append(user.user_id),
+    )
+
+    count = auto_redeem_resolved_markets(db, admin)
+
+    assert count == 1
+    assert redeemed_for == [bot_user_id]
+    assert human_user_id not in redeemed_for
