@@ -214,24 +214,60 @@ def _is_market_over(market: dict) -> bool:
     return not accepting
 
 
-#: Upstream's own name for the daily-temperature fee schedule. 1 market of a
-#: live 400-market sample carried it, and nothing else does.
+#: Upstream's fee schedule for the WHOLE weather/science/natural-disaster
+#: bucket -- NOT a name for the daily-temperature series. Of 158 rows carrying
+#: it in a live 2000-row sample, 155 are the churn series and 5 are not:
+#: "Hantavirus pandemic in 2026?" ($412k book, $17.7M lifetime volume, runs to
+#: 2026-12-31), "Will any month of 2026 be the hottest on record?", two more
+#: science/global-temp questions and "Will it rain during the Dutch Grand
+#: Prix?". So this is a necessary condition, never a sufficient one.
 WEATHER_FEE_TYPE = "weather_fees"
-#: The tag every daily-temperature market carries alongside `weather_fees`
-#: ([weather, recurring, hide-from-new, daily-temperature, munich, ...]). Kept
-#: as a second, independent signal: either one alone is enough.
+#: The tag that actually names the series. All 155 daily-temperature rows carry
+#: it ([weather, recurring, hide-from-new, daily-temperature, munich, ...]);
+#: none of the 5 long-lived weather_fees markets does.
 WEATHER_TAG = "daily-temperature"
 #: The ONLY sportsMarketType worth a condition on chain: the game itself.
 HEADLINE_SPORTS_MARKET_TYPE = "moneyline"
 
 
+def _tag_slugs(m: dict) -> set[str] | None:
+    """The market's tag slugs, or None when the payload carries no usable tags.
+
+    `tags` is whatever upstream sent: absent on markets nested under `/events`,
+    None when `include_tag=true` was omitted, occasionally a JSON string, and
+    its entries are not guaranteed to be dicts. A discovery filter must never
+    raise on a malformed payload, so every shape that isn't a dict-with-a-slug
+    is simply skipped -- and a payload that yields no slug at all is reported
+    as None (unknown) rather than as an empty set (known to have no tags).
+    """
+    tags = m.get("tags")
+    if not isinstance(tags, list):
+        return None
+    slugs = {
+        tag["slug"]
+        for tag in tags
+        if isinstance(tag, dict) and isinstance(tag.get("slug"), str)
+    }
+    return slugs or None
+
+
 def _is_churn_series(m: dict) -> bool:
     """Is this market part of a series that regenerates faster than it is read?
 
-    Two upstream fields decide it, and no slug is parsed: `feeType` names the
-    daily temperature series, and `sportsMarketType` separates a game from the
-    props hung off it. Both are absent from older Gamma shapes and from
+    Upstream fields decide it, and no slug is parsed: the `daily-temperature`
+    tag names the temperature series, and `sportsMarketType` separates a game
+    from the props hung off it. Both are absent from older Gamma shapes and from
     fixtures, and absence means KEEP -- this excludes only on positive evidence.
+
+    `feeType == weather_fees` is NOT that evidence on its own. Upstream bills
+    the entire weather/science/natural-disaster bucket on that schedule, so it
+    also covers markets nothing like the churn series -- a $17.7M-volume
+    hantavirus-pandemic question, "hottest month on record", VEI-4 eruption
+    counts, rain at the Dutch Grand Prix, three of them running into 2027.
+    Dropping on the fee type alone thinned that whole category silently. It is
+    consulted only where the tag cannot be: markets nested under `/events`
+    carry `feeType` but no `tags` key at all, and there the fee type is the one
+    signal available, so weather + unknown tags still counts as the series.
 
     Measured on production: 49 cities x ~3.4 thresholds = ~166 daily temperature
     markets born every day with a median life of 55.9h -- 11% of the standing
@@ -248,17 +284,14 @@ def _is_churn_series(m: dict) -> bool:
     type is excluded on arrival, and the cost of being wrong is one keeper
     missing until this constant grows -- not an unbounded new series on chain.
     """
-    if m.get("fee_type") == WEATHER_FEE_TYPE:
+    slugs = _tag_slugs(m)
+    if slugs is not None and WEATHER_TAG in slugs:
         return True
-    # `tags` is whatever upstream sent: None when include_tag=true was omitted,
-    # occasionally a JSON string, and its entries are not guaranteed to be
-    # dicts. A discovery filter must never raise on a malformed payload, so
-    # every shape that isn't a dict-with-a-slug is simply skipped.
-    tags = m.get("tags")
-    if isinstance(tags, list):
-        for tag in tags:
-            if isinstance(tag, dict) and tag.get("slug") == WEATHER_TAG:
-                return True
+    # No usable tags: fall back to the fee type, which on the sibling path is
+    # all there is. Where tags DID arrive and did not say `daily-temperature`,
+    # the market has answered the question already and the fee type is mute.
+    if slugs is None and m.get("fee_type") == WEATHER_FEE_TYPE:
+        return True
     sports_market_type = m.get("sports_market_type")
     if sports_market_type and sports_market_type != HEADLINE_SPORTS_MARKET_TYPE:
         return True
@@ -532,6 +565,15 @@ def fetch_event_siblings(
             # `_to_bool`, and matches the check `_passes_market_filters` makes
             # later — the raw field alone left a latent truthy-string trap.
             outcomes = [m for m in outcomes if not m.get("closed")]
+            # Churn BEFORE the cap, not after. A prop-heavy game event carries
+            # a dozen spreads/totals legs that each out-trade the second real
+            # leg, so filtering after `outcomes[:cap]` let the props eat every
+            # slot and then get dropped -- the event contributed nothing and
+            # the genuine keeper was lost, which is worse than not excluding
+            # at all. `_passes_market_filters` below still asks the same
+            # question; asking it twice is free and keeps the chokepoint.
+            if exclude_churn_series:
+                outcomes = [m for m in outcomes if not _is_churn_series(m)]
             outcomes.sort(
                 key=lambda m: (
                     -_as_float(m.get("volume24hr")),

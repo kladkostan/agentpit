@@ -398,10 +398,55 @@ def _kept(*, exclude_churn_series=True, **over):
     )
 
 
-def test_a_daily_temperature_market_is_dropped_by_its_fee_type():
+def test_a_weather_market_with_no_tags_at_all_is_dropped_by_its_fee_type():
     """49 cities x ~3.4 thresholds = ~166 born every day, median life 55.9h:
-    23% of every market we have ever created and resolved on chain."""
+    23% of every market we have ever created and resolved on chain.
+
+    Markets nested under `/events` carry `feeType` but no `tags` key, so with
+    nothing else to go on the fee type decides.
+    """
     assert _kept(feeType="weather_fees") is False
+
+
+def test_the_fee_type_alone_never_drops_a_tagged_weather_market():
+    """`weather_fees` is upstream's schedule for the WHOLE weather / science /
+    natural-disaster bucket, not a name for the daily-temperature series. Of
+    158 rows carrying it in a live 2000-row sample, 5 are long-lived markets
+    nothing like the churn series — dropping on the fee type alone thinned that
+    category silently, with no error and no log line."""
+    survivors = (
+        # $412k book, $17.7M lifetime volume, endDate 2026-12-31.
+        ["pandemics", "weather", "hantavirus"],
+        ["science", "weather", "climate-science", "global-temp"],
+        ["science", "weather", "global-temp"],
+        ["science", "weather", "natural-disasters", "climate-science"],
+        ["f1", "dutch", "weather", "climate", "formula1", "grand-prix"],
+    )
+    for slugs in survivors:
+        assert (
+            _kept(
+                feeType="weather_fees",
+                tags=[{"slug": s, "label": s} for s in slugs],
+            )
+            is True
+        ), slugs
+
+
+def test_a_tagged_daily_temperature_market_is_still_dropped():
+    """The 155 real churn rows all carry the tag alongside the fee type."""
+    assert (
+        _kept(
+            feeType="weather_fees",
+            tags=[
+                {"slug": "weather", "label": "Weather"},
+                {"slug": "recurring", "label": "Recurring"},
+                {"slug": "hide-from-new", "label": "Hide From New"},
+                {"slug": "daily-temperature", "label": "Daily Temperature"},
+                {"slug": "munich", "label": "Munich"},
+            ],
+        )
+        is False
+    )
 
 
 def test_the_daily_temperature_tag_alone_is_enough():
@@ -455,3 +500,129 @@ def test_malformed_tags_never_raise():
 def test_the_flag_switches_the_exclusion_back_off():
     """The operator can reverse the decision without a code change."""
     assert _kept(feeType="weather_fees", exclude_churn_series=False) is True
+
+
+# ----- the predicate is only worth what the call sites do with it -----------
+
+
+def _prop(name, *, v24, **over):
+    """A sports prop sibling: a real Gamma payload shape, camelCase."""
+    m = _sib(name, v24=v24)
+    m["feeType"] = "sports_fees_v2"
+    m["sportsMarketType"] = "spreads"
+    m.update(over)
+    return m
+
+
+def test_a_prop_sibling_never_reaches_the_catalogue():
+    """The sibling outcomes of a game event are exactly where the prop tail
+    hangs, so the primary window dropping props is only half the job."""
+    game = _primary("Game")
+    event = _event(game, _prop("Spread", v24=5000))
+    extra = polymarket_sync.fetch_event_siblings(
+        [game], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert extra == []
+
+
+def test_the_sibling_pass_still_returns_props_when_the_flag_is_off():
+    """Proves the assertion above is the flag working, not the fixture."""
+    game = _primary("Game")
+    event = _event(game, _prop("Spread", v24=5000))
+    extra = polymarket_sync.fetch_event_siblings(
+        [game], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+        exclude_churn_series=False,
+    )
+    assert [m["groupItemTitle"] for m in extra] == ["Spread"]
+
+
+def test_props_do_not_eat_the_cap_before_the_real_second_leg():
+    """Every prop out-trades the second real leg of a game, so a cap applied
+    before the churn filter is spent entirely on markets about to be dropped —
+    the event contributes nothing and a genuine keeper is lost, which is worse
+    than not excluding at all."""
+    game = _primary("Game")
+    props = [_prop(f"Spread{i}", v24=5000) for i in range(12)]
+    second_leg = _sib("SecondLeg", v24=328)
+    event = _event(game, *props, second_leg)
+    extra = polymarket_sync.fetch_event_siblings(
+        [game], cap=12, liquidity_threshold=5000,
+        fetcher=_fetcher_for(event),
+    )
+    assert [m["groupItemTitle"] for m in extra] == ["SecondLeg"]
+
+
+def _page_of(*markets):
+    """A one-page Gamma `/markets` response followed by the empty page that
+    stops pagination."""
+    pages = [list(markets), []]
+
+    def fake_get(url):
+        return pages.pop(0) if pages else []
+
+    return fake_get
+
+
+def test_the_primary_window_drops_the_churn_series(monkeypatch):
+    """`fetch_all_polymarket_markets` is the other half of the threading: the
+    predicate cannot see its own call sites."""
+    keeper = _sib("Game", v24=678_000)
+    keeper["sportsMarketType"] = "moneyline"
+    keeper["feeType"] = "sports_fees_v2"
+    weather = _sib("Munich 30C", v24=19_000)
+    weather["feeType"] = "weather_fees"
+    monkeypatch.setattr(
+        polymarket_sync, "get", _page_of(keeper, weather, _prop("Spread", v24=5000))
+    )
+
+    out = polymarket_sync.fetch_all_polymarket_markets(liquidity_threshold=5000)
+
+    assert [m["groupItemTitle"] for m in out] == ["Game"]
+
+
+def test_the_primary_window_keeps_everything_when_the_flag_is_off(monkeypatch):
+    keeper = _sib("Game", v24=678_000)
+    weather = _sib("Munich 30C", v24=19_000)
+    weather["feeType"] = "weather_fees"
+    monkeypatch.setattr(
+        polymarket_sync, "get", _page_of(keeper, weather, _prop("Spread", v24=5000))
+    )
+
+    out = polymarket_sync.fetch_all_polymarket_markets(
+        liquidity_threshold=5000, exclude_churn_series=False
+    )
+
+    assert sorted(m["groupItemTitle"] for m in out) == [
+        "Game", "Munich 30C", "Spread",
+    ]
+
+
+def test_the_sync_entry_point_forwards_the_flag_to_both_passes(monkeypatch):
+    """`fetch_and_sync_polymarket_markets` is where the Settings value lands;
+    if it forwards a hardcoded False the whole feature is off in production."""
+    seen = {}
+
+    def fake_fetch_all(host, **kw):
+        seen["primary"] = kw["exclude_churn_series"]
+        return [{"condition_id": "0x01", "events": [{"id": "77"}]}]
+
+    def fake_siblings(pm_markets, **kw):
+        seen["siblings"] = kw["exclude_churn_series"]
+        return []
+
+    monkeypatch.setattr(
+        polymarket_sync, "fetch_all_polymarket_markets", fake_fetch_all
+    )
+    monkeypatch.setattr(polymarket_sync, "fetch_event_siblings", fake_siblings)
+    monkeypatch.setattr(
+        polymarket_sync, "create_polymarket_markets_if_needed",
+        lambda db, pm_markets, admin: [],
+    )
+
+    for flag in (True, False):
+        polymarket_sync.fetch_and_sync_polymarket_markets(
+            db=None, admin=None, event_max_outcomes=12, exclude_churn_series=flag,
+        )
+        assert seen == {"primary": flag, "siblings": flag}, flag
