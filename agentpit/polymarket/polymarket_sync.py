@@ -276,6 +276,20 @@ def _is_churn_series(m: dict) -> bool:
     already carry) and the two series are 89% of new creations, ~870M gas/day in
     prepareCondition + registerToken + splitPosition + reportPayouts.
 
+    The gas is the measurable reason, not the first one. The product does not
+    support these markets: a set handicap or a first-inning run has no reading
+    on the site, so `atp-halys-kwon-2026-08-11-set-handicap-home-1pt5` arrives
+    on the grid as a row nobody can act on. Excluding the tail leaves Sports a
+    list of matches rather than a list of handicaps.
+
+    A third consequence is repaired in passing. CONDITION_ID is derived from
+    `keccak(question)`, and upstream reuses a prop's question text across games
+    -- "Spread: Baltimore Orioles (-1.5)" is a new market every time the Orioles
+    play, and the same condition forever to us. Production ran 251 UniqueViolation
+    skips against 278 successful creations in three hours, and the stale row that
+    squats on each reused string is a market from a game weeks past. Props ARE
+    the reused strings; dropping them drops the collision with them.
+
     `moneyline` is an allow-list of one, deliberately: `sportsMarketType` is an
     open vocabulary upstream keeps extending (round_handicap_game_3 and
     both_teams_to_score_second_half are recent arrivals), so a deny-list would
