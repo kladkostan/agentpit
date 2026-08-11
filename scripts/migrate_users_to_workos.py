@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from agentpit.auth.workos_client import WorkOsClient, build_workos_client
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
-from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 
 log = logging.getLogger("migrate_users_to_workos")

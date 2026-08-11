@@ -173,6 +173,41 @@ class Settings(BaseSettings):
         default="", validation_alias="WORKOS_AUTHKIT_DOMAIN"
     )
 
+    @field_validator(
+        "workos_api_key", "workos_client_id", "workos_authkit_domain", mode="after"
+    )
+    @classmethod
+    def _strip_workos(cls, value: str) -> str:
+        # Same measured reason as `_strip_google_client_id` above: Compose's
+        # env_file parser leaves trailing whitespace. Here it is worse than a
+        # bad audience -- a padded domain builds a JWKS URL containing "%20",
+        # so the fetch 404s and EVERY sign-in is rejected as "invalid session"
+        # with no configuration error anywhere to point at the cause.
+        return value.strip()
+
+    @field_validator("workos_authkit_domain", mode="after")
+    @classmethod
+    def _normalize_authkit_domain(cls, value: str) -> str:
+        """Trailing slash off, and only a full URL accepted.
+
+        Both shapes are what an operator actually pastes. A trailing slash was
+        silently tolerated in one place and not the other -- the JWKS fetch
+        stripped it, so the key resolved and the config looked right, while the
+        `iss` comparison kept the slash and rejected every token. A missing
+        scheme is worse still: the URL has no type, key resolution raises
+        before a socket opens, and the same "invalid session" comes back.
+
+        Fail here instead. A wrong value at startup is a bug an operator can
+        read; the same value at request time is one they cannot.
+        """
+        value = value.rstrip("/")
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError(
+                "WORKOS_AUTHKIT_DOMAIN must include the scheme, "
+                f"e.g. https://{value}"
+            )
+        return value
+
     leaderboard_interval_seconds: int = Field(
         default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"
     )

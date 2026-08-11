@@ -8,6 +8,7 @@ every test uses; `RealWorkOsClient` is the only place the SDK is touched.
 The surface is deliberately narrow. Plan 2 widens it; this plan needs exactly
 what the migration script needs.
 """
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -53,6 +54,24 @@ class WorkOsError(RuntimeError):
 
 API_BASE = "https://api.workos.com"
 
+#: bcrypt output: $2a/$2b/$2y, a cost, and the salt+digest. Matched wherever it
+#: appears, not anchored, because it is being hunted inside a JSON body.
+_BCRYPT_RE = re.compile(r"\$2[aby]?\$\d{2}\$[./A-Za-z0-9]{0,53}")
+
+
+def _redact(text: str) -> str:
+    """Strip anything password-shaped out of an error body before it is stored.
+
+    The body is kept because it names the field WorkOS objected to, which is
+    what makes a failed import diagnosable. But a 422 is entitled to quote the
+    value it rejected, and the value we send is a bcrypt hash lifted from
+    `users.PASSWORD_HASH`. `migrate_users` catches per account and calls
+    `log.exception`, so without this a rejected import writes a live password
+    hash to stdout next to the address it belongs to, during a hand-run
+    production migration.
+    """
+    return _BCRYPT_RE.sub("[redacted]", text)
+
 
 class RealWorkOsClient:
     """The WorkOS REST API over the httpx we already have.
@@ -88,7 +107,7 @@ class RealWorkOsClient:
             # included: it carries the hash, and the headers carry the key.
             raise WorkOsError(
                 f"WorkOS {method} {path} returned {response.status_code}: "
-                f"{response.text[:500]}"
+                f"{_redact(response.text)[:500]}"
             )
         return response.json()
 
