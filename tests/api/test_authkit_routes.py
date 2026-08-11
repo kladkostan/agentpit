@@ -229,3 +229,23 @@ def test_the_app_factory_wires_the_workos_client_into_the_dependency():
     # what turns the three routes into the 503 above instead of a 500.
     absent = create_app(Settings(workos_api_key="", workos_client_id=""))
     assert absent.dependency_overrides[deps.get_workos_client]() is None
+
+
+def test_a_workos_rate_limit_reaches_the_caller_as_429():
+    # The UI already has copy for 429 (`codeFlow.ts`), and it has been
+    # unreachable because the status never arrived. This is what switches it on.
+    from agentpit.auth.workos_client import WorkOsRateLimitedError
+
+    class _RateLimited:
+        def send_magic_auth_code(self, email: str) -> None:
+            raise WorkOsRateLimitedError("WorkOS POST /user_management/magic_auth returned 429")
+
+    app.dependency_overrides[deps.get_workos_client] = lambda: _RateLimited()
+    try:
+        with TestClient(app) as client:
+            resp = client.post("/auth/code", json={"email": "g@example.com"})
+        assert resp.status_code == 429, resp.text
+        # The diagnostic message names our endpoint; it is logged, not returned.
+        assert "user_management" not in resp.text
+    finally:
+        app.dependency_overrides.pop(deps.get_workos_client, None)

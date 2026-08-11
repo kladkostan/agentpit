@@ -3,7 +3,11 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from agentpit.auth.workos_client import WorkOsError, WorkOsUnavailableError
+from agentpit.auth.workos_client import (
+    WorkOsError,
+    WorkOsRateLimitedError,
+    WorkOsUnavailableError,
+)
 from agentpit.domain.exceptions import (
     AlreadyExistsError,
     BusinessRuleError,
@@ -69,6 +73,25 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=503,
             content={"detail": "sign-in is temporarily unavailable — try again"},
+        )
+
+    @app.exception_handler(WorkOsRateLimitedError)
+    async def _workos_rate_limited(
+        _: Request, exc: WorkOsRateLimitedError
+    ) -> JSONResponse:
+        """We asked WorkOS too often. Not the caller's typo, not our outage.
+
+        Starlette walks the raised exception's MRO and matches the most
+        specific registered type, so this wins over the `WorkOsError` handler
+        below regardless of registration order -- the same mechanism
+        `InsufficientGasError` relies on.
+
+        WARNING, not ERROR: a rate limit is a working system saying no.
+        """
+        log.warning("WorkOS rate limited a request: %s", exc)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "too many attempts — wait a moment and try again"},
         )
 
     @app.exception_handler(WorkOsError)

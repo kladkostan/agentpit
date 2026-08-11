@@ -91,6 +91,19 @@ class WorkOsUnavailableError(WorkOsError):
     """
 
 
+class WorkOsRateLimitedError(WorkOsError):
+    """WorkOS refused because we asked too often.
+
+    A subclass rather than a sibling for the same reason
+    `WorkOsUnavailableError` is one: `migrate_users` catches `WorkOsError` per
+    account and must keep catching this unchanged. It exists for the API, which
+    otherwise answers 401 "request a new code" -- instructing a rate-limited
+    caller to perform the action that rate limited them, in a loop the UI's own
+    resend cooldown cannot break because the cooldown is per dialog, not per
+    address.
+    """
+
+
 API_BASE = "https://api.workos.com"
 
 #: bcrypt output: $2a/$2b/$2y, a cost, and the salt+digest. Matched wherever it
@@ -181,6 +194,14 @@ class RealWorkOsClient:
             raise WorkOsUnavailableError(
                 f"WorkOS request failed: {method} {path}"
             ) from exc
+        if response.status_code == 429:
+            # Split out ahead of the generic refusal below so the API can answer
+            # 429 and the already-written UI copy becomes reachable. Same
+            # redaction as every other error body.
+            raise WorkOsRateLimitedError(
+                f"WorkOS {method} {path} returned 429: "
+                f"{_redact(response.text, secrets)[:500]}"
+            )
         if response.status_code >= 400:
             # The body may name the field WorkOS objected to, which is what
             # makes a failed migration diagnosable. The request is not
@@ -249,8 +270,9 @@ class RealWorkOsClient:
             },
             # Everything secret this body can carry. The refresh token is the
             # one no pattern can find, and this endpoint is the only place it
-            # is ever sent.
-            secrets=(self._api_key, body.get("refresh_token")),
+            # is ever sent. The six-digit code joins it: it is a live sign-in
+            # credential for ten minutes, and this method's errors are logged.
+            secrets=(self._api_key, body.get("refresh_token"), body.get("code")),
         )
         return WorkOsSession(
             workos_user_id=payload["user"]["id"],

@@ -6,6 +6,7 @@ import pytest
 from agentpit.auth.workos_client import (
     FakeWorkOsClient,
     WorkOsError,
+    WorkOsRateLimitedError,
     WorkOsSession,
     WorkOsUnavailableError,
     WorkOsUser,
@@ -351,3 +352,35 @@ def test_unavailable_is_still_caught_as_a_workos_error():
     # The migration script catches `WorkOsError` per account and carries on;
     # the new subclass must not fall out of that net.
     assert issubclass(WorkOsUnavailableError, WorkOsError)
+
+
+def test_the_mailed_code_is_stripped_from_an_error_body():
+    # WorkOS answered a bad code with `{"code": "invalid_code"}` when this was
+    # measured, echoing nothing -- but a gateway or WAF in front of it is under
+    # no such obligation, and this endpoint is reached by an unauthenticated
+    # caller who supplies the code. The message becomes a log line.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "bad code 515627 for a@b.com"})
+
+    with pytest.raises(WorkOsError) as excinfo:
+        _real(handler).authenticate_with_code("a@b.com", "515627")
+    assert "515627" not in str(excinfo.value)
+    assert "[redacted]" in str(excinfo.value)
+
+
+def test_a_429_is_its_own_error_type():
+    # Collapsed into the generic refusal, a rate limit reaches the caller as
+    # 401 "request a new code" -- telling them to do the very thing that rate
+    # limited them.
+    client = _real(lambda _r: httpx.Response(429, json={"code": "rate_limit"}))
+    with pytest.raises(WorkOsRateLimitedError):
+        client.send_magic_auth_code("a@b.com")
+
+
+def test_a_rate_limit_is_still_a_workos_error():
+    # The migration script catches `WorkOsError` per account and carries on.
+    # A subclass keeps that working unchanged, exactly as
+    # `WorkOsUnavailableError` does.
+    client = _real(lambda _r: httpx.Response(429, json={"code": "rate_limit"}))
+    with pytest.raises(WorkOsError):
+        client.send_magic_auth_code("a@b.com")
