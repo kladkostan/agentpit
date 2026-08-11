@@ -10,6 +10,7 @@ class UserPublic(BaseModel):
     onboarded_at: int | None
     created_at: int
     has_password: bool
+    auto_redeem: bool
 
 
 class AuthResponse(BaseModel):

@@ -23,6 +23,11 @@ class User(BaseModel):
     # Google-only export control to a password account if a caller ever
     # forgot to pass it.
     has_password: bool
+    # No default either: a defaulted value fails OPEN here too -- it would
+    # start spending an account's gas on its behalf if a caller ever forgot
+    # to pass it. AUTO_REDEEM_ENABLED defaults FALSE at the column, so every
+    # existing account opts out until it says otherwise.
+    auto_redeem: bool
 
     def model_post_init(self, __context):
         if self.handle is not None:

@@ -87,6 +87,16 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
+    def set_auto_redeem(
+        db: psycopg.Connection, user_id: str, enabled: bool
+    ) -> bool:
+        cur = db.execute(
+            "UPDATE users SET AUTO_REDEEM_ENABLED = %s WHERE USER_ID = %s",
+            (enabled, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def mark_key_export_attempt(
         db: psycopg.Connection, user_id: str, at: int, not_before: int
     ) -> bool:

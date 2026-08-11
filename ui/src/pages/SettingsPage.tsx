@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Check, Copy, Eye, EyeOff, Key, KeyRound, Lock, Mail, User, X } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Fuel, Key, KeyRound, Lock, Mail, User, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   changePasswordRequest,
   exportPrivateKeyRequest,
+  setAutoRedeemRequest,
   type UserPublic,
   updateHandleRequest,
 } from "@/api/auth";
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { GOOGLE_CLIENT_ID } from "@/lib/googleAuth";
 import { exportErrorMessage } from "@/lib/exportKeyError";
+import { cn } from "@/lib/utils";
 
 export function SettingsPage() {
   const { user, setUser } = useAuth();
@@ -56,6 +58,7 @@ export function SettingsPage() {
               </div>
               <ExportKeyButton user={user} />
             </div>
+            <AutoRedeemRow user={user} onUpdated={setUser} />
             <ApiKeyRow apiKey={user.api_key} />
             <ChangePasswordRow />
           </CardContent>
@@ -372,6 +375,59 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function AutoRedeemRow({ user, onUpdated }: UsernameRowProps) {
+  const [saving, setSaving] = useState(false);
+
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      const updated = await setAutoRedeemRequest(!user.auto_redeem);
+      onUpdated(updated);
+      toast.success(
+        updated.auto_redeem
+          ? "You'll now claim winnings automatically."
+          : "You'll claim your own winnings from now on.",
+      );
+    } catch {
+      toast.error("Failed to update claim setting.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4 border-b p-4">
+      <Fuel className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="flex-1">
+        <p className="text-sm font-medium">Claim winnings automatically</p>
+        <p className="text-xs text-muted-foreground">
+          Claiming costs a small amount of gas from this wallet. With this
+          off, you claim your winnings yourself.
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={user.auto_redeem}
+        aria-label="Claim winnings automatically"
+        onClick={() => void toggle()}
+        disabled={saving}
+        className={cn(
+          "inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+          user.auto_redeem ? "bg-primary" : "bg-input",
+        )}
+      >
+        <span
+          className={cn(
+            "pointer-events-none block size-5 rounded-full bg-background shadow-lg transition-transform",
+            user.auto_redeem ? "translate-x-5" : "translate-x-0",
+          )}
+        />
+      </button>
+    </div>
   );
 }
 

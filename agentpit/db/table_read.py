@@ -216,7 +216,8 @@ class TableRead:
     _USER_COLS = (
         "USER_ID, EMAIL, HANDLE, ETH_ADDRESS, ETH_PRIVATE_KEY, "
         "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT, "
-        "(PASSWORD_HASH IS NOT NULL) AS HAS_PASSWORD"
+        "(PASSWORD_HASH IS NOT NULL) AS HAS_PASSWORD, "
+        "(AUTO_REDEEM_ENABLED) AS AUTO_REDEEM"
     )
 
     @staticmethod
@@ -234,6 +235,7 @@ class TableRead:
             created_at=row["CREATED_AT"] if row["CREATED_AT"] is not None else 0,
             is_bot=bool(row["IS_BOT"]),
             has_password=bool(row["HAS_PASSWORD"]),
+            auto_redeem=bool(row["AUTO_REDEEM"]),
         )
 
     @staticmethod

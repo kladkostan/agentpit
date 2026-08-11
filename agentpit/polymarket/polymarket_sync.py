@@ -1029,8 +1029,14 @@ def auto_redeem_resolved_markets(db, admin: OnchainAdmin) -> int:
     `db` is a DbSession (not a raw connection) because PositionService manages
     its own read/write connections. For each candidate market, scans the
     participant accounts (trades + split/merge, including the house bot),
-    redeems any with a nonzero on-chain token balance using their custodial
-    key, and flags the market FULLY_REDEEMED once no holder remains.
+    redeems any that opted in and hold a nonzero on-chain token balance using
+    their custodial key, and flags the market FULLY_REDEEMED once no holder
+    remains.
+
+    A holder who has not set AUTO_REDEEM_ENABLED is skipped outright, and a
+    market with such a holder still sitting on tokens never gets marked
+    FULLY_REDEEMED -- the winnings do not move or expire, they just wait for
+    that account to claim them itself.
 
     The holder pays their own gas for the redeem — the house no longer tops
     anyone up here. A holder without enough native balance simply fails this
@@ -1060,6 +1066,10 @@ def auto_redeem_resolved_markets(db, admin: OnchainAdmin) -> int:
             with db.read() as conn:
                 user = TableRead.get_user_by_api_key(conn, api_key)
             if user is None:
+                continue
+            if not user.auto_redeem:
+                # Settlement is still theirs to trigger. The winnings do not
+                # move or expire; they wait behind a button.
                 continue
             if not any(
                 admin.ctf_balance(user.eth_address, tid) > 0 for tid in token_ints

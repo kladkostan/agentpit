@@ -184,6 +184,7 @@ class TableCreate:
             ("GOOGLE_SUB", "TEXT"),
             ("KEY_EXPORTED_AT", "BIGINT"),
             ("KEY_EXPORT_ATTEMPT_AT", "BIGINT"),
+            ("AUTO_REDEEM_ENABLED", "BOOLEAN NOT NULL DEFAULT FALSE"),
         ]
         for col, col_type in additions:
             conn.execute(

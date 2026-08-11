@@ -25,6 +25,10 @@ from agentpit.domain.exceptions import HandleAlreadyExistsError
 router = APIRouter(tags=["users"])
 
 
+class AutoRedeemRequest(BaseModel):
+    enabled: bool
+
+
 class TopUpStatusWire(BaseModel):
     nextAllowedAt: int
 
@@ -73,6 +77,18 @@ def update_me_password(
         new_password=payload.new_password,
     )
     return UserPublic.model_validate(user.model_dump())
+
+
+@router.patch("/me/auto-redeem", response_model=UserPublic)
+def update_me_auto_redeem(
+    payload: AutoRedeemRequest,
+    user: CurrentUserDep,
+    db: SessionDep,
+) -> UserPublic:
+    with db.write() as conn:
+        TableWrite.set_auto_redeem(conn, user.user_id, payload.enabled)
+        refreshed = TableRead.get_user_by_userid(conn, user.user_id)
+    return UserPublic.model_validate((refreshed or user).model_dump())
 
 
 @router.post("/me/private-key", response_model=PrivateKeyResponse)

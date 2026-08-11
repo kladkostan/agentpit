@@ -9,6 +9,7 @@ export type UserPublic = {
   has_password: boolean;
   onboarded_at: number | null;
   created_at: number;
+  auto_redeem: boolean;
 };
 
 export type AuthResponse = {
@@ -75,6 +76,13 @@ export function changePasswordRequest(
     // A 401 here means "current password is wrong," the expected case for a
     // re-auth prompt — not a dead session. See client.ts's ApiFetchInit.
     skipAuthEvent: true,
+  });
+}
+
+export function setAutoRedeemRequest(enabled: boolean): Promise<UserPublic> {
+  return apiFetch<UserPublic>("/me/auto-redeem", {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
   });
 }
 
