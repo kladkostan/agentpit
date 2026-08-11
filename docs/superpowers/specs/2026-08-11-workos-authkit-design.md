@@ -1,6 +1,10 @@
 # WorkOS AuthKit owns authentication — design
 
-**Status:** approved 2026-08-11
+**Status:** approved 2026-08-11, amended the same day — **there are no passwords
+at all.** Sign-in is a six-digit code emailed by WorkOS (their Magic Auth), or
+Google. Every section below reflects the amendment; what it removed is recorded
+in "What passwords cost us" near the end.
+
 **Supersedes:** `2026-08-11-email-verification-design.md`. That spec built email
 verification on our own auth with Resend as the mail channel. The decision
 changed: authentication moves to WorkOS entirely, which brings verification with
@@ -63,13 +67,25 @@ through it keeps working across this migration without changes.
 ## Sign-up and sign-in stay in our dialog
 
 Custom UI on the AuthKit API, not the Hosted UI. `AuthDialog.tsx` keeps its
-design and the user never leaves the site. Concretely:
+design and the user never leaves the site.
 
-- **Sign-up** creates the user at WorkOS unverified; WorkOS sends the code. The
-  dialog gains a third mode for entering it, with a resend button and a
-  cooldown — the flow already designed in the superseded spec.
-- **Sign-in** calls AuthKit's password authentication.
-- **Password reset** becomes possible for the first time and uses their flow.
+**There is one flow, not two.** The dialog loses its `login` / `signup` modes
+entirely. A person types their address, receives a six-digit code, types it in,
+and is inside — whether or not they have been here before. WorkOS calls this
+Magic Auth and it is two calls: `POST /user_management/magic_auth` sends the
+code, `POST /user_management/authenticate` with
+`grant_type: urn:workos:oauth:grant-type:magic-auth:code` returns the session.
+
+The dialog therefore has two states — address, then code — plus a resend button
+with a cooldown. That is strictly less UI than it has today.
+
+A code rather than a link, and WorkOS agrees: they deprecated Magic Links
+because security scanners fetch every link in a message and invalidate them
+before the human arrives. It also keeps the session in the tab where it started.
+
+**Verification stops being a step.** It is not possible to sign in without
+reading the email, so every address in the system is proven by construction.
+The problem this whole spec started from dissolves rather than being solved.
 
 ### Google becomes a redirect
 
@@ -84,15 +100,18 @@ the shape of the Google sign-in shipped on 2026-08-06 while keeping the feature.
 
 ### First sign-in is the sign-up
 
-A WorkOS user with no `WORKOS_USER_ID` match is a new account, and the callback
-creates the local row, the wallet, and runs on-chain onboarding — exactly what
-`_onboard_new_account` does today. This is how a Google user signs up: there is
-no separate registration for them, as there is none now.
+A verified WorkOS identity with no `WORKOS_USER_ID` match is a new account, and
+whichever door it arrived through — a Magic Auth code or the Google callback —
+creates the local row, the wallet, and runs on-chain onboarding, exactly what
+`_onboard_new_account` does today. There is no separate registration for anyone,
+which is already true for Google users and is now true for everyone.
 
-The email-and-password path keeps its explicit gate: the local row is created by
-successful **verification**, not by the WorkOS user existing. An unverified
-address therefore still costs us no wallet and no gas — the property the
-superseded spec was built around, preserved here.
+The gate the superseded spec was built around is preserved, and by a stronger
+mechanism: **the account is created by a successful authentication, never by an
+address being typed.** Somebody who enters a stranger's address and never reads
+the mail causes a code to be sent and nothing else — no row, no wallet, no gas.
+Where that spec enforced the rule with its own `pending_registrations` table, it
+now falls out of what authentication means.
 
 ### The address lives at WorkOS
 
@@ -102,59 +121,77 @@ sign-in, so a change upstream lands on our side at the next visit rather than
 never. Nothing in the product keys off the address — every relationship uses
 `USER_ID` — so a stale copy between visits costs only a display.
 
-## Private key export needs a new second factor
+## Private key export re-authenticates the same way for everyone
 
 `export_private_key` (`auth_service.py:207`) re-authenticates before handing over
-a key that cannot be revoked. It does that today by verifying the password hash
-we hold — and we will not hold one.
+a key that cannot be revoked. It does that today by verifying a password hash we
+hold, and we will hold none.
 
-- **Password accounts:** re-auth by calling AuthKit's password authentication
-  with the supplied password. A success is the proof; we never see a hash.
-- **Google accounts:** no equivalent single call exists. Export requires a fresh
-  authorization round-trip — the same redirect as sign-in, with `max_age` set so
-  WorkOS re-prompts rather than reusing an old session — and the export is
-  permitted only against the session that returns.
+Passwordless makes this simpler rather than harder: **send a fresh Magic Auth
+code and require it.** One mechanism for every account, password-era or Google,
+because there is no longer any such distinction. An earlier draft of this spec
+had password accounts re-auth one way and Google accounts another — a redirect
+with `max_age` to force a re-prompt — and that asymmetry is now gone along with
+the passwords that caused it.
 
 The existing `KEY_EXPORT_COOLDOWN_S` claim (`auth_service.py:241`) stays exactly
 as it is. It is a guessing floor on our side and does not depend on who stores
-the password.
+what.
 
 ## Migration
 
-WorkOS accepts existing password hashes on user creation — `passwordHash` plus
-`passwordHashType`, with bcrypt among the supported algorithms. **The 17
-production accounts keep their passwords and nobody resets anything.**
+For each existing row: create the WorkOS user with the address and
+`emailVerified: true` — these accounts predate verification and belong to
+colleagues — then store the returned id in `WORKOS_USER_ID`. That is the whole
+migration.
 
-For each existing row: create the WorkOS user with the address, `emailVerified:
-true` (these accounts predate verification and are trusted colleagues), and the
-bcrypt hash where one exists; store the returned id in `WORKOS_USER_ID`. Google
-accounts have no hash and are created without one; they sign in through the
-social path.
+**No password hashes move.** WorkOS does accept a foreign bcrypt hash on user
+creation, and the plan was to use it so nobody had to reset anything. With no
+passwords anywhere there is nothing to carry: the 17 accounts sign in by code to
+the addresses they already have. The hash-import path built in plan 1 becomes
+dead weight and is removed rather than left to rot.
 
-`PASSWORD_HASH` stops being authoritative the moment the cutover lands. It is
-kept in place through the migration as a rollback path and dropped afterwards, in
-a separate change.
+`PASSWORD_HASH` stops being read at the cutover, is kept through it as a rollback
+path, and is dropped afterwards in a separate change.
 
 **Everyone is logged out at the cutover.** Our JWTs stop being accepted and
 AuthKit's have not been issued yet. This is accepted: sessions already die every
 24 hours, so the disruption is one the product inflicts daily already.
 
+## What passwords cost us
+
+Recorded because the amendment deleted work that was already designed, and the
+list is the argument for it. Removing passwords removes: password storage,
+length rules, `change_password` and its Settings row, password reset (never
+built, now never needed), the bcrypt hash import in the migration, the
+`login` / `signup` split in the dialog, email verification as a separate step,
+and the password-versus-Google asymmetry in key export. It adds two API calls.
+
+**It costs one thing, and the cost is real: email becomes the only door.** Today
+a person with a password gets in even while our mail is broken. Passwordless
+means a mail outage locks out everybody, not just new arrivals. Google sign-in
+stays precisely as the second door that does not touch email — which is why it
+is not optional here.
+
 ## Ordering
 
-1. The WorkOS client and configuration, behind an interface, with a test double —
-   so no test reaches the network.
-2. JWKS verification of AuthKit access tokens in the request path, accepted
-   *alongside* our own JWT. Both work; nothing is broken yet.
-3. The migration script: import the existing users, populate `WORKOS_USER_ID`.
-4. Registration, sign-in, verification and resend move to AuthKit, and the dialog
-   gains the code step.
-5. Google becomes the redirect flow.
-6. Cutover: our JWT issuance is removed and only AuthKit tokens are accepted.
-7. Afterwards, separately: drop `PASSWORD_HASH`, remove `JwtCoder` and the Google
-   verifier.
+0. **Establish what an AuthKit access token actually contains.** Mint one in
+   staging, print its claims, and pin `AuthKitVerifier` to them. Plan 1 built
+   that verifier to require `iss` = the AuthKit domain and `aud` = the client
+   id; WorkOS's own session library verifies with neither, so if the real token
+   omits `aud` the verifier rejects every sign-in. The tests cannot settle it —
+   they mint their own tokens carrying exactly the assumed claims. Nothing below
+   is worth building until this is checked against a real token.
+1. Magic Auth send + verify behind the existing `WorkOsClient` protocol, with the
+   double extended to match. No UI yet.
+2. First sign-in creates the account: local row, wallet, on-chain onboarding.
+3. The dialog: address, then code, then in. `login`/`signup` modes removed.
+4. Google becomes the redirect flow.
+5. Cutover: our JWT issuance removed, only AuthKit tokens accepted.
+6. Afterwards, separately: drop `PASSWORD_HASH`, remove `JwtCoder`, the Google
+   verifier, `change_password`, and the hash-import path in the migration.
 
-Steps 1–3 are additive and shippable on their own. Nothing is removed before
-step 6.
+Nothing is removed before step 5.
 
 ## Out of scope
 
@@ -177,12 +214,16 @@ Cases that must hold:
   signature from an unknown key is rejected.
 - A valid token whose `sub` matches no `WORKOS_USER_ID` is rejected rather than
   silently creating an account.
-- During steps 2–5, a legacy `JwtCoder` token still authenticates; after step 6
-  it does not.
-- Sign-up creates the WorkOS user and NO local row until verification succeeds;
-  verification creates the row, the wallet, and runs on-chain onboarding.
-- Key export re-auth succeeds with the correct password and fails with a wrong
-  one, without any password hash existing locally.
+- Until step 5, a legacy `JwtCoder` token still authenticates; after it, not.
+- A first-time address gets a code, and entering it creates the local row, the
+  wallet, and runs on-chain onboarding — one flow, no separate registration.
+- A returning address gets a code and lands on its EXISTING row: no second
+  wallet, no second onboarding, no second `USER_ID`.
+- A wrong code, an expired code, and a code for a different address each fail
+  without creating anything.
+- Key export re-auth succeeds with a freshly-mailed code and fails with a stale
+  or wrong one, with no password hash existing anywhere.
+- Nothing anywhere reads `PASSWORD_HASH` after the cutover.
 - The migration script is idempotent: running it twice does not create a second
   WorkOS user for the same address.
 - No test reaches the network: the WorkOS client is a double throughout.
