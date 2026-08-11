@@ -46,7 +46,10 @@ def test_credits_are_reported_as_a_string(client, registered_user):
     r = client.get("/me/credits", headers=registered_user.auth_header)
     assert r.status_code == 200
     assert isinstance(r.json()["credits_wei"], str)
-    assert int(r.json()["credits_wei"]) >= 0
+    # Registration funds the wallet (per this module's docstring) -- assert
+    # a real balance, not merely a non-negative one, so a hardcoded "0"
+    # can't pass this test.
+    assert int(r.json()["credits_wei"]) > 0
 
 
 def test_credits_need_authentication(client):
