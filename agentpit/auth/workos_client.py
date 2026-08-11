@@ -77,6 +77,20 @@ class WorkOsError(RuntimeError):
     """
 
 
+class WorkOsUnavailableError(WorkOsError):
+    """We never reached WorkOS at all — a timeout, a DNS failure, a refused TCP
+    connection.
+
+    A subclass rather than a sibling so every `except WorkOsError` (the
+    migration script, anything that just wants "the call didn't work") keeps
+    catching it unchanged. It exists for one caller: the API, which answers a
+    refusal 401 ("your code was wrong") and this 503 ("come back in a moment").
+    Collapsing the two made a total sign-in outage look like a wave of typos —
+    4xx, so no status-code monitor fires — and told a caller who was never
+    mailed anything to request a new code, which loops.
+    """
+
+
 API_BASE = "https://api.workos.com"
 
 #: bcrypt output: $2a/$2b/$2y, a cost, and the salt+digest. Matched wherever it
@@ -89,7 +103,7 @@ _BCRYPT_RE = re.compile(r"\$2[aby]?\$\d{2}\$[./A-Za-z0-9]{0,53}")
 _API_KEY_RE = re.compile(r"sk_[A-Za-z0-9_]+")
 
 
-def _redact(text: str) -> str:
+def _redact(text: str, secrets: tuple[str | None, ...] = ()) -> str:
     """Strip anything secret-shaped out of an error body before it is stored.
 
     The body is kept because it names the field WorkOS objected to, which is
@@ -105,7 +119,19 @@ def _redact(text: str) -> str:
       bad code with `{"code": "invalid_code"}` and echoes nothing — but a
       gateway or WAF in front of it is under no such obligation, and that path
       is reached by an unauthenticated caller who supplies the code.
+
+    The two patterns catch those by shape. `secrets` catches the third kind,
+    which has no shape to match: the refresh token, an opaque string no regex
+    can recognise. It is the longest-lived credential we handle — measured
+    2026-08-11, WorkOS does NOT rotate it, so one leaked into a log at WARNING
+    keeps working — so the caller passes the literal values it just sent and
+    they are removed by identity rather than by pattern.
     """
+    for secret in secrets:
+        # Guard the empty string: `"".join` semantics would turn `str.replace`
+        # into inserting "[redacted]" between every character.
+        if secret:
+            text = text.replace(secret, "[redacted]")
     return _API_KEY_RE.sub("[redacted]", _BCRYPT_RE.sub("[redacted]", text))
 
 
@@ -135,13 +161,26 @@ class RealWorkOsClient:
             transport=transport,
         )
 
-    def _request(self, method: str, path: str, **kwargs) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        secrets: tuple[str | None, ...] = (),
+        **kwargs,
+    ) -> dict:
+        """`secrets` are the literal secret values in the body we are sending,
+        for `_redact` to strip back out if the response quotes them."""
         try:
             response = self._http.request(method, path, **kwargs)
         except httpx.HTTPError as exc:
+            # Nothing was reached, so this is not a refusal: `WorkOsUnavailable
+            # Error` is what makes the API answer 503 instead of 401 here.
             # Bare `exc` would be fine, but chaining keeps the cause visible in
             # a traceback while the message stays ours.
-            raise WorkOsError(f"WorkOS request failed: {method} {path}") from exc
+            raise WorkOsUnavailableError(
+                f"WorkOS request failed: {method} {path}"
+            ) from exc
         if response.status_code >= 400:
             # The body may name the field WorkOS objected to, which is what
             # makes a failed migration diagnosable. The request is not
@@ -149,7 +188,7 @@ class RealWorkOsClient:
             # remaining case, a response that quotes the request back at us.
             raise WorkOsError(
                 f"WorkOS {method} {path} returned {response.status_code}: "
-                f"{_redact(response.text)[:500]}"
+                f"{_redact(response.text, secrets)[:500]}"
             )
         return response.json()
 
@@ -176,7 +215,12 @@ class RealWorkOsClient:
             body["password_hash"] = password_hash
             body["password_hash_type"] = "bcrypt"
         return self._to_user(
-            self._request("POST", "/user_management/users", json=body)
+            self._request(
+                "POST",
+                "/user_management/users",
+                json=body,
+                secrets=(password_hash,),
+            )
         )
 
     def find_user_by_email(self, email: str) -> WorkOsUser | None:
@@ -203,6 +247,10 @@ class RealWorkOsClient:
                 "client_secret": self._api_key,
                 **body,
             },
+            # Everything secret this body can carry. The refresh token is the
+            # one no pattern can find, and this endpoint is the only place it
+            # is ever sent.
+            secrets=(self._api_key, body.get("refresh_token")),
         )
         return WorkOsSession(
             workos_user_id=payload["user"]["id"],
@@ -234,6 +282,11 @@ class FakeWorkOsClient:
         #: How many codes this double has mailed. Doubles as the source of the
         #: code itself, so that no two addresses are ever issued the same one.
         self._codes_sent = 0
+        #: Test-only: how many codes were presented for authentication. Lets a
+        #: test assert that a request was rejected BEFORE WorkOS was called --
+        #: which a status code alone cannot show, since the round trip and the
+        #: local rejection both end in the same 4xx.
+        self.authenticate_calls = 0
 
     def create_user(self, *, email: str, password_hash: str | None) -> WorkOsUser:
         existing = self.find_user_by_email(email)
@@ -267,6 +320,7 @@ class FakeWorkOsClient:
         return self._codes[email.lower()]
 
     def authenticate_with_code(self, email: str, code: str) -> WorkOsSession:
+        self.authenticate_calls += 1
         if self._codes.get(email.lower()) != code:
             raise WorkOsError("WorkOS rejected the code")
         user = self.find_user_by_email(email)

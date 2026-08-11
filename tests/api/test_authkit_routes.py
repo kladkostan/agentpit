@@ -1,18 +1,47 @@
 """Signing in with a mailed code, over the real app."""
+from contextlib import contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 
 from agentpit.api import deps
 from agentpit.api.main import app
-from agentpit.auth.workos_client import FakeWorkOsClient
+from agentpit.auth.workos_client import (
+    FakeWorkOsClient,
+    RealWorkOsClient,
+    WorkOsUnavailableError,
+)
+from agentpit.config import Settings
+from tests.db_helpers import fresh_test_conn
+
+
+@contextmanager
+def _using(client):
+    """Swap the app's WorkOS client, then put back exactly what was there.
+
+    Restore rather than pop, the way `_isolated_db_session` in conftest handles
+    `get_db_session`. Something else already owns this key -- `create_app`
+    installs the production client under it and conftest replaces that with the
+    offline default -- so popping does not undo this override, it deletes
+    theirs, and every later test in the session that touches an /auth route
+    without asking for the `workos` fixture would 500 on the placeholder's
+    RuntimeError, looking like a product bug in a file that changed nothing.
+    """
+    previous = app.dependency_overrides.get(deps.get_workos_client)
+    app.dependency_overrides[deps.get_workos_client] = lambda: client
+    try:
+        yield client
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(deps.get_workos_client, None)
+        else:
+            app.dependency_overrides[deps.get_workos_client] = previous
 
 
 @pytest.fixture
 def workos():
-    fake = FakeWorkOsClient()
-    app.dependency_overrides[deps.get_workos_client] = lambda: fake
-    yield fake
-    app.dependency_overrides.pop(deps.get_workos_client, None)
+    with _using(FakeWorkOsClient()) as fake:
+        yield fake
 
 
 def _code(workos: FakeWorkOsClient, email: str) -> str:
@@ -63,6 +92,18 @@ def test_a_wrong_code_is_401_and_creates_nothing(workos):
             "/auth/session", json={"email": "b@example.com", "code": "000000"}
         )
         assert resp.status_code == 401, resp.text
+        # Look, rather than infer it from the 200 below: if a failed
+        # `authenticate_with_code` ever did commit a row -- a refactor that
+        # resolved the account before calling WorkOS would -- the correct code
+        # afterwards finds that row by WORKOS_USER_ID and still answers 200,
+        # so the second half of this test passes while a wrong code has minted
+        # a funded wallet for whoever guessed the address.
+        with fresh_test_conn() as conn:
+            made = conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE EMAIL = %s",
+                ("b@example.com",),
+            ).fetchone()
+        assert made["n"] == 0, made
         # Nothing was created, so a correct code afterwards still works.
         ok = client.post(
             "/auth/session",
@@ -78,6 +119,10 @@ def test_a_malformed_code_is_422_and_never_reaches_workos(workos):
             "/auth/session", json={"email": "c@example.com", "code": "12345"}
         )
     assert resp.status_code == 422
+    # The status code alone does not say WorkOS was spared: a round trip that
+    # came back refused would be a 401, which is also not 200. Count the calls
+    # instead -- this is the assertion the test's name makes.
+    assert workos.authenticate_calls == 0
 
 
 def test_signing_in_twice_returns_the_same_account(workos):
@@ -135,10 +180,52 @@ def test_register_and_login_are_untouched(workos):
 def test_the_routes_answer_503_when_workos_is_not_configured():
     # Every developer machine before the account existed, and any deployment
     # that forgets the keys. It must be an obvious 503, not a 500.
-    app.dependency_overrides[deps.get_workos_client] = lambda: None
-    try:
+    with _using(None):
         with TestClient(app) as client:
             resp = client.post("/auth/code", json={"email": "f@example.com"})
-        assert resp.status_code == 503, resp.text
-    finally:
-        app.dependency_overrides.pop(deps.get_workos_client, None)
+    assert resp.status_code == 503, resp.text
+
+
+def test_an_unreachable_workos_is_503_not_401():
+    """An outage is ours, and must not read as "you typed it wrong".
+
+    /auth/code is the case that makes it visible: the caller asked to be SENT a
+    code and was not, so "request a new code" -- the 401 body -- asks them to
+    do the thing that just failed, forever. 503 also puts a sign-in outage
+    where status-code monitoring can see it.
+    """
+    class Unreachable(FakeWorkOsClient):
+        def send_magic_auth_code(self, email: str) -> None:
+            raise WorkOsUnavailableError("WorkOS request failed: POST /x")
+
+    with _using(Unreachable()):
+        with TestClient(app) as client:
+            resp = client.post("/auth/code", json={"email": "g@example.com"})
+    assert resp.status_code == 503, resp.text
+    assert "new code" not in resp.json()["detail"]
+
+
+def test_the_app_factory_wires_the_workos_client_into_the_dependency():
+    """The thing every test above overrides has to exist underneath.
+
+    All of them install their own `get_workos_client`, so all of them stay
+    green if `create_app` stops installing it -- verified by deleting that line
+    -- while every production POST /auth/code answers 500 from the placeholder's
+    RuntimeError. Nothing else in the suite looks at the real wiring, so assert
+    it on a freshly built app rather than on the shared, overridden one. No
+    request is made: building the client only opens a connection pool.
+    """
+    from agentpit.api.app import create_app
+
+    configured = create_app(
+        Settings(workos_api_key="sk_test_wiring", workos_client_id="client_wiring")
+    )
+    assert deps.get_workos_client in configured.dependency_overrides
+    assert isinstance(
+        configured.dependency_overrides[deps.get_workos_client](), RealWorkOsClient
+    )
+
+    # And the deployment without keys gets None through the same wire, which is
+    # what turns the three routes into the 503 above instead of a 500.
+    absent = create_app(Settings(workos_api_key="", workos_client_id=""))
+    assert absent.dependency_overrides[deps.get_workos_client]() is None

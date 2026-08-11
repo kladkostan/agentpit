@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from agentpit.auth.workos_client import WorkOsError
+from agentpit.auth.workos_client import WorkOsError, WorkOsUnavailableError
 from agentpit.domain.exceptions import (
     AlreadyExistsError,
     BusinessRuleError,
@@ -48,15 +48,40 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _business_rule(_: Request, exc: BusinessRuleError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
+    # Registered before its base class for readability only; as with
+    # `InsufficientGasError` above, Starlette walks the raised exception's MRO
+    # and the subclass wins whatever the order.
+    @app.exception_handler(WorkOsUnavailableError)
+    async def _workos_unreachable(
+        _: Request, exc: WorkOsUnavailableError
+    ) -> JSONResponse:
+        """WorkOS was never reached: our outage, not the caller's typo.
+
+        Split out of the 401 below because collapsing the two was wrong twice
+        over. On POST /auth/code the caller asked to be SENT a code and was not
+        -- telling them to request a new one loops forever. And a total sign-in
+        outage reported as 4xx is invisible to status-code monitoring, which is
+        the one signal that would page anybody; 503 is the same answer the
+        unconfigured deployment gives, and means the same thing to a client.
+        ERROR, not WARNING: nothing the caller did can fix this.
+        """
+        log.error("WorkOS is unreachable: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "sign-in is temporarily unavailable — try again"},
+        )
+
     @app.exception_handler(WorkOsError)
     async def _workos_refused(_: Request, exc: WorkOsError) -> JSONResponse:
         """A failed sign-in, not a failed server.
 
-        `WorkOsError` is deliberately one type for every WorkOS failure, so a
-        mistyped code and a WorkOS outage arrive here together. 401 is right for
-        the first and honest about the second -- either way no session exists --
-        and without this handler the exception is a `RuntimeError` that falls
-        through to a 500, turning a six-digit typo into "agentpit is broken".
+        `WorkOsError` is deliberately one type for every WorkOS failure, so
+        everything WorkOS actively refused -- a mistyped code, an expired one,
+        a rejected refresh token -- arrives here together. 401 is right for all
+        of them, and without this handler the exception is a `RuntimeError`
+        that falls through to a 500, turning a six-digit typo into "agentpit is
+        broken". The one case that is NOT a refusal, never reaching WorkOS at
+        all, is `WorkOsUnavailableError` above.
 
         Handled here rather than by making `WorkOsError` a subclass of
         `InvalidCredentialsError`: the migration script catches it outside the

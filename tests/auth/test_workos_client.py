@@ -7,6 +7,7 @@ from agentpit.auth.workos_client import (
     FakeWorkOsClient,
     WorkOsError,
     WorkOsSession,
+    WorkOsUnavailableError,
     WorkOsUser,
     build_workos_client,
 )
@@ -307,3 +308,46 @@ def test_fake_creates_the_user_on_first_code_like_the_real_api_does():
     assert fake.find_user_by_email("new@b.com") is None
     fake.send_magic_auth_code("new@b.com")
     assert fake.find_user_by_email("new@b.com") is not None
+
+
+def test_the_refresh_token_never_appears_in_an_error():
+    # Same gateway-echo case as the API key above, one endpoint later. The
+    # refresh token has no shape a regex can match, and measured 2026-08-11 it
+    # does NOT rotate -- so one echoed into an error message is a permanent
+    # credential written to the log, at WARNING, by the handler that turns this
+    # into a 401.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"code": "invalid_request", "received": request.read().decode()},
+        )
+
+    with pytest.raises(WorkOsError) as exc:
+        _real(handler).refresh_session("rt_live_do_not_log_me")
+    assert "rt_live_do_not_log_me" not in str(exc.value)
+
+
+def test_a_transport_failure_is_an_unavailable_error():
+    # WorkOS was never reached, so nothing was refused. The API answers this
+    # 503 and the refusal below it 401; a single type made a total outage look
+    # like a wave of mistyped codes.
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route to host")
+
+    with pytest.raises(WorkOsUnavailableError):
+        _real(handler).send_magic_auth_code("a@b.com")
+
+
+def test_a_refusal_is_not_an_unavailable_error():
+    # The other side of the split: a 400 from WorkOS itself stays a plain
+    # `WorkOsError`, or every wrong code would answer 503.
+    client = _real(lambda _r: httpx.Response(400, json={"code": "invalid_code"}))
+    with pytest.raises(WorkOsError) as exc:
+        client.authenticate_with_code("a@b.com", "000000")
+    assert not isinstance(exc.value, WorkOsUnavailableError)
+
+
+def test_unavailable_is_still_caught_as_a_workos_error():
+    # The migration script catches `WorkOsError` per account and carries on;
+    # the new subclass must not fall out of that net.
+    assert issubclass(WorkOsUnavailableError, WorkOsError)
