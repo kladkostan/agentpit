@@ -6,6 +6,7 @@ non-crossed per token AND across the YES/NO complement map, so the mirror can
 never self-match — provided cancels are applied before placements.
 """
 import logging
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -307,10 +308,16 @@ def reconcile_market(
     SUCCESSFUL placements; "deferred" is hot placements skipped over budget
     and "failed" is placements that errored or raised — both mean the cycle
     is incomplete and a later cycle must converge the remainder."""
+    # Timing, carried out in the stats the caller already logs. A pass that
+    # gets slow should say where without anyone adding a profiler: the same
+    # code costs milliseconds against a local anvil and seconds against a
+    # remote node, and which segment grew is the whole question.
+    t0 = time.perf_counter()
     tokens = [ref.yes_token, ref.no_token]
     with db.read() as conn:
         rows = TableRead.list_live_order_levels(conn, user.api_key, tokens)
         foreign = {t: TableRead.foreign_touch(conn, user.api_key, t) for t in tokens}
+    t_db = time.perf_counter() - t0
     current = [
         LiveLevel(r["ORDER_ID"], r["TOKEN_ID"], r["SIDE"],
                   int(r["PRICE"]), int(r["REMAINING_AMOUNT"]))
@@ -327,6 +334,7 @@ def reconcile_market(
     # One round trip for all three balances, and the pass keeps them: calm
     # (resting) placements never move them, so this replaces one on-chain read
     # per order — the dominant cost when replicating a deep book.
+    t1 = time.perf_counter()
     held, house_usd = _read_balances(onchain, user, ref)
     splits = 0
     try:
@@ -341,6 +349,7 @@ def reconcile_market(
         # backs asks the house cannot cover. Splits are rare enough for the
         # second round trip to cost nothing — zero in 179 production passes.
         held, house_usd = _read_balances(onchain, user, ref)
+    t_chain = time.perf_counter() - t1
     inventory = dict(held)
     raw_ctf = dict(inventory)
     # KEPT resting SELLs already reserve inventory; only the surplus may back
@@ -416,6 +425,7 @@ def reconcile_market(
         house_usd if p.side == "BUY" else raw_ctf.get(p.token_id)
         for p in calm
     ]
+    t2 = time.perf_counter()
     try:
         ids = order.replace_resting_orders(
             user, cancels, calm_reqs, balance_hints=calm_hints)
@@ -425,9 +435,11 @@ def reconcile_market(
         log.warning("mirror batch replace raised (market=%s)",
                     ref.market_id, exc_info=True)
         failed += len(calm)
+    t_calm = time.perf_counter() - t2
 
     # Phase 2: hot placements (real settlements), budgeted by ATTEMPT — a
     # failed settlement still consumed chain time and must count.
+    t3 = time.perf_counter()
     attempted = 0
     for p in hot:
         if attempted >= cfg.mirror_max_settlements_per_cycle:
@@ -435,6 +447,13 @@ def reconcile_market(
             continue
         attempted += 1
         _try_place(p, expect_fill=True)
+    t_hot = time.perf_counter() - t3
 
     return {"placed": placed, "cancelled": len(cancels), "fills": fills,
-            "splits": splits, "deferred": deferred, "failed": failed}
+            "splits": splits, "deferred": deferred, "failed": failed,
+            # Milliseconds, rounded: the log line is read by a person.
+            "ms_db": round(t_db * 1000),
+            "ms_chain": round(t_chain * 1000),
+            "ms_calm": round(t_calm * 1000),
+            "ms_hot": round(t_hot * 1000),
+            "ms_all": round((time.perf_counter() - t0) * 1000)}
