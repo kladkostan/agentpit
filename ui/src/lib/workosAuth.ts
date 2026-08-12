@@ -44,6 +44,44 @@ export const WORKOS_REDIRECT_URI = present(
 /** Where the state lives between leaving the tab and coming back to it. */
 export const STATE_KEY = "agentpit.oauth_state";
 
+/** The route `AuthCallbackPage` is mounted at in `App.tsx`. */
+export const CALLBACK_PATH = "/auth/callback";
+
+/**
+ * Should the provider hydrate `/me` from whatever token storage already holds?
+ *
+ * No, when the app has been loaded straight onto the callback route -- and that
+ * exception is load-bearing, not tidiness.
+ *
+ * `AuthCallbackPage` is a descendant of `AuthProvider`, and React runs child
+ * effects before parent ones, so the code exchange starts BEFORE the provider's
+ * mount hydration. Both are then in flight at once. For every browser returning
+ * after the cutover, storage still holds a legacy access token the API no
+ * longer accepts and no refresh token to trade for a new one, so the hydration
+ * 401s while the exchange succeeds. Two things then destroy the session that
+ * just started: the hydration's own catch clears the token, and `apiFetch`
+ * dispatches UNAUTHORIZED_EVENT, whose handler sees `tokenRef.current` holding
+ * the NEW token and logs out. A completed Google sign-in lands on `/` signed
+ * out.
+ *
+ * Refereeing that after the fact -- comparing tokens in the handler -- fixes
+ * only the second path and leaves the first. Not starting the second request is
+ * what actually removes the race, and it costs nothing: the callback page's
+ * whole job is to establish a session, and it sets the user itself.
+ *
+ * Matching is case-insensitive because react-router's is: `caseSensitive`
+ * defaults to false, so `/Auth/Callback` renders the callback page too, and a
+ * check stricter than the router's would reopen the race on that URL.
+ */
+export function hydratesFromStoredToken(
+  pathname: string,
+  storedToken: string | null,
+): boolean {
+  if (!storedToken) return false;
+  const normalised = pathname.toLowerCase().replace(/\/+$/, "");
+  return normalised !== CALLBACK_PATH;
+}
+
 export function buildAuthorizeUrl(params: {
   clientId: string;
   redirectUri: string;

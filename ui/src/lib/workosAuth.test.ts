@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuthorizeUrl,
+  CALLBACK_PATH,
   createState,
+  hydratesFromStoredToken,
   present,
   readCallbackParams,
   stateMatches,
@@ -30,6 +32,43 @@ describe("present", () => {
 
   it("trims surrounding whitespace", () => {
     expect(present(" client_1 \n")).toBe("client_1");
+  });
+});
+
+describe("hydratesFromStoredToken", () => {
+  // This is the whole of the fix for the callback race, held out here because
+  // `ui/` vitest is node-env and cannot render AuthProvider to catch it.
+  it("hydrates on an ordinary route when a token is stored", () => {
+    expect(hydratesFromStoredToken("/markets", "tok")).toBe(true);
+  });
+
+  it("does not hydrate with nothing stored", () => {
+    expect(hydratesFromStoredToken("/markets", null)).toBe(false);
+    expect(hydratesFromStoredToken("/markets", "")).toBe(false);
+  });
+
+  it("does not hydrate on the callback route even holding a token", () => {
+    // The case the cutover produces for every returning browser: a legacy
+    // token in storage that the API no longer accepts. Hydrating it races the
+    // code exchange and ends with the user logged out of the session the
+    // exchange just created.
+    expect(hydratesFromStoredToken(CALLBACK_PATH, "stale-legacy-jwt")).toBe(
+      false,
+    );
+  });
+
+  it("ignores a trailing slash on the callback route", () => {
+    expect(hydratesFromStoredToken("/auth/callback/", "tok")).toBe(false);
+  });
+
+  it("ignores case, because react-router does", () => {
+    // `caseSensitive` defaults to false, so this URL renders the callback page
+    // as well — a stricter check here would leave the race open on it.
+    expect(hydratesFromStoredToken("/Auth/Callback", "tok")).toBe(false);
+  });
+
+  it("still hydrates on a route that merely starts the same way", () => {
+    expect(hydratesFromStoredToken("/auth/callback-help", "tok")).toBe(true);
   });
 });
 

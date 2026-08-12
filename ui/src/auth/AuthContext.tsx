@@ -27,6 +27,7 @@ import {
   refreshFailureEndsSession,
   statusOf,
 } from "@/components/auth/codeFlow";
+import { hydratesFromStoredToken } from "@/lib/workosAuth";
 import { AuthContext, type AuthValue, type DialogMode } from "./context";
 import { showWelcomeToast } from "./welcomeToast";
 
@@ -148,10 +149,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
   }, [logout]);
 
-  // On mount, if we have a token, hydrate the user via /me.
+  // On mount, if we have a token, hydrate the user via /me — unless the app
+  // was loaded straight onto the callback route, where doing so races the code
+  // exchange and can end the session it just created. The reasoning is on
+  // `hydratesFromStoredToken`; it lives there so it is covered, since this
+  // component cannot be render-tested.
   useEffect(() => {
     let cancelled = false;
-    if (!accessToken) {
+    if (!hydratesFromStoredToken(window.location.pathname, accessToken)) {
+      // Loading has to end either way. Leaving it true for the callback page
+      // to clear would strand the nav in a loading state whenever the exchange
+      // fails; the cost of clearing it now is a brief logged-out nav over a
+      // page that already reads "Signing you in…".
       setIsLoading(false);
       return;
     }
