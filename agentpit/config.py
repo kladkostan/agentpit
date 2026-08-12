@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -196,23 +199,32 @@ class Settings(BaseSettings):
     @field_validator("workos_authkit_domain", mode="after")
     @classmethod
     def _normalize_authkit_domain(cls, value: str) -> str:
-        """Trailing slash off, and only a full URL accepted.
+        """Trailing slash off, and a missing scheme complained about loudly.
 
         Both shapes are what an operator actually pastes. A trailing slash was
         silently tolerated in one place and not the other -- the JWKS fetch
         stripped it, so the key resolved and the config looked right, while the
-        `iss` comparison kept the slash and rejected every token. A missing
-        scheme is worse still: the URL has no type, key resolution raises
-        before a socket opens, and the same "invalid session" comes back.
+        `iss` comparison kept the slash and rejected every token.
 
-        Fail here instead. A wrong value at startup is a bug an operator can
-        read; the same value at request time is one they cannot.
+        This used to raise on a missing scheme. It must not: `Settings()` is
+        constructed by `create_app` before anything serves, so a ValueError
+        here crash-loops the whole api container -- taking `/order` down for
+        every trading bot over a value that authentication does not even read.
+        Nothing outside this module reads `workos_authkit_domain`; the issuer
+        and the JWKS URL are both derived from `workos_client_id` instead (see
+        `authkit_issuer` / `authkit_jwks_url` in auth/authkit_tokens.py). The
+        setting is kept because a future hosted-UI flow would want it, and the
+        trap is kept documented because that flow would hit it.
         """
         value = value.rstrip("/")
         if value and not value.startswith(("http://", "https://")):
-            raise ValueError(
-                "WORKOS_AUTHKIT_DOMAIN must include the scheme, "
-                f"e.g. https://{value}"
+            log.error(
+                "WORKOS_AUTHKIT_DOMAIN=%r has no scheme; it should look like "
+                "https://%s. Nothing reads it today, so sign-in is unaffected, "
+                "but any future use of it would build an untyped URL that "
+                "fails before a socket opens.",
+                value,
+                value,
             )
         return value
 
