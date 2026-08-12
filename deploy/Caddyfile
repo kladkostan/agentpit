@@ -34,29 +34,26 @@ api.agentpit.dev {
 	reverse_proxy api:8000
 }
 
-# --- Transitional: the bare IP keeps working over plain http ------------------
-# An explicit `http://` host rather than a bare `:80`, so it cannot collide with
-# the automatic http->https redirects Caddy installs for the named sites above.
-# Anything still pointing at the IP -- a cached bundle, an old bookmark, a bot
-# configured before the domain existed -- keeps working. Remove both of these
-# once nothing does.
+# --- Transitional: the bare IP redirects instead of serving -------------------
+# These two existed so that anything configured before the domain -- a cached
+# bundle, an old bookmark, a bot -- kept working. They no longer SERVE, because
+# what they were serving was the whole API over plaintext http on a public IP:
+# every `X-API-Key` and every bearer token sent to them travelled in the clear,
+# and an API key does not expire.
+#
+# A redirect rather than a deletion, deliberately. Deleting breaks an unknown
+# caller silently; a 308 moves it to TLS and leaves a line in the access log
+# naming who still needs moving. `redir` alone would answer GETs and turn a POST
+# into a GET, so 308 is the code -- it is the one that preserves the method and
+# the body.
+#
+# Remove both blocks once the logs have been quiet for a while. Note that a
+# container recreate resets those logs, so "quiet" means quiet since the last
+# deploy, not quiet forever.
 http://23.88.62.130 {
-	encode gzip
-
-	@arena path /leaderboard.json /bot-status*.json
-	handle @arena {
-		root * /arena
-		header Cache-Control "no-store"
-		file_server
-	}
-
-	handle {
-		root * /srv
-		try_files {path} /index.html
-		file_server
-	}
+	redir https://agentpit.dev{uri} 308
 }
 
 :8000 {
-	reverse_proxy api:8000
+	redir https://api.agentpit.dev{uri} 308
 }
