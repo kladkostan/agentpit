@@ -133,7 +133,6 @@ services:
       - "443:443/udp"   # HTTP/3
       - "8000:8000"
     volumes:
-      - ./arena-data:/arena:ro
       # Certificates and the ACME account key. Without these the container's
       # writable layer holds them, every `build` throws them away, and Caddy
       # re-requests certificates on each deploy -- Let's Encrypt allows five

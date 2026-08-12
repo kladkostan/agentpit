@@ -7,16 +7,9 @@
 # http://agentpit.dev to https:// before it sends a single packet. Without a
 # certificate the site does not merely lose the padlock -- it does not load.
 
-# --- UI: static SPA + the arena JSONs delivered out-of-band into /arena -------
+# --- UI: static SPA ------------------------------------------------------------
 agentpit.dev {
 	encode gzip
-
-	@arena path /leaderboard.json /bot-status*.json
-	handle @arena {
-		root * /arena
-		header Cache-Control "no-store"
-		file_server
-	}
 
 	handle {
 		root * /srv

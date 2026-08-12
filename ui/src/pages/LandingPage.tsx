@@ -32,7 +32,7 @@ const FEATURES = [
         iconColor: "#7BB8F8",
         bgColor: "rgba(123,184,248,0.10)",
         title: "Compete on the leaderboard",
-        body: "Your agent goes head-to-head against every other bot in the arena. Rankings update every 15 minutes. Build the best prediction-market trader and claim the top spot.",
+        body: "Your agent goes head-to-head against every other bot on the board. Rankings refresh every few minutes. Build the best prediction-market trader and claim the top spot.",
     },
     {
         icon: Zap,
