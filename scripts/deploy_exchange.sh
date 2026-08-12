@@ -97,7 +97,26 @@ echo "  signup grant:  $SIGNUP_GRANT_RAW raw apUSD"
 echo
 
 # Fund the deployer with 10,000 native (0x21E19E0C9BAB2400000 == 10_000 * 1e18).
-cast rpc anvil_setBalance "$DEPLOYER" 0x21E19E0C9BAB2400000 --rpc-url "$RPC_URL" >/dev/null
+# Only a local anvil has that cheat. On a real chain -- SKALE, a testnet -- the
+# method does not exist and the node answers -32601, which used to kill the
+# deploy on its first RPC call. There the deployer is funded out of band, so a
+# missing cheat is not an error; an empty wallet still is, and it is better to
+# say so here than to fail three contracts later.
+if ! cast rpc anvil_setBalance "$DEPLOYER" 0x21E19E0C9BAB2400000 \
+     --rpc-url "$RPC_URL" >/dev/null 2>&1; then
+  BAL="$(cast balance "$DEPLOYER" --rpc-url "$RPC_URL")"
+  if [ "$BAL" = "0" ]; then
+    echo "Error: no anvil_setBalance on $RPC_URL and $DEPLOYER holds no gas." >&2
+    exit 1
+  fi
+  echo "  funding:       external, $BAL wei already held"
+fi
+
+# SKALE prices gas at zero and implements no EIP-1559, so foundry's attempt to
+# build a type-2 transaction asks for eth_feeHistory and gets -32601. Legacy
+# pricing is what such a chain wants, and anvil accepts legacy transactions
+# too, so this is safe to pass everywhere rather than branching on the chain.
+GAS_MODE="--legacy"
 
 # --- 1. Deploy ConditionalTokens from its committed creation bytecode ---------
 CTF_ARTIFACT="$CTF_EXCHANGE_DIR/artifacts/ConditionalTokens.json"
@@ -110,6 +129,7 @@ fi
 CTF="$(cast send \
   --private-key "$PK" \
   --rpc-url "$RPC_URL" \
+  $GAS_MODE \
   --json \
   --create "$CTF_BYTECODE" | jq -r .contractAddress)"
 
@@ -128,6 +148,7 @@ echo "ConditionalTokens deployed: $CTF"
 OUTPUT="$(cd "$CTF_EXCHANGE_DIR" && forge script ExchangeDeployment \
     --private-key "$PK" \
     --rpc-url "$RPC_URL" \
+    $GAS_MODE \
     --json \
     --broadcast \
     -s "deployAgentpitStack(address,address,address,address,uint256)" \
