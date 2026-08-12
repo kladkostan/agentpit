@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/useAuth";
-import { ApiError } from "@/api/client";
 import {
   buildAuthorizeUrl,
   createState,
@@ -29,49 +28,16 @@ import {
 } from "@/components/auth/codeFlow";
 
 const EMAIL_RE = /.+@.+\..+/;
-const MIN_PASSWORD_LENGTH = 8;
-
-function extractDetail(error: unknown): string {
-  if (error instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(error.body) as { detail?: unknown };
-      if (typeof parsed.detail === "string") return parsed.detail;
-      if (Array.isArray(parsed.detail) && parsed.detail.length > 0) {
-        // FastAPI 422: array of {msg, loc, ...}; surface the first message.
-        const first = parsed.detail[0] as { msg?: unknown };
-        if (typeof first.msg === "string") return first.msg;
-      }
-    } catch {
-      /* fall through to error.message */
-    }
-    return error.message;
-  }
-  return error instanceof Error ? error.message : "Something went wrong";
-}
 
 /** Which of the two mailed-code steps the dialog is showing. */
 type Step = "email" | "code";
 
 export function AuthDialog() {
-  const {
-    dialogOpen,
-    dialogMode,
-    closeDialog,
-    setDialogMode,
-    login,
-    register,
-    sendCode,
-    signInWithCode,
-  } = useAuth();
+  const { dialogOpen, closeDialog, sendCode, signInWithCode } = useAuth();
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState<Step>("email");
-  // The password form is still here on purpose: `/register` and `/login` are
-  // untouched by this change, so a regression in the mailed-code path must not
-  // lock anybody out. It goes when those endpoints go.
-  const [usePassword, setUsePassword] = useState(false);
   const [lastSentAt, setLastSentAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
@@ -81,23 +47,13 @@ export function AuthDialog() {
   useEffect(() => {
     if (dialogOpen) {
       setEmail("");
-      setPassword("");
       setCode("");
       setStep("email");
-      setUsePassword(false);
       setLastSentAt(null);
       setError(null);
       setSubmitting(false);
     }
   }, [dialogOpen]);
-
-  // Switching between Log in and Create account clears the password form. Not
-  // folded into the effect above: toggling the mode must not throw the user
-  // back out of the password form they just chose.
-  useEffect(() => {
-    setPassword("");
-    setError(null);
-  }, [dialogMode]);
 
   // Drives the resend countdown. Only ticks on the code step, so the rest of
   // the app never re-renders on a timer it cannot see.
@@ -157,44 +113,7 @@ export function AuthDialog() {
     await requestCode(email);
   };
 
-  const onSubmitPassword = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!EMAIL_RE.test(email)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      if (dialogMode === "login") {
-        await login(email, password);
-      } else {
-        await register(email, password);
-      }
-    } catch (err) {
-      setError(extractDetail(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const isLogin = dialogMode === "login";
-  const passwordTitle = isLogin ? "Log in" : "Create account";
-  const switchPrompt = isLogin ? "New here?" : "Already have an account?";
-  const switchAction = isLogin ? "Create an account" : "Log in";
-  const switchTo = isLogin ? "signup" : "login";
-
-  const title = usePassword
-    ? passwordTitle
-    : step === "email"
-      ? "Sign in"
-      : "Check your email";
+  const title = step === "email" ? "Sign in" : "Check your email";
 
   const secondsLeft = resendSecondsLeft(lastSentAt, now);
   const resendReady = canResend(lastSentAt, now) && !submitting;
@@ -288,55 +207,7 @@ export function AuthDialog() {
           </DialogTitle>
         </DialogHeader>
 
-        {usePassword ? (
-          <form onSubmit={onSubmitPassword} className="space-y-4">
-            {emailField}
-            <div className="space-y-1.5">
-              <Label htmlFor="auth-password" className={fieldLabelClass}>
-                Password
-              </Label>
-              <Input
-                id="auth-password"
-                type="password"
-                autoComplete={isLogin ? "current-password" : "new-password"}
-                required
-                minLength={MIN_PASSWORD_LENGTH}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={submitting}
-              />
-            </div>
-            {errorBlock}
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? `${passwordTitle}…` : passwordTitle}
-            </Button>
-            {googleBlock}
-            <p className="pt-1 text-center text-sm text-muted-foreground">
-              {switchPrompt}{" "}
-              <button
-                type="button"
-                className={linkClass}
-                onClick={() => setDialogMode(switchTo)}
-                disabled={submitting}
-              >
-                {switchAction}
-              </button>
-            </p>
-            <p className="text-center text-sm text-muted-foreground">
-              <button
-                type="button"
-                className={linkClass}
-                onClick={() => {
-                  setUsePassword(false);
-                  setError(null);
-                }}
-                disabled={submitting}
-              >
-                Email me a code instead
-              </button>
-            </p>
-          </form>
-        ) : step === "email" ? (
+        {step === "email" ? (
           <form onSubmit={onSendCode} className="space-y-4">
             <p className="text-sm text-muted-foreground">
               We&rsquo;ll email you a {CODE_LENGTH}-digit code. No password
@@ -348,19 +219,6 @@ export function AuthDialog() {
               {submitting ? "Sending…" : "Email me a code"}
             </Button>
             {googleBlock}
-            <p className="pt-1 text-center text-sm text-muted-foreground">
-              <button
-                type="button"
-                className={linkClass}
-                onClick={() => {
-                  setUsePassword(true);
-                  setError(null);
-                }}
-                disabled={submitting}
-              >
-                Use a password instead
-              </button>
-            </p>
           </form>
         ) : (
           <form onSubmit={onVerifyCode} className="space-y-4">

@@ -161,8 +161,9 @@ class AuthKitService:
         # and `has_password` must keep saying so. Key export no longer consults
         # this flag -- every account re-authenticates with a mailed code -- but
         # it still describes the row, and the row still holds a hash that
-        # `/login` accepts and `change_password` reads. A false here would be
-        # the response denying a credential that works.
+        # `change_password` reads and that `/login` would accept again the
+        # moment the cutover commit is reverted. A false here would be the
+        # response denying a credential the row is still carrying.
         return existing.model_copy(
             update={"workos_user_id": session.workos_user_id}
         )

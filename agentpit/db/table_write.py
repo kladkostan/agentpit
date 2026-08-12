@@ -202,16 +202,17 @@ class TableWrite:
         stopped reading PASSWORD_HASH and now re-authenticates every account
         the same way, with a mailed code pinned to WORKOS_USER_ID.
 
-        The rollback is. `/login` and `change_password` are live and read this
-        column, and the cutover deliberately leaves every legacy capability in
-        the tree so that reverting one commit restores a working legacy
-        sign-in. Nulling the hash here spends that credential account by
-        account, silently, on each holder's first code sign-in -- all 17
-        production accounts have one -- and it does not come back.
+        The rollback is. `/login` answers 410 since the cutover, but the
+        service behind it was left untouched for exactly this reason:
+        reverting that one commit restores a working legacy sign-in, and what
+        it signs people in with is these hashes. `change_password` reads the
+        column live either way. Nulling the hash here spends that credential
+        account by account, silently, on each holder's first code sign-in --
+        all 17 production accounts have one -- and it does not come back.
 
-        The password goes when the door does: task 8 answers 410 on the legacy
-        routes and plan 4 drops the column. Until then the row keeps its
-        password, which is exactly the situation before this feature existed.
+        The door is shut and the password outlives it by one plan: plan 4
+        drops the column, and until then the row keeps its password, which is
+        exactly the situation before this feature existed.
         """
         cur = db.execute(
             "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",

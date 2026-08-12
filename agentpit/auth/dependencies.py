@@ -1,6 +1,5 @@
 from typing import Annotated
 
-import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import (
     APIKeyHeader,
@@ -9,7 +8,6 @@ from fastapi.security import (
 )
 
 from agentpit.auth.authkit_tokens import AuthKitVerifier
-from agentpit.auth.jwt import JwtCoder
 from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
@@ -39,8 +37,9 @@ def _authkit_user(db: DbSession, authkit: AuthKitVerifier, token: str) -> User:
     try:
         workos_user_id = authkit.verify(token)
     except InvalidCredentialsError:
-        # Same wording as the legacy branch above: which of the two verifiers
-        # refused is nothing a caller should be able to probe for.
+        # Deliberately the same wording the unconfigured-deployment branch in
+        # `current_user` uses: why a bearer token was refused is nothing a
+        # caller should be able to probe for.
         raise _unauth("invalid token")
 
     with db.read() as conn:
@@ -50,21 +49,18 @@ def _authkit_user(db: DbSession, authkit: AuthKitVerifier, token: str) -> User:
     return user
 
 
-def make_current_user_dep(coder: JwtCoder, authkit: AuthKitVerifier | None = None):
+def make_current_user_dep(authkit: AuthKitVerifier | None):
     """Build a FastAPI dependency that resolves a request credential to a User.
 
-    Three accepted credentials: a long-lived `X-API-Key` header (checked
-    first), a legacy `JwtCoder` bearer token, or an AuthKit access token. The
-    coder and the verifier are captured by closure so tests can swap them via
+    Two accepted credentials since the cutover: a long-lived `X-API-Key`
+    header, checked first, and an AuthKit access token as a bearer. The
+    verifier is captured by closure so tests can swap it via
     dependency_overrides.
 
     `authkit` is None on a deployment with no `WORKOS_CLIENT_ID` -- the issuer
     and the JWKS URL are both derived from it, so a verifier built without one
-    could only reject everything. That deployment behaves exactly as it did
-    before this plan.
-
-    Both bearer paths are accepted for the whole of this transition; plan 3
-    removes the legacy one.
+    could only reject everything. Such a deployment can still authenticate
+    bots by `X-API-Key`, and nobody else.
     """
     from agentpit.api.deps import get_db_session
 
@@ -82,38 +78,17 @@ def make_current_user_dep(coder: JwtCoder, authkit: AuthKitVerifier | None = Non
 
         if creds is None or not creds.credentials:
             raise _unauth("missing credentials")
-        try:
-            payload = coder.decode(creds.credentials)
-        except jwt.ExpiredSignatureError:
-            # PyJWT checks the signature before `exp`, so reaching this means
-            # the token verified against OUR secret: it is certainly a legacy
-            # one, and handing it to AuthKit could only replace an accurate
-            # message with a vaguer one.
-            raise _unauth("token expired")
-        except jwt.PyJWTError:
-            # Legacy first, AuthKit second, and deliberately in that order: the
-            # legacy check is a local HMAC verification with no I/O, while
-            # `authkit.verify` may fetch a JWKS. During the transition the
-            # common case then costs nothing extra.
-            #
-            # Anything that is not a legacy token lands here, including
-            # unauthenticated junk, so `verify` must not fetch for a token that
-            # is not plausibly ours -- see the gate at the top of it, and the
-            # single-flight guard in `cached_key_resolver`. Without those, this
-            # line hands a stranger one live request to api.workos.com per
-            # request, in the threadpool the X-API-Key path shares.
-            if authkit is None:
-                raise _unauth("invalid token")
-            return _authkit_user(db, authkit, creds.credentials)
 
-        user_id = payload.get("sub")
-        if not isinstance(user_id, str):
-            raise _unauth("invalid token payload")
-
-        with db.read() as conn:
-            user = TableRead.get_user_by_userid(conn, user_id)
-        if user is None:
-            raise _unauth("user no longer exists")
-        return user
+        # EVERY bearer token now reaches the verifier -- a legacy `JwtCoder`
+        # one, an expired AuthKit one, outright junk. The local HMAC check that
+        # used to absorb the first two and answer without I/O is gone, so the
+        # gate at the top of `AuthKitVerifier.verify` and the single-flight
+        # guard in `cached_key_resolver` are the only things left between an
+        # unauthenticated caller and one live fetch to api.workos.com per
+        # request, on the threadpool the X-API-Key path shares. They matter
+        # more after this change than they did before it.
+        if authkit is None:
+            raise _unauth("invalid token")
+        return _authkit_user(db, authkit, creds.credentials)
 
     return current_user

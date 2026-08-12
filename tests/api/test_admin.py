@@ -9,16 +9,9 @@ from agentpit.api.main import app
 ADMIN_TOKEN = "dev-admin-token"
 
 
-def _register(client: TestClient, email: str) -> dict:
-    return client.post(
-        "/register",
-        json={"email": email, "password": "hunter22hunter22"},
-    ).json()
-
-
-def test_mark_bot_requires_admin_token():
+def test_mark_bot_requires_admin_token(sign_in):
     with TestClient(app) as client:
-        user = _register(client, "mark1@example.com")
+        user = sign_in(client, "mark1@example.com")
         resp = client.post(
             "/admin/mark_bot",
             json={"eth_address": user["user"]["eth_address"]},
@@ -26,9 +19,9 @@ def test_mark_bot_requires_admin_token():
         assert resp.status_code == 401
 
 
-def test_mark_bot_flips_is_bot_flag():
+def test_mark_bot_flips_is_bot_flag(sign_in):
     with TestClient(app) as client:
-        user = _register(client, "mark2@example.com")
+        user = sign_in(client, "mark2@example.com")
         resp = client.post(
             "/admin/mark_bot",
             json={"eth_address": user["user"]["eth_address"]},

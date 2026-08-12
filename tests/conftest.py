@@ -22,7 +22,6 @@ import pytest
 from agentpit.api.deps import (
     get_current_user,
     get_db_session,
-    get_jwt_coder,
     get_workos_client,
 )
 from agentpit.api.main import app
@@ -69,12 +68,11 @@ def _no_live_jwks(_token: str):
 # pulls in above carries a real WORKOS_CLIENT_ID. A test that sends an
 # AuthKit-shaped bearer token to the shared app would then reach out to WorkOS
 # and merely look slow, rather than fail as the network-free rule it broke.
-# This default cannot reach anything: its resolver raises. The coder is the
-# app's own instance, so the X-API-Key and legacy-bearer paths are byte for
-# byte what create_app wired.
+# This default cannot reach anything: its resolver raises. The X-API-Key path
+# is byte for byte what create_app wired -- it is ahead of the bearer branch
+# and touches no verifier at all.
 _default_current_user = make_current_user_dep(
-    app.dependency_overrides[get_jwt_coder](),
-    AuthKitVerifier(client_id="client_test_offline", key_resolver=_no_live_jwks),
+    AuthKitVerifier(client_id="client_test_offline", key_resolver=_no_live_jwks)
 )
 app.dependency_overrides[get_current_user] = _default_current_user
 

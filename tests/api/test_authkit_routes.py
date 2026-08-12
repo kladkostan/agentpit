@@ -56,8 +56,10 @@ def test_post_auth_code_accepts_any_address_with_202(workos):
 
 def test_post_auth_code_says_the_same_thing_for_known_and_unknown_addresses(workos):
     # Whether an address has an account must not be inferable here: anybody
-    # can post any address. `/register` already leaks existence with its 409,
-    # which is no reason to add a second oracle.
+    # can post any address. `/register`'s 409 used to leak exactly that, and
+    # since the cutover retired it this endpoint is the only one a stranger
+    # can ask -- so it is now the whole of the answer, not merely a second
+    # oracle beside an existing one.
     with TestClient(app) as client:
         first = client.post("/auth/code", json={"email": "known@example.com"})
         client.post(
@@ -161,20 +163,21 @@ def test_a_garbage_refresh_token_is_401(workos):
     assert resp.status_code == 401, resp.text
 
 
-def test_register_and_login_are_untouched(workos):
-    # This plan removes nothing. If these break, the transition has no floor.
+def test_register_and_login_are_gone(workos):
+    # They were the floor under the transition and they held it until the
+    # mailed-code path above was proven. The cutover pulls it away: these two
+    # answer 410 now, and everything above this line is the only way in.
     with TestClient(app) as client:
         made = client.post(
             "/register",
             json={"email": "legacy@example.com", "password": "hunter22hunter22"},
         )
-        assert made.status_code == 200, made.text
         back = client.post(
             "/login",
             json={"email": "legacy@example.com", "password": "hunter22hunter22"},
         )
-    assert back.status_code == 200, back.text
-    assert back.json()["access_token"]
+    assert made.status_code == 410, made.text
+    assert back.status_code == 410, back.text
 
 
 def test_the_routes_answer_503_when_workos_is_not_configured():

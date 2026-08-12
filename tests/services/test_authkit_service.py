@@ -178,15 +178,15 @@ def test_adopting_a_legacy_row_leaves_its_password_alone():
     code proves it. What stands in the way is no longer key export —
     `export_private_key` stopped reading PASSWORD_HASH and re-authenticates
     every account with a mailed code pinned to WORKOS_USER_ID. It is the
-    rollback: `/login` still accepts this hash and `change_password` still
-    reads it, and the cutover keeps both working so that reverting one commit
-    restores legacy sign-in. Stripping the hash here spends that credential
-    account by account — all 17 production accounts have one — on each
-    holder's first mailed-code sign-in, permanently, because the hash is not
-    recoverable.
+    rollback: `change_password` still reads this hash, and `/login` answers
+    410 only because the cutover left the service under it intact, so
+    reverting that one commit restores legacy sign-in — over these hashes.
+    Stripping the hash here spends that credential account by account — all 17
+    production accounts have one — on each holder's first mailed-code sign-in,
+    permanently, because the hash is not recoverable.
 
-    The password goes when the door does: task 8 answers 410 on the legacy
-    routes and plan 4 drops the column. Until then, the password stays.
+    The password outlives the door by one plan: the legacy routes answer 410
+    now, and plan 4 drops the column. Until then, the password stays.
     """
     workos, onboarder = FakeWorkOsClient(), _Onboarder()
     svc, db = _service(workos, onboarder)

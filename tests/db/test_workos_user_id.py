@@ -44,14 +44,15 @@ def test_linking_stamps_the_identity_and_keeps_the_password():
     # The sign-in writer, unlike the migration one above. It stamps the
     # identity and LEAVES THE PASSWORD ALONE.
     #
-    # Clearing it is the eventual intent -- registration takes any address on
-    # trust while a mailed code proves it -- but the hash is still a working
-    # credential: `/login` accepts it and `change_password` reads it, and the
-    # cutover keeps both alive so that reverting one commit restores legacy
-    # sign-in. Nulling it here spends that on each holder's first code sign-in,
-    # irreversibly, across all 17 production accounts. Key export is no longer
-    # the reason -- it re-authenticates every account with a mailed code now --
-    # so the password goes when the legacy routes do, not before.
+    # Clearing it is the eventual intent -- registration took any address on
+    # trust while a mailed code proves it -- but the hash is still a credential
+    # somebody can be signed in with: `change_password` reads it, and `/login`
+    # answers 410 only because the cutover left the service under it intact so
+    # that reverting one commit restores legacy sign-in. Nulling it here spends
+    # that on each holder's first code sign-in, irreversibly, across all 17
+    # production accounts. Key export is no longer the reason -- it
+    # re-authenticates every account with a mailed code now -- so the password
+    # outlives the routes by one plan and goes when plan 4 drops the column.
     db = DbSession(Settings().database_url)
     with db.write() as conn:
         user_id, _acct, _api_key = TableWrite.create_user(
@@ -70,9 +71,10 @@ def test_adoption_leaves_the_password_flag_true():
 
     `has_password` is `PASSWORD_HASH IS NOT NULL` projected onto the read
     model, and it is what a caller actually sees. Key export no longer consults
-    it -- every account re-authenticates with a mailed code -- but `/login`
-    still accepts the hash and `change_password` still needs it, so a false
-    here would be the row denying a credential it holds.
+    it -- every account re-authenticates with a mailed code -- but
+    `change_password` still needs the hash, and reverting the cutover commit
+    puts `/login` back on top of it, so a false here would be the row denying
+    a credential it holds.
     """
     db = DbSession(Settings().database_url)
     with db.write() as conn:

@@ -1,39 +1,51 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from agentpit.api.deps import AuthKitServiceDep, AuthServiceDep
-from agentpit.datastructures.auth_response import (
-    AuthResponse,
-    GoogleAuthResponse,
-    UserPublic,
-)
+from agentpit.api.deps import AuthKitServiceDep
+from agentpit.datastructures.auth_response import AuthResponse, UserPublic
 from agentpit.datastructures.authkit_requests import (
     CallbackRequest,
     CodeSignInRequest,
     RefreshRequest,
     SendCodeRequest,
 )
-from agentpit.datastructures.google_auth_request import GoogleAuthRequest
-from agentpit.datastructures.login_request import LoginRequest
-from agentpit.datastructures.register_request import RegisterRequest
 
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/register", response_model=AuthResponse)
-def register(payload: RegisterRequest, service: AuthServiceDep) -> AuthResponse:
-    return service.register(payload)
+@router.post("/register", status_code=410)
+def register() -> dict:
+    """Gone: accounts are created by signing in.
+
+    410 rather than 404 because this endpoint existed and was removed, and
+    rather than deleting the route because that would answer 404 -- which reads
+    as a typo to whoever calls it. The service code behind it is untouched, so
+    reverting this commit restores a working legacy sign-in; plan 4 deletes it.
+    """
+    raise HTTPException(
+        status_code=410, detail="sign in with a mailed code instead"
+    )
 
 
-@router.post("/login", response_model=AuthResponse)
-def login(payload: LoginRequest, service: AuthServiceDep) -> AuthResponse:
-    return service.login(payload)
+@router.post("/login", status_code=410)
+def login() -> dict:
+    """Gone: sign in with a mailed code. See `register` above for why 410."""
+    raise HTTPException(
+        status_code=410, detail="sign in with a mailed code instead"
+    )
 
 
-@router.post("/auth/google", response_model=GoogleAuthResponse)
-def google_sign_in(
-    payload: GoogleAuthRequest, service: AuthServiceDep
-) -> GoogleAuthResponse:
-    return service.google_sign_in(payload.credential)
+@router.post("/auth/google", status_code=410)
+def google_sign_in() -> dict:
+    """Gone: Google now arrives through the WorkOS redirect.
+
+    The browser is sent to AuthKit's authorize URL and comes back to
+    `/auth/callback` with a code, so no Google credential is ever posted here.
+    See `register` above for why 410.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="continue with Google, which returns through /auth/callback",
+    )
 
 
 @router.post("/auth/code", status_code=202)

@@ -1,9 +1,9 @@
-"""Three credentials reach `current_user`; this plan may only ADD the third.
+"""Two credentials reach `current_user`, and this is the file that holds it.
 
-`X-API-Key` is every bot trading today, the legacy `JwtCoder` bearer token is
-every browser session minted before this plan, and the AuthKit access token is
-the new one. The first two have to survive untouched -- plan 3 removes the
-second, nothing removes the first.
+`X-API-Key` is every bot trading today; the AuthKit access token is every
+browser. The legacy `JwtCoder` bearer token was the third right up to the
+cutover and is now refused -- `_CountingCoder` survives only to mint one and
+prove that, and goes with `JwtCoder` in plan 4.
 
 The dependency is driven directly rather than through the app because the
 production key resolver fetches a JWKS over the network on the first token it
@@ -94,8 +94,8 @@ def verifier() -> _CountingVerifier:
 
 
 @pytest.fixture
-def current_user(coder: _CountingCoder, verifier: _CountingVerifier):
-    return make_current_user_dep(coder, verifier)
+def current_user(verifier: _CountingVerifier):
+    return make_current_user_dep(verifier)
 
 
 def _bearer(token: str) -> HTTPAuthorizationCredentials:
@@ -119,49 +119,55 @@ def _user_count(db) -> int:
         return conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
 
 
-def test_an_api_key_resolves_its_user_without_consulting_either_token_path(
-    db, coder, verifier, current_user
-):
-    # The bot path. Every agent trading today authenticates with this header,
-    # and no new test would notice it breaking -- so assert not only that it
-    # still works but that it still short-circuits: a refactor that verified
-    # the (absent) bearer token first would put a JWKS fetch in front of every
-    # order placement.
-    user_id, api_key = _make_user(db, email="bot@example.com")
+def test_an_api_key_still_resolves_its_user_after_the_cutover(db):
+    # The single most important assertion in this plan. Every bot trading
+    # today authenticates this way and nothing about it moved to WorkOS.
+    with db.write() as conn:
+        user_id, _acct, api_key = TableWrite.create_user(
+            conn, email="bot@example.com", password_hash=None, handle=None
+        )
+    verifier = _CountingVerifier()
 
-    resolved = current_user(api_key, None, db)
+    dep = make_current_user_dep(verifier)
+    user = dep(api_key=api_key, creds=None, db=db)
 
-    assert resolved.user_id == user_id
-    assert coder.decodes == 0
+    assert user.user_id == user_id
+    # Never consulted: the API-key path returns before the token path.
     assert verifier.verifies == 0
 
 
-def test_a_bad_api_key_is_401_and_does_not_fall_through_to_the_token_paths(
-    db, coder, verifier, current_user
+def test_a_bad_api_key_is_401_and_does_not_fall_through_to_the_token_path(
+    db, verifier, current_user
 ):
     # Same short-circuit, on the failing side: a wrong key must be rejected
-    # here, not handed to the verifiers as if it were a bearer token.
+    # here, not handed to the verifier as if it were a bearer token.
     with pytest.raises(HTTPException) as raised:
         current_user("not-a-key", None, db)
 
     assert raised.value.status_code == 401
-    assert coder.decodes == 0
     assert verifier.verifies == 0
 
 
-def test_a_legacy_bearer_token_still_resolves_its_user(db, verifier, current_user):
-    # /register and /login keep minting these until plan 3, and every browser
-    # session already open is holding one.
-    user_id, _api_key = _make_user(db, email="legacy@example.com")
-    token = JwtCoder(Settings()).encode(user_id=user_id, email="legacy@example.com")
+def test_a_legacy_jwt_is_no_longer_accepted(db, coder):
+    # The cutover itself. Every browser holding one of these is signed out
+    # exactly once -- which is what the product already does to everybody every
+    # 24 hours, so the disruption is one it inflicts daily already.
+    with db.write() as conn:
+        user_id, _acct, _key = TableWrite.create_user(
+            conn, email="legacy@example.com", password_hash="$2b$12$x", handle=None
+        )
+    token = coder.encode(user_id=user_id, email="legacy@example.com")
 
-    resolved = current_user(None, _bearer(token), db)
-
-    assert resolved.user_id == user_id
-    # The legacy check is a local HMAC verification with no I/O and it runs
-    # first, so the common case during the transition never pays for the
-    # AuthKit path at all.
-    assert verifier.verifies == 0
+    dep = make_current_user_dep(_CountingVerifier())
+    with pytest.raises(HTTPException) as excinfo:
+        dep(
+            api_key=None,
+            creds=HTTPAuthorizationCredentials(
+                scheme="Bearer", credentials=token
+            ),
+            db=db,
+        )
+    assert excinfo.value.status_code == 401
 
 
 def test_an_authkit_token_resolves_the_row_its_sub_is_linked_to(db, current_user):
@@ -198,11 +204,11 @@ def test_a_garbage_bearer_token_is_401(db, current_user):
     assert raised.value.status_code == 401
 
 
-def test_an_authkit_token_is_401_where_no_verifier_was_configured(db, coder):
-    # A deployment without WORKOS_CLIENT_ID gets `authkit=None`, and the
-    # dependency must stay exactly what it was before this plan rather than
-    # crash on the None.
-    unconfigured = make_current_user_dep(coder)
+def test_an_authkit_token_is_401_where_no_verifier_was_configured(db):
+    # A deployment without WORKOS_CLIENT_ID gets `authkit=None`. Such a
+    # deployment can authenticate bots by X-API-Key and nobody else, which is
+    # a refusal rather than the crash on the None it must not be.
+    unconfigured = make_current_user_dep(None)
     _make_user(db, email="orphan@example.com", workos_user_id="user_authkit_2")
 
     with pytest.raises(HTTPException) as raised:

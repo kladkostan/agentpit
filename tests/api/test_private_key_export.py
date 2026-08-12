@@ -14,27 +14,22 @@ for it now belongs to a different WorkOS identity. See
 `test_a_code_belonging_to_a_different_account_is_refused` and
 `test_a_stale_email_pins_to_the_row_s_own_identity` below.
 
-Anvil + the deployed exchange must be running -- registering (by password) or
-signing in with a mailed code runs the same on-chain onboarding every other
-auth test relies on.
+Anvil + the deployed exchange must be running -- signing in with a mailed code
+runs the same on-chain onboarding every other auth test relies on.
 """
 
 from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
-from unittest.mock import patch
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from agentpit.api import deps
-from agentpit.api.deps import get_google_verifier
 from agentpit.api.main import app
 from agentpit.auth.dependencies import make_current_user_dep
-from agentpit.auth.google import GoogleIdentity, GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.auth.workos_client import FakeWorkOsClient
 from agentpit.config import Settings
@@ -101,18 +96,25 @@ class _FakeAuthKitVerifier:
 def _fake_authkit_bearer():
     """Let a `FakeWorkOsClient` session authenticate a second request.
 
-    Scoped to this file only, not conftest: swapping in `_FakeAuthKitVerifier`
-    changes nothing for the X-API-Key or legacy-JWT paths (checked first,
-    unaffected), but every OTHER test file relies on conftest's default --
-    built once with a resolver that deliberately raises on any use (see its
-    docstring) -- to catch a real network fetch by accident. Restoring that
-    default afterward, rather than popping the override, matches `_using`
-    above for the same reason: conftest's is not the original value either,
-    and popping would delete it for every test that runs after this one.
+    Scoped to this file only, not the root conftest: swapping in
+    `_FakeAuthKitVerifier` changes nothing for the X-API-Key path (checked
+    first, unaffected), but every test file that does not ask for it relies on
+    the root conftest's default -- built once with a resolver that
+    deliberately raises on any use (see its docstring) -- to catch a real
+    network fetch by accident. Restoring that default afterward, rather than
+    popping the override, matches `_using` above for the same reason: the root
+    conftest's is not the original value either, and popping would delete it
+    for every test that runs after this one.
+
+    `tests/api/conftest.py` pairs the same verifier with a WorkOS double as an
+    opt-in `workos` fixture, for the files that only need "an account that is
+    signed in". This file keeps its own copy because it shadows that fixture
+    name with its own and signs in by hand, and because autouse covers the
+    tests here that drive a bearer request without asking for a double.
     """
     previous = app.dependency_overrides.get(deps.get_current_user)
     app.dependency_overrides[deps.get_current_user] = make_current_user_dep(
-        app.dependency_overrides[deps.get_jwt_coder](), _FakeAuthKitVerifier()
+        _FakeAuthKitVerifier()
     )
     try:
         yield
@@ -137,76 +139,10 @@ def _auth(session: dict) -> dict:
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
-@dataclass
-class _RegisteredUser:
-    user_id: str
-    password: str
-    eth_address: str
-    auth_header: dict
-
-
-@dataclass
-class _GoogleUser:
-    user_id: str
-    google_sub: str
-    email: str
-    eth_address: str
-    auth_header: dict
-
-
 @pytest.fixture
 def client():
     with TestClient(app) as c:
         yield c
-
-
-@pytest.fixture
-def registered_user(client) -> _RegisteredUser:
-    password = "hunter22hunter22"
-    body = client.post(
-        "/register",
-        json={"email": "keyexport@example.com", "password": password},
-    ).json()
-    return _RegisteredUser(
-        user_id=body["user"]["user_id"],
-        password=password,
-        eth_address=body["user"]["eth_address"],
-        auth_header={"Authorization": f"Bearer {body['access_token']}"},
-    )
-
-
-@pytest.fixture
-def google_user(client):
-    """A signed-in Google account, verified through a real `GoogleTokenVerifier`
-    instance (installed as the app's dependency for the life of this fixture)
-    rather than the `_StubVerifier` the other Google tests use -- patching
-    `GoogleTokenVerifier.verify` at the class level, as `has_password` below
-    needs to, only intercepts calls made through a real instance.
-    """
-    previous = app.dependency_overrides.get(get_google_verifier)
-    app.dependency_overrides[get_google_verifier] = lambda: GoogleTokenVerifier(
-        "test-client-id"
-    )
-    try:
-        sub = "google-sub-key-export-owner"
-        email = "keyexport-google@example.com"
-        with patch(
-            "agentpit.auth.google.GoogleTokenVerifier.verify",
-            return_value=GoogleIdentity(sub=sub, email=email),
-        ):
-            body = client.post("/auth/google", json={"credential": "cred-owner"}).json()
-        yield _GoogleUser(
-            user_id=body["user"]["user_id"],
-            google_sub=sub,
-            email=email,
-            eth_address=body["user"]["eth_address"],
-            auth_header={"Authorization": f"Bearer {body['access_token']}"},
-        )
-    finally:
-        if previous is None:
-            app.dependency_overrides.pop(get_google_verifier, None)
-        else:
-            app.dependency_overrides[get_google_verifier] = previous
 
 
 @pytest.fixture
@@ -398,16 +334,24 @@ def test_the_export_code_goes_to_the_account_s_own_address(workos):
 
 
 def test_an_account_with_no_workos_identity_is_told_to_sign_in_again(workos):
-    # A row from `/register` that has never been through WorkOS has a null
-    # WORKOS_USER_ID, so there is nothing to pin a code against. Reachable
-    # only while the legacy JWT is still accepted -- Task 8 closes it.
+    # A legacy row that has never been through WorkOS has a null
+    # WORKOS_USER_ID, so there is nothing to pin a code against.
+    #
+    # The cutover did NOT close this branch, contrary to what the note here
+    # used to say: it reaches `current_user` by `X-API-Key`, which is checked
+    # ahead of every token path and did not move to WorkOS. A bot holding a
+    # key issued before the migration is exactly this case, so the row is
+    # built directly rather than signed in -- there is no HTTP door left that
+    # makes one.
+    with fresh_test_conn() as conn:
+        _user_id, _acct, api_key = TableWrite.create_user(
+            conn, email="legacy@example.com", password_hash="$2b$12$x", handle=None
+        )
     with TestClient(app) as client:
-        made = client.post(
-            "/register",
-            json={"email": "legacy@example.com", "password": "hunter22hunter22"},
-        ).json()
         resp = client.post(
-            "/me/private-key", json={"code": "123456"}, headers=_auth(made)
+            "/me/private-key",
+            json={"code": "123456"},
+            headers={"X-API-Key": api_key},
         )
     assert resp.status_code == 400, resp.text
     assert "sign in again" in resp.text
@@ -482,26 +426,37 @@ def test_the_response_is_not_cacheable(workos):
     assert resp.headers.get("cache-control") == "no-store"
 
 
-def test_the_key_is_absent_from_every_other_response(client, registered_user):
+def test_the_key_is_absent_from_every_other_response(client, workos):
     """UserPublic is a whitelist and must stay one."""
-    r = client.get("/me", headers=registered_user.auth_header)
+    session = _sign_in(client, workos, "whitelist@example.com")
+    r = client.get("/me", headers=_auth(session))
     assert r.status_code == 200
     assert "private_key" not in r.text
     assert "eth_key" not in r.text
 
 
-def test_has_password_reflects_how_the_account_signs_in(
-    client, registered_user, google_user
-):
-    """`has_password` still has to tell the truth for both kinds of account:
-    `login` uses it to pick "invalid email or password" vs. "this account
-    signs in with Google", and `change_password` uses it to refuse a Google
-    account outright. Export no longer reads it -- every account now proves
-    itself the same way -- but the field itself is not going anywhere."""
-    password_account = client.get("/me", headers=registered_user.auth_header).json()
-    google_account = client.get("/me", headers=google_user.auth_header).json()
-    assert password_account["has_password"] is True
-    assert google_account["has_password"] is False
+def test_has_password_reflects_whether_the_row_still_carries_a_hash(client):
+    """`has_password` still has to tell the truth about both kinds of row.
+
+    Nothing signing in today sets a hash, so both rows are built directly and
+    read back over `X-API-Key`: the only door left that a row with no WorkOS
+    identity can come through. `change_password` is the last live reader of
+    the distinction, and it goes with the column in plan 4 -- until then the
+    field must not start reporting True for the accounts the cutover creates,
+    which would put a password form in front of people who have never had one.
+    """
+    with fresh_test_conn() as conn:
+        _uid, _acct, with_hash = TableWrite.create_user(
+            conn, email="haspw@example.com", password_hash="$2b$12$x", handle=None
+        )
+        _uid2, _acct2, without_hash = TableWrite.create_user(
+            conn, email="nopw@example.com", password_hash=None, handle=None
+        )
+
+    legacy = client.get("/me", headers={"X-API-Key": with_hash}).json()
+    current = client.get("/me", headers={"X-API-Key": without_hash}).json()
+    assert legacy["has_password"] is True
+    assert current["has_password"] is False
 
 
 # ----- security invariants ---------------------------------------------

@@ -431,7 +431,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.workos_client_id
         else None
     )
-    current_user_fn = make_current_user_dep(coder, authkit_verifier)
+    current_user_fn = make_current_user_dep(authkit_verifier)
     # One verifier per app: it caches Google's signing keys, and a per-request
     # instance would re-fetch them on every sign-in.
     google_verifier = (

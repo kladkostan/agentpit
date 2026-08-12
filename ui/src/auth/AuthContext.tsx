@@ -10,10 +10,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   completeCallbackRequest,
   googleSignInRequest,
-  loginRequest,
   meRequest,
   refreshSessionRequest,
-  registerRequest,
   sendCodeRequest,
   signInWithCodeRequest,
   type UserPublic,
@@ -28,7 +26,7 @@ import {
   statusOf,
 } from "@/components/auth/codeFlow";
 import { hydratesFromStoredToken } from "@/lib/workosAuth";
-import { AuthContext, type AuthValue, type DialogMode } from "./context";
+import { AuthContext, type AuthValue } from "./context";
 import { showWelcomeToast } from "./welcomeToast";
 
 const TOKEN_KEY = "agentpit.access_token";
@@ -64,7 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     readStored(TOKEN_KEY) !== null,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState<DialogMode>("login");
 
   // Keep the api client in sync with the live token without a circular import.
   const tokenRef = useRef(accessToken);
@@ -182,46 +179,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
     // We only want this to run once on mount; subsequent token changes go
-    // through login/register which set the user themselves.
+    // through signInWithCode, signInWithCallbackCode or refreshAccessToken,
+    // all of which set the user themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openLogin = useCallback(() => {
-    setDialogMode("login");
-    setDialogOpen(true);
-  }, []);
-
-  const openSignup = useCallback(() => {
-    setDialogMode("signup");
-    setDialogOpen(true);
-  }, []);
+  // Two names, one dialog. Signing in and signing up stopped being different
+  // actions at the cutover — a mailed code creates the account if there isn't
+  // one — but the callers still read differently at their call sites, so the
+  // pair stays rather than every one of them switching to `openDialog`.
+  const openLogin = useCallback(() => setDialogOpen(true), []);
+  const openSignup = useCallback(() => setDialogOpen(true), []);
 
   const closeDialog = useCallback(() => setDialogOpen(false), []);
-
-  const login = useCallback<AuthValue["login"]>(
-    async (email, password) => {
-      const resp = await loginRequest(email, password);
-      persistToken(resp.access_token);
-      // Legacy paths send back null here; writing it through clears whatever
-      // an earlier mailed-code session left behind.
-      persistRefreshToken(resp.refresh_token);
-      setUser(resp.user);
-      setDialogOpen(false);
-    },
-    [persistRefreshToken, persistToken],
-  );
-
-  const register = useCallback<AuthValue["register"]>(
-    async (email, password) => {
-      const resp = await registerRequest(email, password);
-      persistToken(resp.access_token);
-      persistRefreshToken(resp.refresh_token);
-      setUser(resp.user);
-      setDialogOpen(false);
-      showWelcomeToast();
-    },
-    [persistRefreshToken, persistToken],
-  );
 
   const sendCode = useCallback<AuthValue["sendCode"]>(async (email) => {
     await sendCodeRequest(email);
@@ -272,13 +242,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       isLoading,
       dialogOpen,
-      dialogMode,
       openLogin,
       openSignup,
       closeDialog,
-      setDialogMode,
-      login,
-      register,
       sendCode,
       signInWithCode,
       signInWithGoogle,
@@ -291,12 +257,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       isLoading,
       dialogOpen,
-      dialogMode,
       openLogin,
       openSignup,
       closeDialog,
-      login,
-      register,
       sendCode,
       signInWithCode,
       signInWithGoogle,
