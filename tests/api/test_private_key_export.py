@@ -1,17 +1,20 @@
 """Taking the key to a wallet that is yours.
 
 agentpit generates the wallet and holds its key. Export is what lets the
-account holder put it in MetaMask and fund it. The dangerous path is the
-Google one: a valid token proves somebody signed in, not that THIS account's
-owner did.
+account holder put it in MetaMask and fund it. The dangerous path is a code
+that proves somebody's identity, not necessarily THIS account's -- the
+`workos_user_id` pin in `AuthService.export_private_key` is what keeps a code
+genuinely mailed to one account from unlocking another's key.
 
-Anvil + the deployed exchange must be running — registering (by password or
-Google) runs the same on-chain onboarding every other auth test relies on.
+Anvil + the deployed exchange must be running -- registering (by password) or
+signing in with a mailed code runs the same on-chain onboarding every other
+auth test relies on.
 """
 
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from unittest.mock import patch
 
@@ -19,16 +22,111 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from agentpit.api import deps
 from agentpit.api.deps import get_google_verifier
 from agentpit.api.main import app
+from agentpit.auth.dependencies import make_current_user_dep
 from agentpit.auth.google import GoogleIdentity, GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
+from agentpit.auth.workos_client import FakeWorkOsClient
 from agentpit.config import Settings
 from agentpit.db.row_factory import ci_dict_row
+from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
+from agentpit.domain.exceptions import InvalidCredentialsError
 from agentpit.services.auth_service import AuthService
 from tests.db_helpers import TEST_DSN, fresh_test_conn, fresh_test_db
+
+
+@contextmanager
+def _using(client):
+    """Swap the app's WorkOS client, then put back exactly what was there.
+
+    Copied from `tests/api/test_authkit_routes.py` rather than imported: see
+    that module's copy of this helper for why restoring beats popping --
+    conftest's shared fake sits under this same key, and popping would delete
+    it for every test that runs after this one in the session.
+    """
+    previous = app.dependency_overrides.get(deps.get_workos_client)
+    app.dependency_overrides[deps.get_workos_client] = lambda: client
+    try:
+        yield client
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(deps.get_workos_client, None)
+        else:
+            app.dependency_overrides[deps.get_workos_client] = previous
+
+
+@pytest.fixture
+def workos():
+    with _using(FakeWorkOsClient()) as fake:
+        yield fake
+
+
+class _FakeAuthKitVerifier:
+    """Maps `FakeWorkOsClient`'s access token straight back to its
+    `workos_user_id`, instead of verifying a signature.
+
+    Every export test in this file signs in over HTTP and then re-presents
+    that session's access token as a bearer credential on a LATER request --
+    export re-authenticates a second call on the same signed-in account, which
+    nothing before this file needed. The production `AuthKitVerifier` checks a
+    real JWT's signature, issuer and `client_id` claim against a JWKS fetched
+    over the network -- exactly what a unit test may never do, and not
+    something `FakeWorkOsClient` attempts either: it mints an opaque
+    `at-<workos_user_id>` string (see `workos_client.py`), which is precise
+    enough for every test that only inspects the `/auth/session` response
+    itself. `AuthKitVerifier.verify`'s contract is "token in, workos_user_id
+    out"; this satisfies exactly that without pretending to check a signature
+    the double never produced.
+    """
+
+    def verify(self, token: str) -> str:
+        if not token.startswith("at-"):
+            raise InvalidCredentialsError("invalid session")
+        return token[3:]
+
+
+@pytest.fixture(autouse=True)
+def _fake_authkit_bearer():
+    """Let a `FakeWorkOsClient` session authenticate a second request.
+
+    Scoped to this file only, not conftest: swapping in `_FakeAuthKitVerifier`
+    changes nothing for the X-API-Key or legacy-JWT paths (checked first,
+    unaffected), but every OTHER test file relies on conftest's default --
+    built once with a resolver that deliberately raises on any use (see its
+    docstring) -- to catch a real network fetch by accident. Restoring that
+    default afterward, rather than popping the override, matches `_using`
+    above for the same reason: conftest's is not the original value either,
+    and popping would delete it for every test that runs after this one.
+    """
+    previous = app.dependency_overrides.get(deps.get_current_user)
+    app.dependency_overrides[deps.get_current_user] = make_current_user_dep(
+        app.dependency_overrides[deps.get_jwt_coder](), _FakeAuthKitVerifier()
+    )
+    try:
+        yield
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(deps.get_current_user, None)
+        else:
+            app.dependency_overrides[deps.get_current_user] = previous
+
+
+def _sign_in(client, workos, email: str) -> dict:
+    """A signed-in account, the only way there is one now: address, code, in."""
+    client.post("/auth/code", json={"email": email})
+    resp = client.post(
+        "/auth/session", json={"email": email, "code": workos.last_code(email)}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _auth(session: dict) -> dict:
+    return {"Authorization": f"Bearer {session['access_token']}"}
 
 
 @dataclass
@@ -73,9 +171,9 @@ def registered_user(client) -> _RegisteredUser:
 def google_user(client):
     """A signed-in Google account, verified through a real `GoogleTokenVerifier`
     instance (installed as the app's dependency for the life of this fixture)
-    rather than the `_StubVerifier` the other Google tests use — patching
-    `GoogleTokenVerifier.verify` at the class level, as the dangerous-path test
-    below needs to, only intercepts calls made through a real instance.
+    rather than the `_StubVerifier` the other Google tests use -- patching
+    `GoogleTokenVerifier.verify` at the class level, as `has_password` below
+    needs to, only intercepts calls made through a real instance.
     """
     previous = app.dependency_overrides.get(get_google_verifier)
     app.dependency_overrides[get_google_verifier] = lambda: GoogleTokenVerifier(
@@ -104,82 +202,173 @@ def google_user(client):
 
 
 @pytest.fixture
-def other_google_sub() -> str:
-    """A Google `sub` that belongs to nobody in this account's row."""
-    return "google-sub-someone-else"
-
-
-@pytest.fixture
 def db_conn():
     conn = fresh_test_conn()
     yield conn
     conn.close()
 
 
-def test_a_password_account_exports_with_its_password(client, registered_user):
-    r = client.post(
-        "/me/private-key",
-        json={"password": registered_user.password},
-        headers=registered_user.auth_header,
-    )
-    assert r.status_code == 200
-    body = r.json()
+# ----- the mailed-code factor -------------------------------------------
+
+
+def test_export_succeeds_with_a_freshly_mailed_code(workos):
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "k@example.com")
+        assert client.post(
+            "/me/private-key/code", headers=_auth(session)
+        ).status_code == 202
+        resp = client.post(
+            "/me/private-key",
+            json={"code": workos.last_code("k@example.com")},
+            headers=_auth(session),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["eth_address"] == session["user"]["eth_address"]
     assert body["private_key"].startswith("0x")
-    assert len(body["private_key"]) == 66
-    assert body["eth_address"] == registered_user.eth_address
 
 
-def test_a_wrong_password_is_rejected(client, registered_user):
-    r = client.post(
-        "/me/private-key",
-        json={"password": "not-the-password"},
-        headers=registered_user.auth_header,
-    )
-    assert r.status_code == 401
-    assert "private_key" not in r.text
-
-
-def test_a_password_account_cannot_use_the_google_door(client, registered_user):
-    r = client.post(
-        "/me/private-key",
-        json={"google_credential": "anything"},
-        headers=registered_user.auth_header,
-    )
-    assert r.status_code == 400
-    assert "private_key" not in r.text
-
-
-def test_a_google_token_for_a_DIFFERENT_account_gets_nothing(
-    client, google_user, other_google_sub
-):
-    """The one that matters. A valid Google token proves somebody signed in;
-    it must also be THIS account's identity, or the key goes to whoever
-    authenticated last."""
-    with patch(
-        "agentpit.auth.google.GoogleTokenVerifier.verify",
-        return_value=GoogleIdentity(sub=other_google_sub, email="someone@else.com"),
-    ):
-        r = client.post(
+def test_a_code_belonging_to_a_different_account_is_refused(workos):
+    # THE test in this task. Without the workos_user_id pin this passes and
+    # the key goes to whoever authenticated last.
+    with TestClient(app) as client:
+        mine = _sign_in(client, workos, "mine@example.com")
+        _sign_in(client, workos, "theirs@example.com")
+        # A code genuinely mailed to the other account, presented by this one.
+        client.post("/auth/code", json={"email": "theirs@example.com"})
+        resp = client.post(
             "/me/private-key",
-            json={"google_credential": "a-valid-token-for-someone-else"},
-            headers=google_user.auth_header,
+            json={"code": workos.last_code("theirs@example.com")},
+            headers=_auth(mine),
         )
-    assert r.status_code == 401
-    assert "private_key" not in r.text
+    assert resp.status_code == 401, resp.text
+    assert "private_key" not in resp.text
 
 
-def test_a_google_account_exports_with_its_own_token(client, google_user):
-    with patch(
-        "agentpit.auth.google.GoogleTokenVerifier.verify",
-        return_value=GoogleIdentity(sub=google_user.google_sub, email=google_user.email),
-    ):
-        r = client.post(
+def test_a_wrong_code_is_401_and_does_not_stamp_the_export(workos):
+    # The stamp matters beyond this endpoint: once EXPORTED_AT is set,
+    # `_maybe_reonboard` never repairs that account again. A wrong guess must
+    # not spend that.
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "w@example.com")
+        client.post("/me/private-key/code", headers=_auth(session))
+        resp = client.post(
+            "/me/private-key", json={"code": "000000"}, headers=_auth(session)
+        )
+    assert resp.status_code == 401, resp.text
+    with DbSession(Settings().database_url).read() as conn:
+        exported_at, _ = TableRead.get_key_export_state(
+            conn, session["user"]["user_id"]
+        )
+    assert exported_at is None
+
+
+def test_a_malformed_code_is_422_and_never_reaches_workos(workos):
+    # Asserted on the call counter, not the status: a local rejection and a
+    # round trip both end in a 4xx and are indistinguishable otherwise.
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "m@example.com")
+        before = workos.authenticate_calls
+        resp = client.post(
+            "/me/private-key", json={"code": "12345"}, headers=_auth(session)
+        )
+    assert resp.status_code == 422
+    assert workos.authenticate_calls == before
+
+
+def test_the_cooldown_still_applies(workos):
+    # Two attempts inside KEY_EXPORT_COOLDOWN_S. The second is refused before
+    # its code is looked at, right or wrong.
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "c@example.com")
+        client.post("/me/private-key/code", headers=_auth(session))
+        first_code = workos.last_code("c@example.com")
+        assert client.post(
+            "/me/private-key", json={"code": first_code}, headers=_auth(session)
+        ).status_code == 200
+        client.post("/me/private-key/code", headers=_auth(session))
+        resp = client.post(
             "/me/private-key",
-            json={"google_credential": "a-valid-token"},
-            headers=google_user.auth_header,
+            json={"code": workos.last_code("c@example.com")},
+            headers=_auth(session),
         )
-    assert r.status_code == 200
-    assert r.json()["private_key"].startswith("0x")
+    assert resp.status_code == 400, resp.text
+    assert "too many attempts" in resp.text
+
+
+def test_the_export_code_goes_to_the_account_s_own_address(workos):
+    # `/auth/code` takes an address from the request body. This one may only
+    # ever mail the address on the row the caller is authenticated as, or the
+    # endpoint becomes a way to mail a sign-in code to anybody.
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "own@example.com")
+        resp = client.post(
+            "/me/private-key/code",
+            json={"email": "someone-else@example.com"},
+            headers=_auth(session),
+        )
+    assert resp.status_code == 202, resp.text
+    assert workos.last_code("own@example.com")
+    with pytest.raises(KeyError):
+        workos.last_code("someone-else@example.com")
+
+
+def test_an_account_with_no_workos_identity_is_told_to_sign_in_again(workos):
+    # A row from `/register` that has never been through WorkOS has a null
+    # WORKOS_USER_ID, so there is nothing to pin a code against. Reachable
+    # only while the legacy JWT is still accepted -- Task 8 closes it.
+    with TestClient(app) as client:
+        made = client.post(
+            "/register",
+            json={"email": "legacy@example.com", "password": "hunter22hunter22"},
+        ).json()
+        resp = client.post(
+            "/me/private-key", json={"code": "123456"}, headers=_auth(made)
+        )
+    assert resp.status_code == 400, resp.text
+    assert "sign in again" in resp.text
+
+
+def test_export_answers_503_when_workos_is_not_configured(workos):
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "d@example.com")
+        app.dependency_overrides[deps.get_workos_client] = lambda: None
+        try:
+            resp = client.post("/me/private-key/code", headers=_auth(session))
+        finally:
+            app.dependency_overrides[deps.get_workos_client] = lambda: workos
+    assert resp.status_code == 503, resp.text
+
+
+# ----- behaviour that doesn't change with the factor ---------------------
+
+
+def test_a_successful_export_is_stamped(workos, db_conn):
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "stamped@example.com")
+        client.post("/me/private-key/code", headers=_auth(session))
+        client.post(
+            "/me/private-key",
+            json={"code": workos.last_code("stamped@example.com")},
+            headers=_auth(session),
+        )
+    row = db_conn.execute(
+        "SELECT KEY_EXPORTED_AT FROM users WHERE USER_ID = %s",
+        (session["user"]["user_id"],),
+    ).fetchone()
+    assert row["KEY_EXPORTED_AT"] is not None
+
+
+def test_the_response_is_not_cacheable(workos):
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "cache@example.com")
+        client.post("/me/private-key/code", headers=_auth(session))
+        resp = client.post(
+            "/me/private-key",
+            json={"code": workos.last_code("cache@example.com")},
+            headers=_auth(session),
+        )
+    assert resp.headers.get("cache-control") == "no-store"
 
 
 def test_the_key_is_absent_from_every_other_response(client, registered_user):
@@ -190,34 +379,14 @@ def test_the_key_is_absent_from_every_other_response(client, registered_user):
     assert "eth_key" not in r.text
 
 
-def test_a_successful_export_is_stamped(client, registered_user, db_conn):
-    client.post(
-        "/me/private-key",
-        json={"password": registered_user.password},
-        headers=registered_user.auth_header,
-    )
-    row = db_conn.execute(
-        "SELECT KEY_EXPORTED_AT FROM users WHERE USER_ID = %s",
-        (registered_user.user_id,),
-    ).fetchone()
-    assert row["KEY_EXPORTED_AT"] is not None
-
-
-def test_the_response_is_not_cacheable(client, registered_user):
-    r = client.post(
-        "/me/private-key",
-        json={"password": registered_user.password},
-        headers=registered_user.auth_header,
-    )
-    assert r.headers.get("cache-control") == "no-store"
-
-
 def test_has_password_reflects_how_the_account_signs_in(
     client, registered_user, google_user
 ):
-    """The Task 2 dialog needs to know which factor to show without guessing
-    client-side, so `UserPublic.has_password` has to tell the truth for both
-    kinds of account."""
+    """`has_password` still has to tell the truth for both kinds of account:
+    `login` uses it to pick "invalid email or password" vs. "this account
+    signs in with Google", and `change_password` uses it to refuse a Google
+    account outright. Export no longer reads it -- every account now proves
+    itself the same way -- but the field itself is not going anywhere."""
     password_account = client.get("/me", headers=registered_user.auth_header).json()
     google_account = client.get("/me", headers=google_user.auth_header).json()
     assert password_account["has_password"] is True
@@ -225,30 +394,6 @@ def test_has_password_reflects_how_the_account_signs_in(
 
 
 # ----- security invariants ---------------------------------------------
-
-
-def test_a_failed_attempt_still_starts_the_cooldown(client, registered_user):
-    """The regression this closes: every failure branch used to raise inside
-    the same transaction as the attempt stamp, so psycopg rolled the stamp
-    back along with the exception and a REJECTED guess cost nothing. A second
-    call right after -- even with the RIGHT password this time -- must still
-    be refused while the window from the first (failed) attempt is open, or
-    an attacker can guess at full speed while only the legitimate owner ever
-    waits."""
-    first = client.post(
-        "/me/private-key",
-        json={"password": "not-the-password"},
-        headers=registered_user.auth_header,
-    )
-    assert first.status_code == 401
-
-    second = client.post(
-        "/me/private-key",
-        json={"password": registered_user.password},
-        headers=registered_user.auth_header,
-    )
-    assert second.status_code == 400
-    assert "private_key" not in second.text
 
 
 def test_mark_key_exported_stamps_only_the_first_export(db_conn):

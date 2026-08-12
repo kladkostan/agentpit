@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, Eye, EyeOff, Fuel, Key, KeyRound, Lock, Mail, User, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   changePasswordRequest,
   exportPrivateKeyRequest,
+  sendExportCodeRequest,
   setAutoRedeemRequest,
   type UserPublic,
   updateHandleRequest,
@@ -11,7 +12,13 @@ import {
 import { ApiError } from "@/api/client";
 import { useCredits } from "@/api/portfolio";
 import { useAuth } from "@/auth/useAuth";
-import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import {
+  CODE_LENGTH,
+  canResend,
+  isCompleteCode,
+  normaliseCode,
+  resendSecondsLeft,
+} from "@/components/auth/codeFlow";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -23,7 +30,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { GOOGLE_CLIENT_ID } from "@/lib/googleAuth";
 import { exportErrorMessage } from "@/lib/exportKeyError";
 import { formatCredits } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -267,17 +273,28 @@ function ApiKeyRow({ apiKey }: { apiKey: string }) {
 
 type ExportedKey = { private_key: string; eth_address: string };
 
+/** Which of the three export-dialog screens is showing: the warning, the
+ *  mailed code, or the key itself. */
+type ExportStep = "warning" | "code" | "result";
+
 function ExportKeyButton({ user }: { user: UserPublic }) {
   const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState("");
+  const [step, setStep] = useState<ExportStep>("warning");
+  const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [result, setResult] = useState<ExportedKey | null>(null);
 
   const reset = () => {
-    setPassword("");
+    setStep("warning");
+    setCode("");
     setError("");
+    setSendingCode(false);
     setLoading(false);
+    setLastSentAt(null);
     setResult(null);
   };
 
@@ -286,20 +303,51 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
     if (!next) reset();
   };
 
-  const submit = async (factor: { password: string } | { googleCredential: string }) => {
+  // Drives the resend countdown, same as AuthDialog: only while the code
+  // field is showing, so the rest of the page never re-renders on a timer it
+  // cannot see.
+  useEffect(() => {
+    if (step !== "code") return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [step]);
+
+  const requestCode = async () => {
     setError("");
-    setLoading(true);
+    setSendingCode(true);
     try {
-      const exported = await exportPrivateKeyRequest(factor);
-      setResult(exported);
-      // Clear it now rather than leaving it to `reset()` on close — the
-      // plaintext password otherwise sits in state for as long as the
-      // dialog stays open showing the key beside it.
-      setPassword("");
+      await sendExportCodeRequest();
+      setLastSentAt(Date.now());
+      setCode("");
+      setStep("code");
     } catch (err) {
       const message =
         err instanceof ApiError
-          ? exportErrorMessage(err.status, user.has_password, err.body)
+          ? exportErrorMessage(err.status, err.body)
+          : "Failed to export private key.";
+      setError(message);
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!isCompleteCode(code)) return;
+    setError("");
+    setLoading(true);
+    try {
+      const exported = await exportPrivateKeyRequest(code);
+      setResult(exported);
+      setStep("result");
+      // Clear it now rather than leaving it to `reset()` on close — the
+      // code otherwise sits in state, a live credential, for as long as the
+      // dialog stays open showing the key beside it.
+      setCode("");
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? exportErrorMessage(err.status, err.body)
           : "Failed to export private key.";
       setError(message);
       toast.error(message);
@@ -318,6 +366,9 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
     }
   };
 
+  const secondsLeft = resendSecondsLeft(lastSentAt, now);
+  const resendReady = canResend(lastSentAt, now) && !sendingCode;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
@@ -333,7 +384,7 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
             cannot undo an export or move the funds back.
           </DialogDescription>
         </DialogHeader>
-        {result ? (
+        {step === "result" && result ? (
           <div className="flex flex-col gap-3">
             <p className="break-all rounded-md border bg-muted p-3 font-mono text-sm">
               {result.private_key}
@@ -343,50 +394,66 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
               Copy private key
             </Button>
           </div>
-        ) : user.has_password ? (
+        ) : step === "code" ? (
           <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              We sent a {CODE_LENGTH}-digit code to{" "}
+              <span className="font-medium text-foreground">{user.email}</span>.
+            </p>
             <Input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              // one-time-code lets the OS offer the code straight from the
+              // mail; inputMode gets the numeric keypad on a phone.
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              maxLength={CODE_LENGTH}
+              placeholder="Code"
+              className="font-mono text-lg tracking-[0.4em]"
+              value={code}
+              // Normalised on the way in, not on submit: a paste of
+              // "515 627" should look right in the field immediately.
+              onChange={(e) => setCode(normaliseCode(e.target.value))}
               autoFocus
               disabled={loading}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && password && !loading) {
+                if (e.key === "Enter" && isCompleteCode(code) && !loading) {
                   e.preventDefault();
-                  void submit({ password });
+                  void submit();
                 }
               }}
             />
             {error && <p className="text-xs text-red-500">{error}</p>}
             <Button
               type="button"
-              onClick={() => void submit({ password })}
-              disabled={loading || !password}
+              onClick={() => void submit()}
+              disabled={loading || !isCompleteCode(code)}
             >
               Confirm
             </Button>
-          </div>
-        ) : GOOGLE_CLIENT_ID ? (
-          <div className="flex flex-col gap-2">
-            <GoogleSignInButton
-              onCredential={(credential) =>
-                void submit({ googleCredential: credential })
-              }
-              onError={setError}
-            />
-            {error && <p className="text-xs text-red-500">{error}</p>}
+            <p className="text-center text-xs text-muted-foreground">
+              {resendReady ? (
+                <button
+                  type="button"
+                  className="font-medium underline-offset-4 hover:underline"
+                  onClick={() => void requestCode()}
+                >
+                  Send a new code
+                </button>
+              ) : (
+                <span>Send a new code in {secondsLeft}s</span>
+              )}
+            </p>
           </div>
         ) : (
-          // GoogleSignInButton renders nothing at all without a client id —
-          // without this branch a Google-only account would open the dialog
-          // to a warning and no control, with no way to ever export.
-          <p className="text-sm text-muted-foreground">
-            Google sign-in isn't configured on this deployment, so this
-            account can't export its key right now.
-          </p>
+          <div className="flex flex-col gap-2">
+            {error && <p className="text-xs text-red-500">{error}</p>}
+            <Button
+              type="button"
+              onClick={() => void requestCode()}
+              disabled={sendingCode}
+            >
+              {sendingCode ? "Sending…" : "Email me a code"}
+            </Button>
+          </div>
         )}
       </DialogContent>
     </Dialog>

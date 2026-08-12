@@ -240,12 +240,14 @@ def test_a_workos_rate_limit_reaches_the_caller_as_429():
         def send_magic_auth_code(self, email: str) -> None:
             raise WorkOsRateLimitedError("WorkOS POST /user_management/magic_auth returned 429")
 
-    app.dependency_overrides[deps.get_workos_client] = lambda: _RateLimited()
-    try:
+    # `_using` rather than a bare override/pop: a bare `pop` at teardown
+    # deletes conftest's shared default instead of restoring it, which is
+    # invisible right up until some OTHER endpoint that also depends on
+    # `get_workos_client` runs later in the session and 500s on the
+    # placeholder's RuntimeError -- see `_using`'s own docstring.
+    with _using(_RateLimited()):
         with TestClient(app) as client:
             resp = client.post("/auth/code", json={"email": "g@example.com"})
         assert resp.status_code == 429, resp.text
         # The diagnostic message names our endpoint; it is logged, not returned.
         assert "user_management" not in resp.text
-    finally:
-        app.dependency_overrides.pop(deps.get_workos_client, None)

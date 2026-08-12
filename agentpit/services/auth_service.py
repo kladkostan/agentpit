@@ -7,6 +7,7 @@ from web3 import Web3
 from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
 from agentpit.auth.passwords import hash_password, verify_password
+from agentpit.auth.workos_client import WorkOsClient
 from agentpit.config import Settings
 from agentpit.datastructures.auth_response import (
     AuthResponse,
@@ -43,12 +44,14 @@ class AuthService:
         onchain_admin: OnchainAdmin,
         settings: Settings,
         google_verifier: GoogleTokenVerifier | None = None,
+        workos: WorkOsClient | None = None,
     ):
         self._db = db
         self._coder = coder
         self._onchain = onchain_admin
         self._settings = settings
         self._google = google_verifier
+        self._workos = workos
 
     def register(self, payload: RegisterRequest) -> AuthResponse:
         with self._db.write() as conn:
@@ -204,18 +207,29 @@ class AuthService:
     #: The project has no rate limiting anywhere else, including /login.
     KEY_EXPORT_COOLDOWN_S = 5
 
-    def export_private_key(
-        self,
-        *,
-        user_id: str,
-        password: str | None = None,
-        google_credential: str | None = None,
-    ) -> str:
+    def send_key_export_code(self, *, user_id: str) -> None:
+        """Mail a fresh code to the account's own address.
+
+        Deliberately not `/auth/code`: that endpoint takes an address from the
+        request body, and this one may only ever mail the address on the row
+        the caller is already authenticated as.
+        """
+        if self._workos is None:
+            raise FeatureDisabledError("key export is not configured")
+        with self._db.read() as conn:
+            user = TableRead.get_user_by_userid(conn, user_id)
+        if user is None:
+            raise UserNotFoundError()
+        self._workos.send_magic_auth_code(user.email)
+
+    def export_private_key(self, *, user_id: str, code: str) -> str:
         """The account's own private key, after proving it is the account.
 
-        Exactly one factor, chosen by what the account HAS rather than by what
-        the caller offers: a password account cannot authenticate with a Google
-        token and a Google account has no password to give.
+        One factor for everybody: a code mailed to the address WorkOS holds.
+        It is not a second factor in the strict sense -- sign-in is also a
+        mailed code -- and what it buys is freshness. A stolen access token out
+        of `localStorage` no longer suffices to export a key that cannot be
+        revoked; the holder must be at the mailbox now.
         """
         now = int(time.time())
         # Stamped in its own transaction, committed before the credential is
@@ -244,26 +258,25 @@ class AuthService:
             if not claimed:
                 raise BusinessRuleError("too many attempts — wait a moment")
 
-        with self._db.write() as conn:
-            password_hash = TableRead.get_password_hash_by_userid(conn, user_id)
-            if password_hash is not None:
-                if password is None:
-                    raise BusinessRuleError("this account exports with its password")
-                if not verify_password(password, password_hash):
-                    raise InvalidCredentialsError("invalid password")
-            else:
-                if google_credential is None:
-                    raise BusinessRuleError("this account exports with Google")
-                if self._google is None:
-                    raise FeatureDisabledError("Google sign-in is not configured")
-                identity = self._google.verify(google_credential)
-                owner = TableRead.get_user_by_google_sub(conn, identity.sub)
-                # A valid token proves somebody signed in with Google. It has
-                # to be THIS account's Google identity, or the key goes to
-                # whoever authenticated last.
-                if owner is None or owner.user_id != user_id:
-                    raise InvalidCredentialsError("that Google account is not this one")
+        if self._workos is None:
+            raise FeatureDisabledError("key export is not configured")
+        if user.workos_user_id is None:
+            # Nothing to pin the code against. Only reachable while the legacy
+            # JWT is still accepted -- after the cutover every session came
+            # through AuthKit and every row therefore has an identity.
+            raise BusinessRuleError("sign in again to export this key")
 
+        session = self._workos.authenticate_with_code(user.email, code)
+        # A valid code proves somebody owns an address. It has to be THIS
+        # account's identity, or the key goes to whoever authenticated last --
+        # the same reasoning as the Google-identity check this replaces. It
+        # also covers a stale `users.EMAIL`: if the address has changed hands
+        # upstream the code reaches a stranger, and the code that stranger
+        # presents comes back with a different `workos_user_id`.
+        if session.workos_user_id != user.workos_user_id:
+            raise InvalidCredentialsError("that code is not this account's")
+
+        with self._db.write() as conn:
             TableWrite.mark_key_exported(conn, user_id, now)
         return Web3.to_hex(user.eth_key.key)
 

@@ -130,20 +130,21 @@ export function setAutoRedeemRequest(enabled: boolean): Promise<UserPublic> {
   });
 }
 
+export function sendExportCodeRequest(): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/me/private-key/code", {
+    method: "POST",
+  });
+}
+
 export function exportPrivateKeyRequest(
-  factor: { password: string } | { googleCredential: string },
+  code: string,
 ): Promise<{ private_key: string; eth_address: string }> {
-  const body =
-    "password" in factor
-      ? { password: factor.password }
-      : { google_credential: factor.googleCredential };
   return apiFetch<{ private_key: string; eth_address: string }>(
     "/me/private-key",
     {
       method: "POST",
-      body: JSON.stringify(body),
-      // Same reasoning as changePasswordRequest: a 401 means the re-auth
-      // factor was wrong, not that the session died.
+      body: JSON.stringify({ code }),
+      // A 401 means the typed code was wrong, not that the session died.
       skipAuthEvent: true,
     },
   );
