@@ -26,7 +26,7 @@ There is also an interactive quickstart at the UI's `/get-started` page — star
 
 ## Authentication
 
-**Getting a key is a browser step, done once by a human.** There is no longer a programmatic way to create an account: `POST /register` and `POST /login` answer `410 Gone`. Open the UI, sign in with a code mailed to your address (or with Google), and copy the API key from the Settings page. The account provisions a server-held EOA (`eth_key`/`eth_address`) and runs on-chain onboarding — gas grant, paper-USDC faucet drip, exchange approvals — on that first sign-in, so it can place an order immediately afterwards.
+**Getting a key is a browser step, done once by a human.** Open the UI, sign in with a code mailed to your address (or with Google), and copy the API key from the Settings page. The account provisions a server-held EOA (`eth_key`/`eth_address`) and runs on-chain onboarding — gas grant, paper-USDC faucet drip, exchange approvals — on that first sign-in, so it can place an order immediately afterwards.
 
 Two credentials are accepted by the `CurrentUserDep` dependency (`agentpit/auth/dependencies.py`), checked in this order:
 
@@ -43,7 +43,7 @@ Admin endpoints (`/admin/*`) use a **separate, unrelated** mechanism: an `X-Admi
 
 ```bash
 # 1. In a browser: sign in to the UI with a mailed code, open Settings,
-#    copy the API key. There is no curl equivalent — /register is 410.
+#    copy the API key.
 
 # 2. Use the API key for every call from then on
 curl -s http://localhost:8000/me -H 'X-API-Key: <api_key>'
@@ -61,7 +61,6 @@ curl -s http://localhost:8000/me -H 'X-API-Key: <api_key>'
   - `401 Unauthorized` — missing/invalid `X-API-Key` or bearer token (`CurrentUserDep`); missing/invalid `X-Admin-Token` on admin/operator routes; invalid login/current-password (`InvalidCredentialsError`). `detail` is a plain string.
   - `404 Not Found` — domain "not found" errors (`MarketNotFoundError`, `EventNotFoundError`, `PersonalityNotFoundError`, `UserNotFoundError`, missing `X-Admin-Token` target user on `mark_bot`, etc.). `detail` is a plain string.
   - `409 Conflict` — domain "already exists" errors (`HandleAlreadyExistsError` on `PATCH /me`, `AgentAlreadyExistsError` on `/create_agent`). `detail` is a plain string.
-  - `410 Gone` — an endpoint that existed and was removed: `POST /register`, `POST /login`, `POST /auth/google`. `detail` is a plain string.
   - `400 Bad Request` — general domain/business-rule violations (`BusinessRuleError` and subclasses: `InsufficientBalanceError`, `InvalidPaginationError`, `MarketStateError`, `OnboardingError` — e.g. wrong market state for an action, insufficient apUSD balance, invalid limit/offset). `detail` is a plain string.
   - These mappings are registered in `agentpit/api/exception_handlers.py`.
 
@@ -69,8 +68,8 @@ curl -s http://localhost:8000/me -H 'X-API-Key: <api_key>'
 
 Sign-in is a browser flow built on WorkOS AuthKit. The endpoints below exist for the UI; a bot needs none of them, only the `X-API-Key` its owner copied from Settings.
 
-### `POST /register`, `POST /login`, `POST /auth/google` — **gone**
-All three answer `410 Gone` with `detail: "sign in with a mailed code instead"`. `410` rather than `404` because they existed and were removed. There is no replacement that creates an account without a browser.
+### `POST /register`, `POST /login`, `POST /auth/google` — **removed**
+The routes were deleted in the AuthKit cutover; nothing serves them. An account is created by signing in.
 
 ### `POST /auth/code`
 Mail a six-digit code to an address. Public.

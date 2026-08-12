@@ -1,6 +1,6 @@
 """The legacy sign-in path, which is now reachable only by reverting.
 
-`/register`, `/login` and `/auth/google` answer 410 since the cutover, but the
+`/register`, `/login` and `/auth/google` were deleted in the cutover, but the
 service behind them was deliberately left in the tree: not deleting it IS the
 rollback plan, and reverting the cutover commit puts these methods straight
 back under live routes.
@@ -14,7 +14,7 @@ nobody wants to discover it. A rollback path with no test is a rollback path
 nobody has checked.
 
 Deliberately small, and deliberately at the service rather than the HTTP layer
-since the route is a 410 now: one success, one refusal. It exists to fail
+since the route is gone now: one success, one refusal. It exists to fail
 loudly if the legacy path rots, not to re-cover what the deleted endpoint
 tests covered.
 """

@@ -187,7 +187,7 @@ def test_adopting_a_legacy_row_leaves_its_password_alone():
     production accounts have one — on each holder's first mailed-code sign-in,
     permanently, because the hash is not recoverable.
 
-    The password outlives the door by one plan: the legacy routes answer 410
+    The password outlives the door by one plan: the legacy routes are gone
     now, and plan 4 drops the column. Until then, the password stays.
     """
     workos, onboarder = FakeWorkOsClient(), _Onboarder()

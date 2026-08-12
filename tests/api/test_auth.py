@@ -1,9 +1,9 @@
 """Auth + onboarding flow tests.
 
-The three legacy doors -- `/register`, `/login`, `/auth/google` -- answer 410
-since the cutover, and the tests that proved they worked have been inverted or
-deleted. What is left is the two credentials that survive it: an AuthKit
-bearer token, and the `X-API-Key` header every trading bot uses.
+The three legacy doors -- `/register`, `/login`, `/auth/google` -- are gone:
+the routes were deleted, so nothing answers them. What is left is the two
+credentials that survive the cutover: an AuthKit bearer token, and the
+`X-API-Key` header every trading bot uses.
 
 Anvil + the deployed exchange must be running — a first sign-in hits the
 faucet and grants approvals as part of creating the account.
@@ -27,43 +27,28 @@ def _hdr(token: str) -> dict[str, str]:
 # ----- the doors that closed --------------------------------------------
 
 
-def test_register_is_gone():
+def test_the_legacy_doors_are_gone():
+    # The routes are deleted, not stubbed, so these are plain 404s. Signing in
+    # is the only way an account comes into being.
     with TestClient(app) as client:
-        resp = client.post(
-            "/register",
-            json={"email": "x@example.com", "password": "hunter22hunter22"},
-        )
-    assert resp.status_code == 410, resp.text
-    assert "mailed code" in resp.text
+        assert client.post("/register", json={}).status_code == 404
+        assert client.post("/login", json={}).status_code == 404
+        assert client.post("/auth/google", json={}).status_code == 404
 
 
-def test_login_is_gone():
-    with TestClient(app) as client:
-        resp = client.post(
-            "/login",
-            json={"email": "x@example.com", "password": "hunter22hunter22"},
-        )
-    assert resp.status_code == 410, resp.text
-
-
-def test_nothing_reads_a_password_hash_any_more(monkeypatch):
+def test_signing_in_never_reads_a_password_hash(monkeypatch, sign_in):
     # The spec's plainest requirement, and the cheapest way to hold it: make
-    # reading a hash raise, then drive the two paths that used to. A row's
+    # reading a hash raise, then drive the only door left. A row's
     # PASSWORD_HASH survives the cutover as a rollback path and must simply go
-    # unread until plan 4 drops the column.
+    # unread by sign-in until plan 4 drops the column. `change_password` still
+    # reads it on purpose -- see the /me/password section below.
     def _boom(*_args, **_kwargs):
-        raise AssertionError("PASSWORD_HASH was read after the cutover")
+        raise AssertionError("PASSWORD_HASH was read during sign-in")
 
     monkeypatch.setattr(TableRead, "get_password_hash_by_userid", _boom)
 
     with TestClient(app) as client:
-        assert client.post(
-            "/login", json={"email": "x@example.com", "password": "hunter22hunter22"}
-        ).status_code == 410
-        assert client.post(
-            "/register",
-            json={"email": "y@example.com", "password": "hunter22hunter22"},
-        ).status_code == 410
+        assert sign_in(client, "nohash@example.com")["user"]["api_key"]
 
 
 # ----- the bearer token that replaced them ------------------------------

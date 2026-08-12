@@ -172,23 +172,6 @@ def test_a_garbage_refresh_token_is_401(workos):
     assert resp.status_code == 401, resp.text
 
 
-def test_register_and_login_are_gone(workos):
-    # They were the floor under the transition and they held it until the
-    # mailed-code path above was proven. The cutover pulls it away: these two
-    # answer 410 now, and everything above this line is the only way in.
-    with TestClient(app) as client:
-        made = client.post(
-            "/register",
-            json={"email": "legacy@example.com", "password": "hunter22hunter22"},
-        )
-        back = client.post(
-            "/login",
-            json={"email": "legacy@example.com", "password": "hunter22hunter22"},
-        )
-    assert made.status_code == 410, made.text
-    assert back.status_code == 410, back.text
-
-
 def test_the_routes_answer_503_when_workos_is_not_configured():
     # Every developer machine before the account existed, and any deployment
     # that forgets the keys. It must be an obvious 503, not a 500.
