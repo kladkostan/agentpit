@@ -95,6 +95,7 @@ def _run_polymarket_sync(db: DbSession, admin: OnchainAdmin, settings: Settings)
             liquidity_min=settings.sync_liquidity_min,
             event_max_outcomes=settings.sync_event_max_outcomes,
             exclude_churn_series=settings.sync_exclude_churn_series,
+            excluded_categories=settings.excluded_categories,
         )
     return len(created)
 

@@ -40,9 +40,13 @@ def _ref_of(m) -> "MarketRef | None":
     )
 
 
-def _load_refs(db: DbSession) -> list[MarketRef]:
+def _load_refs(
+    db: DbSession, excluded_categories: "list[str] | None" = None
+) -> list[MarketRef]:
     with db.read() as conn:
-        markets = TableRead.list_active_synced_markets(conn)
+        markets = TableRead.list_active_synced_markets(
+            conn, excluded_categories=excluded_categories
+        )
     return [r for r in (_ref_of(m) for m in markets) if r is not None]
 
 
@@ -236,8 +240,14 @@ class MirrorEngine:
                 else self._cfg.liquidity_interval_seconds)
 
     async def _refresh_targets(self) -> None:
-        refs = await asyncio.to_thread(_load_refs, self._db)
+        refs = await asyncio.to_thread(
+            _load_refs, self._db, self._cfg.excluded_categories
+        )
         added, removed = self.state.set_targets(refs)
+        # An excluded market leaves the target set exactly as a resolved one
+        # does, so `removed` carries it into the cancel pass below and the
+        # orders it already has are withdrawn — the catalogue and the book stop
+        # showing it in the same pass.
         if added or removed:
             # Signal BEFORE any fallible work — a lost signal would leave new
             # markets unsubscribed until the next unrelated target change.

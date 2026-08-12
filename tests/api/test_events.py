@@ -98,27 +98,29 @@ def test_list_events_rejects_bad_pagination(client_and_db):
 
 
 def test_list_events_can_filter_by_category(client_and_db):
+    # Politics rather than Sports: Sports is in `Settings.excluded_categories`
+    # by default, so using it here would test the exclusion, not the filter.
     client, session = client_and_db
     with session.write() as conn:
-        sports = TableWrite.upsert_event(
-            conn, slug="wc", title="World Cup", category="Sports"
+        politics = TableWrite.upsert_event(
+            conn, slug="election", title="Election", category="Politics"
         )
         TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
     _seed_market(
         session,
-        question="france?",
-        cond_id=_hex32("fr"),
-        event_id=sports.event_id,
-        outcome_label="France",
+        question="candidate-a?",
+        cond_id=_hex32("ca"),
+        event_id=politics.event_id,
+        outcome_label="Candidate A",
     )
 
-    resp = client.get("/events?limit=10&offset=0&category=Sports")
+    resp = client.get("/events?limit=10&offset=0&category=Politics")
     assert resp.status_code == 200
     body = resp.json()
     # Gamma shape: a bare list, no {events, total} envelope.
     assert isinstance(body, list)
-    assert [e["slug"] for e in body] == ["wc"]
-    assert body[0]["category"] == "Sports"
+    assert [e["slug"] for e in body] == ["election"]
+    assert body[0]["category"] == "Politics"
 
 
 def test_list_events_category_filter_is_case_insensitive(client_and_db):
@@ -126,35 +128,79 @@ def test_list_events_category_filter_is_case_insensitive(client_and_db):
     return zero events."""
     client, session = client_and_db
     with session.write() as conn:
-        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(
+            conn, slug="election", title="Election", category="Politics"
+        )
         TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
 
-    resp = client.get("/events?limit=10&offset=0&category=sPoRtS")
+    resp = client.get("/events?limit=10&offset=0&category=pOlItIcS")
     assert resp.status_code == 200
-    assert [e["slug"] for e in resp.json()] == ["wc"]
+    assert [e["slug"] for e in resp.json()] == ["election"]
 
 
 def test_list_events_blank_category_is_treated_as_no_filter(client_and_db):
     client, session = client_and_db
     with session.write() as conn:
-        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(
+            conn, slug="election", title="Election", category="Politics"
+        )
         TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
 
     resp = client.get("/events?limit=10&offset=0&category=%20")
     assert resp.status_code == 200
-    assert {e["slug"] for e in resp.json()} == {"wc", "btc"}
+    assert {e["slug"] for e in resp.json()} == {"election", "btc"}
 
 
 def test_list_event_categories_returns_distinct_categories(client_and_db):
     client, session = client_and_db
     with session.write() as conn:
-        TableWrite.upsert_event(conn, slug="wc", title="World Cup", category="Sports")
+        TableWrite.upsert_event(
+            conn, slug="election", title="Election", category="Politics"
+        )
         TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
-        TableWrite.upsert_event(conn, slug="election", title="Election", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc2", title="BTC 2", category="Crypto")
 
     resp = client.get("/events/categories")
     assert resp.status_code == 200
-    assert resp.json() == {"categories": ["Crypto", "Sports"]}
+    assert resp.json() == {"categories": ["Crypto", "Politics"]}
+
+
+# ----- categories the product does not carry ---------------------------------
+
+
+def test_an_excluded_category_is_absent_from_the_grid(client_and_db):
+    """Sports ships excluded — 68.6% of the catalogue the UI has no rendering
+    for. The default Settings the test app is built with carry the exclusion."""
+    client, session = client_and_db
+    with session.write() as conn:
+        TableWrite.upsert_event(conn, slug="cs2", title="CS2 match", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+
+    resp = client.get("/events?limit=10&offset=0")
+    assert resp.status_code == 200
+    assert [e["slug"] for e in resp.json()] == ["btc"]
+
+
+def test_an_excluded_category_gets_no_tab_to_click(client_and_db):
+    """The tab list and the grid come from different queries; a Sports tab over
+    a grid that refuses to show Sports is a dead click."""
+    client, session = client_and_db
+    with session.write() as conn:
+        TableWrite.upsert_event(conn, slug="cs2", title="CS2 match", category="Sports")
+        TableWrite.upsert_event(conn, slug="btc", title="BTC", category="Crypto")
+
+    assert client.get("/events/categories").json() == {"categories": ["Crypto"]}
+
+
+def test_asking_for_an_excluded_category_returns_nothing(client_and_db):
+    """A bookmarked ?category=Sports must not be a back door into the rows."""
+    client, session = client_and_db
+    with session.write() as conn:
+        TableWrite.upsert_event(conn, slug="cs2", title="CS2 match", category="Sports")
+
+    resp = client.get("/events?limit=10&offset=0&category=Sports")
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 # ----- GET /events/{slug} -----------------------------------------------------

@@ -5,6 +5,7 @@ using TableWrite.create_market.
 
 import logging
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -312,6 +313,39 @@ def _is_churn_series(m: dict) -> bool:
     return False
 
 
+def _is_excluded_category(m: dict, excluded: "Iterable[str]") -> bool:
+    """Is this market in a category the product does not carry at all?
+
+    Different question from `_is_churn_series`, which drops the prop tail and
+    keeps the headline game. This drops the category outright, so a market it
+    rejects never reaches the chain, the catalogue, or the book mirror.
+
+    Upstream fields decide it, as everywhere else in this module. `tags` is the
+    general signal, reduced by the same `resolve_category` the sync stores on
+    the event -- so what is excluded here is exactly what the UI would have
+    labelled. `sportsMarketType` is consulted in addition, and it is not a
+    nicety: an esports match arrives from Gamma with `tags: []`, so the tag
+    path resolves nothing and the field is the ONLY evidence the market is
+    sport (`cs2-mgc-mglz-2026-08-12`, the market this was built for). It is
+    sound as a category test because upstream sets it on sports markets and on
+    nothing else -- unlike `feeType`, whose weather bucket spans half a
+    catalogue (see `_is_churn_series`).
+
+    Absence of both signals means KEEP: this excludes only on positive
+    evidence.
+    """
+    wanted = {c.strip().lower() for c in excluded if c and c.strip()}
+    if not wanted:
+        return False
+    if "sports" in wanted and m.get("sports_market_type"):
+        return True
+    slugs = _tag_slugs(m)
+    if slugs is None:
+        return False
+    category = resolve_category(slugs)
+    return category is not None and category.lower() in wanted
+
+
 def _passes_market_filters(
     m: dict,
     *,
@@ -319,6 +353,7 @@ def _passes_market_filters(
     closed: bool,
     archived: bool,
     exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
 ) -> bool:
     """Does this ALREADY-NORMALIZED market belong in the catalogue?
 
@@ -334,6 +369,11 @@ def _passes_market_filters(
     if not m.get("condition_id"):
         return False
     if exclude_churn_series and _is_churn_series(m):
+        return False
+    # Deliberately NOT gated on `exclude_churn_series`: turning the churn
+    # filter off to get the prop tail back must not re-admit a whole category
+    # the UI cannot draw.
+    if _is_excluded_category(m, excluded_categories):
         return False
     # Use the stronger of orderbook depth ("liquidity") and cumulative trade
     # volume ("volumeNum"). Multi-outcome favourites have shallow books on the
@@ -366,6 +406,7 @@ def fetch_all_polymarket_markets(
     order: str | None = None,
     max_markets: int | None = None,
     exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
 ) -> list[dict]:
     """
     Fetch all markets from Polymarket's Gamma API, paginating through all pages.
@@ -380,6 +421,9 @@ def fetch_all_polymarket_markets(
             and from tests, neither of which can reach Settings, so the value
             arrives as an argument — `AGENTPIT_SYNC_EXCLUDE_CHURN_SERIES` is
             read once in the API layer and threaded down.
+        excluded_categories: drop these categories outright (see
+            `_is_excluded_category`), threaded down the same way from
+            `AGENTPIT_EXCLUDED_CATEGORIES`.
 
     Returns:
         A list of raw market dicts from the Polymarket API.
@@ -442,6 +486,7 @@ def fetch_all_polymarket_markets(
                 closed=closed,
                 archived=archived,
                 exclude_churn_series=exclude_churn_series,
+                excluded_categories=excluded_categories,
             ):
                 filtered_data.append(m)
 
@@ -509,6 +554,7 @@ def fetch_event_siblings(
     host: str = POLYMARKET_GAMMA_URL,
     fetcher=None,
     exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
 ) -> list[dict]:
     """The other outcomes of the events `pm_markets` belong to.
 
@@ -588,6 +634,13 @@ def fetch_event_siblings(
             # question; asking it twice is free and keeps the chokepoint.
             if exclude_churn_series:
                 outcomes = [m for m in outcomes if not _is_churn_series(m)]
+            # Same reasoning, same place: an excluded category must not eat the
+            # `outcomes[:cap]` slots and then be dropped, costing the event the
+            # keepers it did have.
+            outcomes = [
+                m for m in outcomes
+                if not _is_excluded_category(m, excluded_categories)
+            ]
             outcomes.sort(
                 key=lambda m: (
                     -_as_float(m.get("volume24hr")),
@@ -603,6 +656,7 @@ def fetch_event_siblings(
                     closed=False,
                     archived=False,
                     exclude_churn_series=exclude_churn_series,
+                    excluded_categories=excluded_categories,
                 ):
                     continue
                 if group is not None:
@@ -911,6 +965,7 @@ def fetch_and_sync_polymarket_markets(
     liquidity_min: float = 0.0,
     event_max_outcomes: int = 0,
     exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
 ) -> list[Market]:
     """Discover + locally create the trending Polymarket markets.
 
@@ -929,6 +984,8 @@ def fetch_and_sync_polymarket_markets(
             daily-temperature and sports-prop series are dropped whichever way
             a market would have entered. Comes from
             `Settings.sync_exclude_churn_series` at the API layer.
+        excluded_categories: forwarded to both passes for the same reason.
+            Comes from `Settings.excluded_categories`.
     """
     pm_markets = fetch_all_polymarket_markets(
         host,
@@ -938,6 +995,7 @@ def fetch_and_sync_polymarket_markets(
         order="volume24hr",
         max_markets=max_markets,
         exclude_churn_series=exclude_churn_series,
+        excluded_categories=excluded_categories,
     )
     if event_max_outcomes > 0:
         siblings = fetch_event_siblings(
@@ -946,6 +1004,7 @@ def fetch_and_sync_polymarket_markets(
             liquidity_threshold=liquidity_min,
             host=host,
             exclude_churn_series=exclude_churn_series,
+            excluded_categories=excluded_categories,
         )
         logger.info(
             "event expansion added %d sibling markets to %d primary",
