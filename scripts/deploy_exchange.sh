@@ -177,10 +177,17 @@ echo "AgentpitUSD deployed: $USD"
 echo "Faucet      deployed: $FAUCET"
 echo "Exchange    deployed: $EXCHANGE"
 
+# Ask the chain rather than assume anvil's 31337. This number is the EIP-712
+# domain separator the exchange validates every order signature against, so a
+# wrong one does not fail loudly at deploy -- it deploys a stack where every
+# single order is rejected as a bad signature, on a chain that looks healthy.
+CHAIN_ID="$(cast chain-id --rpc-url "$RPC_URL")"
+echo "Chain id:       $CHAIN_ID"
+
 mkdir -p "$AGENTPIT_DIR/deployments"
 cat > "$AGENTPIT_DIR/deployments/local.json" <<EOF
 {
-  "chain_id": 31337,
+  "chain_id": $CHAIN_ID,
   "rpc_url": "$RPC_URL",
   "admin": "$ADMIN",
   "usd": "$USD",
