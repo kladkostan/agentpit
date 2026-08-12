@@ -50,7 +50,20 @@ class DbSession:
             min_size=min_size,
             max_size=max_size,
             max_idle=max_idle,
-            kwargs={"row_factory": ci_dict_row, "autocommit": False},
+            # `-c jit=off`: Postgres decides whether to JIT-compile from the
+            # planner's ESTIMATED cost, and on this schema that estimate is
+            # inflated three orders of magnitude by the mirror tape's share of
+            # `trades` -- the same bad statistic documented on
+            # `TableRead.TRADED_ACCOUNTS_SQL`. Measured on production, the
+            # leaderboard's trade counts spent 220ms in LLVM to do 2ms of work.
+            # Set per-connection rather than on the server so the choice lives
+            # in the repository beside the queries it protects;
+            # `tests/db/test_session_jit.py` carries the measurement.
+            kwargs={
+                "row_factory": ci_dict_row,
+                "autocommit": False,
+                "options": "-c jit=off",
+            },
             open=True,
         )
         if create_tables:
