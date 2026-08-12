@@ -75,9 +75,17 @@ tokens.
 4. **`VITE_WORKOS_CLIENT_ID` and `VITE_WORKOS_REDIRECT_URI` in the prod `.env`.**
    `deploy/docker-compose.prod.yml` now refuses to build `caddy` without them,
    deliberately. Vite bakes them at build time, so a rebuild is required.
-5. **Rename the WorkOS application** from `skalelabs.com's Application`. It is
-   the sender name on the email that is now the only way anyone gets in, and the
-   only thing distinguishing a sign-in code from a key-export code.
+Done 2026-08-12: both environments' WorkOS applications are named `AgentPit`
+(Staging by hand, Production through the API — they are separate objects and
+renaming one does not touch the other). Verified by sending a Production test
+email: no `[STAGING]` prefix, sender `AgentPit <welcome@workos-mail.com>`.
+
+That test also surfaced something only a real send shows: Gmail tags the mail
+**External** for anyone on a `skalelabs.com` Workspace account, because
+`workos-mail.com` is not our domain. Every colleague will see that badge on
+every sign-in code — and, indistinguishably, on every key-export code. It is
+the concrete price of declining the paid Custom Domain add-on, which is what
+would let the mail come from `agentpit.dev`.
 
 Not a prerequisite: `scripts/migrate_users_to_workos.py`. It cannot run before
 the deploy — it selects `WORKOS_USER_ID` with `create_tables=False`, and the
