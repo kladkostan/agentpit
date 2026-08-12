@@ -40,18 +40,18 @@ def test_the_migration_writer_leaves_the_password_alone():
         assert TableRead.get_password_hash_by_userid(conn, user_id) == "$2b$12$x"
 
 
-def test_linking_stamps_the_identity_and_drops_the_password():
+def test_linking_stamps_the_identity_and_keeps_the_password():
     # The sign-in writer, unlike the migration one above. It stamps the
     # identity and LEAVES THE PASSWORD ALONE.
     #
     # Clearing it is the eventual intent -- registration takes any address on
-    # trust while a mailed code proves it -- but `export_private_key` chooses
-    # its second factor by what the account has: a hash means "prove the
-    # password", no hash means "prove the Google identity". Nulling the hash on
-    # a password account leaves neither branch satisfiable, so the holder can
-    # never export their own key again, and the hash is gone for good. All 17
-    # production accounts are that shape. The replacement factor (re-auth by
-    # mailed code) lands in plan 3 together with dropping the column.
+    # trust while a mailed code proves it -- but the hash is still a working
+    # credential: `/login` accepts it and `change_password` reads it, and the
+    # cutover keeps both alive so that reverting one commit restores legacy
+    # sign-in. Nulling it here spends that on each holder's first code sign-in,
+    # irreversibly, across all 17 production accounts. Key export is no longer
+    # the reason -- it re-authenticates every account with a mailed code now --
+    # so the password goes when the legacy routes do, not before.
     db = DbSession(Settings().database_url)
     with db.write() as conn:
         user_id, _acct, _api_key = TableWrite.create_user(
@@ -65,12 +65,14 @@ def test_linking_stamps_the_identity_and_drops_the_password():
         assert TableRead.get_password_hash_by_userid(conn, user_id) == "$2b$12$x"
 
 
-def test_adoption_leaves_key_export_reachable():
-    """The consequence the invariant above exists for, asserted end to end.
+def test_adoption_leaves_the_password_flag_true():
+    """The derived flag, not just the column the test above reads.
 
-    `export_private_key` branches on the presence of a hash. If adoption
-    removed it from a non-Google account, both branches would refuse and the
-    wallet's own key would be permanently unreachable.
+    `has_password` is `PASSWORD_HASH IS NOT NULL` projected onto the read
+    model, and it is what a caller actually sees. Key export no longer consults
+    it -- every account re-authenticates with a mailed code -- but `/login`
+    still accepts the hash and `change_password` still needs it, so a false
+    here would be the row denying a credential it holds.
     """
     db = DbSession(Settings().database_url)
     with db.write() as conn:
@@ -82,8 +84,6 @@ def test_adoption_leaves_key_export_reachable():
     with db.read() as conn:
         user = TableRead.get_user_by_workos_id(conn, "user_export")
         assert user is not None
-        # Truthy `has_password` is what routes the export to the password
-        # factor; false on an account with no GOOGLE_SUB is the dead end.
         assert user.has_password is True
 
 

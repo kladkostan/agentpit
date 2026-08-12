@@ -143,9 +143,11 @@ class AuthKitService:
         # `existing` was read before the stamp, so reflect it locally rather
         # than re-reading the row. Only the identity changed: the password is
         # deliberately left in place (see `TableWrite.link_workos_identity`),
-        # and `has_password` must keep saying so -- the UI routes key export by
-        # that flag, so a false here is the same dead end as clearing the hash,
-        # reached through the payload instead of the database.
+        # and `has_password` must keep saying so. Key export no longer consults
+        # this flag -- every account re-authenticates with a mailed code -- but
+        # it still describes the row, and the row still holds a hash that
+        # `/login` accepts and `change_password` reads. A false here would be
+        # the response denying a credential that works.
         return existing.model_copy(
             update={"workos_user_id": session.workos_user_id}
         )

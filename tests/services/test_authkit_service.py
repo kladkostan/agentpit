@@ -175,17 +175,18 @@ def test_adopting_a_legacy_row_leaves_its_password_alone():
 
     Clearing it is the eventual intent, and the reasoning is sound: nobody ever
     verified that whoever set that password owns the address, while a mailed
-    code proves it. But `export_private_key` picks its second factor by what
-    the account HAS. A hash means "prove the password"; no hash means "prove
-    the Google identity". Strip the hash from an account that never had a
-    Google identity — the shape of all 17 production accounts — and neither
-    branch can ever be satisfied again. The holder loses access to the private
-    key of their own wallet, on their first mailed-code sign-in, permanently,
-    because the hash is not recoverable.
+    code proves it. What stands in the way is no longer key export —
+    `export_private_key` stopped reading PASSWORD_HASH and re-authenticates
+    every account with a mailed code pinned to WORKOS_USER_ID. It is the
+    rollback: `/login` still accepts this hash and `change_password` still
+    reads it, and the cutover keeps both working so that reverting one commit
+    restores legacy sign-in. Stripping the hash here spends that credential
+    account by account — all 17 production accounts have one — on each
+    holder's first mailed-code sign-in, permanently, because the hash is not
+    recoverable.
 
-    The replacement factor is re-authentication by mailed code, one mechanism
-    for every account. It lands in plan 3 alongside dropping the column. Until
-    something can take the password's place, the password stays.
+    The password goes when the door does: task 8 answers 410 on the legacy
+    routes and plan 4 drops the column. Until then, the password stays.
     """
     workos, onboarder = FakeWorkOsClient(), _Onboarder()
     svc, db = _service(workos, onboarder)
@@ -197,7 +198,8 @@ def test_adopting_a_legacy_row_leaves_its_password_alone():
     assert session.user.user_id == user_id
     with db.read() as conn:
         assert TableRead.get_password_hash_by_userid(conn, user_id) is not None
-    # And the session says so, because that flag is what routes the export.
+    # And the session says so: the flag is `PASSWORD_HASH IS NOT NULL`, so the
+    # response must not deny a credential the row still holds.
     assert session.user.has_password is True
 
 

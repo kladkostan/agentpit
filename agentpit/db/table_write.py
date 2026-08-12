@@ -198,20 +198,20 @@ class TableWrite:
         The argument for clearing is good and will be acted on: registration
         takes any address on trust, so a password sitting on a row is no
         evidence that whoever set it owns the address, while a mailed code is.
-        Clearing it here, today, strands the account instead. `export_private_key`
-        picks its second factor by what the account HAS -- a hash means "prove
-        the password", no hash means "prove the Google identity" -- so a
-        password account whose hash is nulled satisfies neither branch and can
-        never export its own key again. All 17 production accounts are that
-        shape, the damage lands on their first code sign-in, and it is not
-        reversible: the hash is gone.
+        Key export is no longer what stands in the way -- `export_private_key`
+        stopped reading PASSWORD_HASH and now re-authenticates every account
+        the same way, with a mailed code pinned to WORKOS_USER_ID.
 
-        The spec's answer is a third factor -- re-authenticate by mailing a
-        code, one mechanism for every account -- and it arrives in plan 3
-        together with dropping PASSWORD_HASH entirely. Clearing the hash before
-        that exists removes a credential while the thing meant to replace it
-        does not. Until then the row keeps its password, which is exactly the
-        situation before this feature existed.
+        The rollback is. `/login` and `change_password` are live and read this
+        column, and the cutover deliberately leaves every legacy capability in
+        the tree so that reverting one commit restores a working legacy
+        sign-in. Nulling the hash here spends that credential account by
+        account, silently, on each holder's first code sign-in -- all 17
+        production accounts have one -- and it does not come back.
+
+        The password goes when the door does: task 8 answers 410 on the legacy
+        routes and plan 4 drops the column. Until then the row keeps its
+        password, which is exactly the situation before this feature existed.
         """
         cur = db.execute(
             "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",
