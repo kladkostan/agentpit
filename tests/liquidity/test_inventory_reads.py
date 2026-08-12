@@ -1,23 +1,28 @@
-"""`_ensure_inventory` hands back what it read, so the pass reads it once.
+"""A reconcile pass asks the chain for its balances once, and all at once.
 
-Every reconcile pass used to ask the chain for the same two CTF balances
-twice: once inside `_ensure_inventory` to decide whether to mint, and again
-immediately after to cap the asks. On the anvil this was written against that
-cost nothing measurable. Measured against the SKALE node on 2026-08-12 a
-single `eth_call` round trip is **0.53s**, versus **0.001s** to a local anvil
-— 530x — so the duplicate pair was most of a pass's wall clock, and the
-mirror seeded roughly four markets a minute.
+It used to ask five times in a row: two CTF reads inside `_ensure_inventory`
+to decide whether to mint, the same two again to cap the asks, and a USD read
+after that. On the anvil this was written against, an `eth_call` costs 0.001s
+and none of it was visible.
 
-These tests pin the contract that removes it: the function returns the
-holdings it read, and returns None exactly when it has nothing honest to
-offer. What they deliberately do NOT assert is the read count through
-`reconcile_market` itself — that needs a live OrderService placing orders
-against a database, and a test built on that much scaffolding tends to pin
-the scaffolding. The reuse is one `if held is None` in the caller; the
-measurement that proves it is on production, in the pass timings.
+Measured against the SKALE node on 2026-08-12, from inside the api container:
+
+    three reads in a row     1583 ms
+    the same three together   545 ms
+
+So the pass now takes all three together and keeps them, and
+`_ensure_inventory` reads nothing at all — it is handed what the caller
+already has.
+
+What these tests pin is the read count and the handing-over. They do NOT
+assert that the three run concurrently: a timing assertion would be flaky in
+CI and would prove nothing about a real chain anyway. That was verified on
+production instead — five runs of three parallel reads returned numbers
+identical to the sequential ones, which is also what showed a shared web3
+client is safe to use from several threads at once.
 """
 from agentpit.config import Settings
-from agentpit.liquidity.reconciler import _ensure_inventory
+from agentpit.liquidity.reconciler import _ensure_inventory, _read_balances
 from agentpit.liquidity.replica import BookSnapshot
 
 
@@ -38,19 +43,26 @@ class _User:
 
 class _CountingOnchain:
     """Counts chain round trips, the way `tests/services/test_order_balance_hint`
-    does — the cost being removed is round trips, so the test counts them."""
+    does — what is being removed is round trips, so the test counts them."""
 
-    def __init__(self, held: int):
+    def __init__(self, held: int = 0, usd: int = 0):
         self._held = held
+        self._usd = usd
         self.ctf_reads = 0
+        self.usd_reads = 0
         self.splits = 0
 
     def ctf_balance(self, _addr: str, _tok: int) -> int:
         self.ctf_reads += 1
         return self._held
 
-    def user_split_position(self, _key, _cond, _add) -> None:
+    def usd_balance(self, _addr: str) -> int:
+        self.usd_reads += 1
+        return self._usd
+
+    def user_split_position(self, _key, _cond, add) -> None:
         self.splits += 1
+        self._held += add
 
 
 def _snap():
@@ -60,42 +72,51 @@ def _snap():
     )
 
 
-def test_a_pass_that_needs_no_mint_hands_its_balances_back():
-    # The common case, and the whole point: two reads, and the caller never
-    # has to ask again.
-    oc = _CountingOnchain(held=10**18)
-    splits, held = _ensure_inventory(  # type: ignore[arg-type]
-        oc, _User(), _Ref(), _snap(), Settings()
+def test_a_pass_reads_each_balance_exactly_once():
+    oc = _CountingOnchain(held=7, usd=9)
+
+    held, usd = _read_balances(oc, _User(), _Ref())  # type: ignore[arg-type]
+
+    assert held == {"111": 7, "222": 7}
+    assert usd == 9
+    assert (oc.ctf_reads, oc.usd_reads) == (2, 1)
+
+
+def test_deciding_whether_to_mint_costs_no_round_trip():
+    # The whole point of passing `held` in. If this ever reads again, the pass
+    # is back to paying twice for the same two numbers.
+    oc = _CountingOnchain()
+
+    splits = _ensure_inventory(  # type: ignore[arg-type]
+        oc, _User(), _Ref(), _snap(), Settings(), {"111": 10**18, "222": 10**18}
     )
 
     assert splits == 0
-    assert oc.ctf_reads == 2
-    assert held == {"111": 10**18, "222": 10**18}
+    assert (oc.ctf_reads, oc.usd_reads) == (0, 0)
 
 
-def test_a_book_needing_nothing_reads_nothing_and_promises_nothing():
-    # No asks means no inventory requirement, so the function returns before
-    # touching the chain. It must NOT hand back a balance it never read --
-    # `None` is what sends the caller to fetch its own.
-    oc = _CountingOnchain(held=0)
+def test_a_book_needing_nothing_does_not_mint():
+    # No asks means no inventory requirement, so nothing is minted however
+    # empty the house is.
+    oc = _CountingOnchain()
     empty = BookSnapshot(asset_id="pm-yes", bids=(), asks=())
-    splits, held = _ensure_inventory(  # type: ignore[arg-type]
-        oc, _User(), _Ref(), empty, Settings()
+
+    splits = _ensure_inventory(  # type: ignore[arg-type]
+        oc, _User(), _Ref(), empty, Settings(), {"111": 0, "222": 0}
     )
 
-    assert (splits, held) == (0, None)
-    assert oc.ctf_reads == 0
+    assert splits == 0
+    assert oc.splits == 0
 
 
-def test_after_a_mint_the_numbers_it_read_are_not_offered():
-    # A split moves both balances, so what was read before it is stale. The
-    # caller must re-read rather than trust arithmetic about a transaction:
-    # inventory that reads high backs asks the house cannot cover.
-    oc = _CountingOnchain(held=0)
-    splits, held = _ensure_inventory(  # type: ignore[arg-type]
-        oc, _User(), _Ref(), _snap(), Settings()
+def test_an_empty_house_mints_against_the_requirement():
+    # And the caller is told so by the return value, which is its signal that
+    # the balances it holds are now stale.
+    oc = _CountingOnchain()
+
+    splits = _ensure_inventory(  # type: ignore[arg-type]
+        oc, _User(), _Ref(), _snap(), Settings(), {"111": 0, "222": 0}
     )
 
     assert splits == 1
     assert oc.splits == 1
-    assert held is None
