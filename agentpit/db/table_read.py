@@ -12,6 +12,7 @@ from agentpit.datastructures.event_sort import EventSort
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.user import User
+from agentpit.liquidity.tape import MIRROR_API_KEY
 from ..datastructures.condition_id import ConditionId
 
 
@@ -402,6 +403,40 @@ class TableRead:
         ).fetchone()
         return row["DEPLOYMENT_ID"] if row else None
 
+    #: Exposed as a constant so `tests/db/test_traded_accounts_plan.py` can
+    #: EXPLAIN the query that actually runs, rather than a copy of it that
+    #: would drift.
+    #:
+    #: `<> %s` on the api key is the mirror tape, and it is the difference
+    #: between 3.2 seconds and 1.4 milliseconds. Semantically it is nothing:
+    #: `MIRROR_API_KEY` is "opaque, never a real user's api key"
+    #: (`agentpit/liquidity/tape.py`), so no row it excludes could have
+    #: matched `u.API_KEY` anyway. To the planner it is everything: that one
+    #: value is 99.76% of `trades`, and without excluding it the estimate for
+    #: "rows matching this api key" is ~87,000 instead of 0, which makes an
+    #: `EXISTS` look like it will stop on the first row and a sequential scan
+    #: look nearly free. It does not stop -- the accounts being probed have no
+    #: trades at all -- so each probe reads all 523,000 rows, thirty times per
+    #: request. See the test for the full measurement.
+    TRADED_ACCOUNTS_SQL = """
+            SELECT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
+            FROM users u
+            WHERE u.IS_BOT = 0
+              AND (
+                EXISTS (
+                    SELECT 1 FROM trades t
+                    WHERE t.TAKER_API_KEY = u.API_KEY AND t.STATUS != %s
+                      AND t.TAKER_API_KEY <> %s
+                )
+                OR EXISTS (
+                    SELECT 1 FROM trades t
+                    WHERE t.MAKER_API_KEY = u.API_KEY AND t.STATUS != %s
+                      AND t.MAKER_API_KEY <> %s
+                )
+              )
+            ORDER BY u.USER_ID
+            """
+
     @staticmethod
     def list_traded_accounts(db: psycopg.Connection) -> "list[TradedAccount]":
         """Every non-house account with at least one non-failed trade, taker
@@ -438,22 +473,8 @@ class TableRead:
         first on every row in this sample).
         """
         rows = db.execute(
-            """
-            SELECT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
-            FROM users u
-            WHERE u.IS_BOT = 0
-              AND (
-                EXISTS (
-                    SELECT 1 FROM trades t
-                    WHERE t.TAKER_API_KEY = u.API_KEY AND t.STATUS != 'FAILED'
-                )
-                OR EXISTS (
-                    SELECT 1 FROM trades t
-                    WHERE t.MAKER_API_KEY = u.API_KEY AND t.STATUS != 'FAILED'
-                )
-              )
-            ORDER BY u.USER_ID
-            """
+            TableRead.TRADED_ACCOUNTS_SQL,
+            ("FAILED", MIRROR_API_KEY, "FAILED", MIRROR_API_KEY),
         ).fetchall()
         return [
             TradedAccount(
