@@ -359,10 +359,15 @@ def test_sign_in_runs_the_chain_wipe_repair_for_an_onboarded_account():
 
 
 def test_a_lost_race_on_a_new_address_returns_the_winner_s_account():
-    # Two first sign-ins for one address arrive together: both miss the
-    # WORKOS_USER_ID lookup, both reach create_user, and one takes a
-    # UniqueViolation on EMAIL. Unhandled it is a 500 -- a person told the
-    # service is broken while their account was in fact created.
+    # NOT a race test, despite the name: stamping WORKOS_USER_ID before
+    # sign_in runs means _resolve_account's first lookup (get_user_by_workos_id)
+    # finds the row immediately and returns through _repair -- _create_account
+    # and _link_existing_account are never called, so this cannot exercise or
+    # regress the UniqueViolation path this task added. What it does cover: a
+    # row that already carries the identity is found and handed back, not
+    # duplicated. The actual race -- the row appearing after
+    # _link_existing_account's lookup finds nothing -- is covered below by
+    # test_a_row_that_appears_after_the_link_lookup_is_adopted_not_500.
     workos = FakeWorkOsClient()
     svc, db = _service(workos)
     svc.send_code("race@example.com")

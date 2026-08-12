@@ -179,7 +179,10 @@ class AuthKitService:
             # because the winner onboards outside its transaction -- that is
             # the condition `_repair` exists for, and the next sign-in closes
             # it.
-            log.info("lost a create race for %s — adopting the winner's row", session.email)
+            log.info(
+                "lost a create race for workos user %s — adopting the winner's row",
+                session.workos_user_id,
+            )
             with self._db.read() as conn:
                 winner = TableRead.get_user_by_workos_id(
                     conn, session.workos_user_id
