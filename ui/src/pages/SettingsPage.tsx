@@ -30,7 +30,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { exportErrorMessage } from "@/lib/exportKeyError";
+import {
+  exportErrorMessage,
+  sendExportCodeErrorMessage,
+} from "@/lib/exportKeyError";
 import { formatCredits } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -322,10 +325,13 @@ function ExportKeyButton({ user }: { user: UserPublic }) {
       setCode("");
       setStep("code");
     } catch (err) {
+      // Not `exportErrorMessage`: no code has been typed at this point, so its
+      // 401 wording ("that code is wrong or expired") describes something that
+      // has not happened yet.
       const message =
         err instanceof ApiError
-          ? exportErrorMessage(err.status, err.body)
-          : "Failed to export private key.";
+          ? sendExportCodeErrorMessage(err.status)
+          : "Could not send the code. Try again in a moment.";
       setError(message);
     } finally {
       setSendingCode(false);

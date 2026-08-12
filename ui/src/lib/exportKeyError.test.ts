@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { exportErrorMessage } from "./exportKeyError";
+import {
+  exportErrorMessage,
+  sendExportCodeErrorMessage,
+} from "./exportKeyError";
 
 const COOLDOWN_BODY = JSON.stringify({
   detail: "too many attempts — wait a moment",
@@ -39,5 +42,39 @@ describe("exportErrorMessage", () => {
 
   it("falls back to the generic message for anything else", () => {
     expect(exportErrorMessage(500, "")).toBe("Failed to export private key.");
+  });
+});
+
+describe("sendExportCodeErrorMessage", () => {
+  it("401: the session died, not a mistyped code", () => {
+    // Nothing has been typed when this request is sent — it carries only the
+    // bearer token — and it runs without skipAuthEvent, so this 401 also logs
+    // the user out. `exportErrorMessage` says the code was wrong here, which
+    // was the bug.
+    const message = sendExportCodeErrorMessage(401);
+    expect(message).not.toBe(exportErrorMessage(401, ""));
+    expect(message).not.toMatch(/code is wrong/i);
+    expect(message).toMatch(/session expired/i);
+  });
+
+  it("429: too many attempts", () => {
+    expect(sendExportCodeErrorMessage(429)).toBe(
+      "Too many attempts. Wait a moment and try again.",
+    );
+  });
+
+  it("503: key export unavailable", () => {
+    expect(sendExportCodeErrorMessage(503)).toBe(
+      "Key export isn't available right now. Try again later.",
+    );
+  });
+
+  it("falls back to a send-shaped message, not an export-shaped one", () => {
+    // The export never got as far as being attempted, so "Failed to export
+    // private key" would describe the wrong step.
+    for (const status of [500, 0]) {
+      const message = sendExportCodeErrorMessage(status);
+      expect(message).toBe("Could not send the code. Try again in a moment.");
+    }
   });
 });

@@ -231,6 +231,14 @@ class AuthService:
         of `localStorage` no longer suffices to export a key that cannot be
         revoked; the holder must be at the mailbox now.
         """
+        # Before the cooldown is claimed, as `send_key_export_code` already
+        # does it. A deployment with no WorkOS cannot verify anything, so every
+        # call is a 503 -- and claiming first meant each of those 503s spent the
+        # window, so an honest retry a second later was refused with "too many
+        # attempts" for a feature that was simply switched off.
+        if self._workos is None:
+            raise FeatureDisabledError("key export is not configured")
+
         now = int(time.time())
         # Stamped in its own transaction, committed before the credential is
         # looked at at all. psycopg's connection context commits on clean exit
@@ -258,8 +266,6 @@ class AuthService:
             if not claimed:
                 raise BusinessRuleError("too many attempts — wait a moment")
 
-        if self._workos is None:
-            raise FeatureDisabledError("key export is not configured")
         if user.workos_user_id is None:
             # Nothing to pin the code against. Only reachable while the legacy
             # JWT is still accepted -- after the cutover every session came

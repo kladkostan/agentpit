@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildAuthorizeUrl,
   CALLBACK_PATH,
+  callbackErrorMessage,
   createState,
   hydratesFromStoredToken,
   present,
   readCallbackParams,
   stateMatches,
 } from "./workosAuth";
+import { signInErrorMessage } from "@/components/auth/codeFlow";
 
 describe("present", () => {
   // Mirrors `readGoogleClientId` in `googleAuth.ts` — same rule, same cases,
@@ -69,6 +71,48 @@ describe("hydratesFromStoredToken", () => {
 
   it("still hydrates on a route that merely starts the same way", () => {
     expect(hydratesFromStoredToken("/auth/callback-help", "tok")).toBe(true);
+  });
+});
+
+describe("callbackErrorMessage", () => {
+  it("describes a spent or expired redirect, not a typed code", () => {
+    const message = callbackErrorMessage(401);
+    // The user typed nothing on this page — copy about a wrong code sends
+    // them looking for a dialog they never opened.
+    expect(message).not.toMatch(/wrong/i);
+    expect(message).toMatch(/sign in again/i);
+  });
+
+  it("does not call the outage 'email sign-in'", () => {
+    // 503 here is the redirect exchange failing; the user never chose email.
+    const message = callbackErrorMessage(503);
+    expect(message).not.toMatch(/email/i);
+    expect(message).toMatch(/isn't available/i);
+  });
+
+  it("keeps 429 distinct from a refusal", () => {
+    expect(callbackErrorMessage(429)).not.toBe(callbackErrorMessage(401));
+    expect(callbackErrorMessage(429)).toMatch(/too many/i);
+  });
+
+  it("falls back to generic copy for anything else, including no response", () => {
+    expect(callbackErrorMessage(500)).toBe(
+      "Could not complete sign-in. Try again in a moment.",
+    );
+    expect(callbackErrorMessage(0)).toBe(
+      "Could not complete sign-in. Try again in a moment.",
+    );
+  });
+
+  it("differs from the typed-code mapper wherever the wording is about a code", () => {
+    // The whole reason this exists: `signInErrorMessage` was being reused
+    // here, and its wording describes the dialog rather than the redirect.
+    // 429 is deliberately excluded — a rate limit reads the same either way,
+    // and forcing it to differ would be churn for its own sake.
+    for (const status of [401, 503, 500, 0]) {
+      expect(callbackErrorMessage(status)).not.toBe(signInErrorMessage(status));
+    }
+    expect(callbackErrorMessage(429)).toBe(signInErrorMessage(429));
   });
 });
 

@@ -125,6 +125,31 @@ export function stateMatches(
   return returned === stored;
 }
 
+/**
+ * Maps a failed `POST /auth/callback` to user-facing copy.
+ *
+ * Separate from `signInErrorMessage` because nothing here is a code the user
+ * typed. What failed is the authorization code WorkOS put in the redirect, and
+ * that mapper's wording -- "That code is wrong or expired", "Email sign-in
+ * isn't available" -- describes a dialog this person never saw. It also asks
+ * them to correct something they cannot: the only recovery from any of these
+ * is to start the sign-in again.
+ */
+export function callbackErrorMessage(status: number): string {
+  if (status === 401) {
+    // WorkOS refused the exchange: the code was already spent, expired, or
+    // issued for another client. Every one of them means "go round again",
+    // and none of them is anything the user did wrong.
+    return "That sign-in link has already been used or has expired. Please sign in again.";
+  }
+  if (status === 429) return "Too many attempts. Wait a moment and try again.";
+  if (status === 503) {
+    // No WorkOS configured on this deployment, or WorkOS was unreachable.
+    return "Sign-in isn't available right now. Try again later.";
+  }
+  return "Could not complete sign-in. Try again in a moment.";
+}
+
 /** A fresh state value. `crypto` is injectable so this is testable. */
 export function createState(source: Crypto = crypto): string {
   const bytes = new Uint8Array(16);

@@ -360,35 +360,6 @@ def test_sign_in_runs_the_chain_wipe_repair_for_an_onboarded_account():
     assert first.user.user_id == second.user.user_id
 
 
-def test_a_lost_race_on_a_new_address_returns_the_winner_s_account():
-    # NOT a race test, despite the name: stamping WORKOS_USER_ID before
-    # sign_in runs means _resolve_account's first lookup (get_user_by_workos_id)
-    # finds the row immediately and returns through _repair -- _create_account
-    # and _link_existing_account are never called, so this cannot exercise or
-    # regress the UniqueViolation path this task added. What it does cover: a
-    # row that already carries the identity is found and handed back, not
-    # duplicated. The actual race -- the row appearing after
-    # _link_existing_account's lookup finds nothing -- is covered below by
-    # test_a_row_that_appears_after_the_link_lookup_is_adopted_not_500.
-    workos = FakeWorkOsClient()
-    svc, db = _service(workos)
-    svc.send_code("race@example.com")
-    code = workos.last_code("race@example.com")
-    created = workos.find_user_by_email("race@example.com")
-
-    # Stand in for the request that won: the row and its identity already
-    # exist by the time our insert runs.
-    with db.write() as conn:
-        user_id, _acct, _key = TableWrite.create_user(
-            conn, email="race@example.com", password_hash=None, handle=None
-        )
-        TableWrite.set_workos_user_id(conn, user_id, created.workos_user_id)
-
-    session = svc.sign_in("race@example.com", code)
-
-    assert session.user.user_id == user_id
-
-
 def test_a_row_that_appears_after_the_link_lookup_is_adopted_not_500(monkeypatch):
     # The window `_link_existing_account` cannot close: it looks, finds
     # nothing, and the winner commits before our insert runs. Simulated by

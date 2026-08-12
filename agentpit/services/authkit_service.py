@@ -100,7 +100,7 @@ class AuthKitService:
             return self._repair(user) if repair else user
         if not create:
             raise InvalidCredentialsError("invalid session")
-        return self._create_account(session, repair=repair)
+        return self._create_account(session)
 
     def _repair(self, user: User) -> User:
         """The two ways an existing row can need chain work, and neither overlaps.
@@ -167,12 +167,15 @@ class AuthKitService:
             update={"workos_user_id": session.workos_user_id}
         )
 
-    def _create_account(self, session: WorkOsSession, *, repair: bool) -> User:
+    def _create_account(self, session: WorkOsSession) -> User:
         linked = self._link_existing_account(session)
         if linked is not None:
             # Outside its transaction, like the create path below: a linked row
-            # can itself be one whose onboarding never finished.
-            return self._repair(linked) if repair else linked
+            # can itself be one whose onboarding never finished. Unconditional
+            # because only `create=True` reaches here, and that means somebody
+            # is at the screen having just proved they own the address --
+            # exactly when `_resolve_account` repairs too.
+            return self._repair(linked)
 
         try:
             with self._db.write() as conn:
@@ -196,10 +199,6 @@ class AuthKitService:
             # because the winner onboards outside its transaction -- that is
             # the condition `_repair` exists for, and the next sign-in closes
             # it.
-            log.info(
-                "lost a create race for workos user %s — adopting the winner's row",
-                session.workos_user_id,
-            )
             with self._db.read() as conn:
                 winner = TableRead.get_user_by_workos_id(
                     conn, session.workos_user_id
@@ -209,6 +208,14 @@ class AuthKitService:
                 # collision, say. Re-raising keeps a real bug visible instead
                 # of turning it into a confusing None.
                 raise
+            # Logged only now. The read-back above is what establishes it was a
+            # race at all: announcing one before it is confirmed puts a calm
+            # INFO line immediately in front of the traceback from the `raise`
+            # above, describing something that did not happen.
+            log.info(
+                "lost a create race for workos user %s — adopting the winner's row",
+                session.workos_user_id,
+            )
             return winner
 
         # Outside the transaction: onboarding is ~a second of chain round-trips

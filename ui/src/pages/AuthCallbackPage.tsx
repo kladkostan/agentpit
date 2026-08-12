@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/useAuth";
-import { signInErrorMessage, statusOf } from "@/components/auth/codeFlow";
+import { statusOf } from "@/components/auth/codeFlow";
 import {
+  callbackErrorMessage,
   readCallbackParams,
   stateMatches,
   STATE_KEY,
@@ -53,7 +54,7 @@ export function AuthCallbackPage() {
         // `replace`, so Back does not return to a URL holding a spent code.
         navigate("/", { replace: true });
       } catch (err) {
-        setError(signInErrorMessage(statusOf(err)));
+        setError(callbackErrorMessage(statusOf(err)));
       }
     })();
   }, [navigate, signInWithCallbackCode]);

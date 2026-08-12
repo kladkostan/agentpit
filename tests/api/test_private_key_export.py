@@ -2,9 +2,17 @@
 
 agentpit generates the wallet and holds its key. Export is what lets the
 account holder put it in MetaMask and fund it. The dangerous path is a code
-that proves somebody's identity, not necessarily THIS account's -- the
-`workos_user_id` pin in `AuthService.export_private_key` is what keeps a code
-genuinely mailed to one account from unlocking another's key.
+that proves somebody's identity, not necessarily THIS account's.
+
+Two separate things close it, and it is worth not confusing them. WorkOS pairs
+a code with the address it was mailed to, and `export_private_key` always asks
+about the row's OWN address -- so a code mailed elsewhere is refused by that
+pairing, as a 401, before anything of ours looks at it. The `workos_user_id`
+pin in `AuthService.export_private_key` covers what the pairing cannot: a stale
+`users.EMAIL`, where the address has changed hands upstream and a genuine code
+for it now belongs to a different WorkOS identity. See
+`test_a_code_belonging_to_a_different_account_is_refused` and
+`test_a_stale_email_pins_to_the_row_s_own_identity` below.
 
 Anvil + the deployed exchange must be running -- registering (by password) or
 signing in with a mailed code runs the same on-chain onboarding every other
@@ -414,6 +422,33 @@ def test_export_answers_503_when_workos_is_not_configured(workos):
         finally:
             app.dependency_overrides[deps.get_workos_client] = lambda: workos
     assert resp.status_code == 503, resp.text
+
+
+def test_a_503_export_does_not_spend_the_cooldown(workos):
+    # `export_private_key` checks configuration BEFORE claiming the cooldown.
+    # Claiming first meant every 503 burned the 5-second window without
+    # verifying anything, so the first real attempt after WorkOS was configured
+    # met "too many attempts" -- a guessing floor charged for a feature that
+    # was switched off.
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "cooldown503@example.com")
+        app.dependency_overrides[deps.get_workos_client] = lambda: None
+        try:
+            refused = client.post(
+                "/me/private-key", json={"code": "123456"}, headers=_auth(session)
+            )
+        finally:
+            app.dependency_overrides[deps.get_workos_client] = lambda: workos
+        assert refused.status_code == 503, refused.text
+
+        # Immediately after, comfortably inside KEY_EXPORT_COOLDOWN_S.
+        client.post("/me/private-key/code", headers=_auth(session))
+        resp = client.post(
+            "/me/private-key",
+            json={"code": workos.last_code("cooldown503@example.com")},
+            headers=_auth(session),
+        )
+    assert resp.status_code == 200, resp.text
 
 
 # ----- behaviour that doesn't change with the factor ---------------------
