@@ -384,3 +384,54 @@ def test_a_rate_limit_is_still_a_workos_error():
     client = _real(lambda _r: httpx.Response(429, json={"code": "rate_limit"}))
     with pytest.raises(WorkOsError):
         client.send_magic_auth_code("a@b.com")
+
+
+# --- the authorization_code grant: a provider redirect landing back on us --
+
+
+def test_the_authorization_code_grant_goes_to_user_management():
+    # NOT the `/oauth2/token` endpoint on the AuthKit domain. That one issues
+    # tokens whose `iss` is the AuthKit domain, and `AuthKitVerifier` pins
+    # `api.workos.com/user_management/<client_id>` -- so every Google sign-in
+    # would be rejected while these tests, which mint their own tokens, stayed
+    # green. This is the same failure the original verifier shipped with.
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.read().decode())
+        return httpx.Response(200, json={
+            "user": {"id": "user_01", "email": "a@b.com", "email_verified": True},
+            "access_token": "at", "refresh_token": "rt",
+        })
+
+    session = _real(handler).authenticate_with_authorization_code("code_abc")
+    assert seen["url"].endswith("/user_management/authenticate")
+    assert seen["body"]["grant_type"] == "authorization_code"
+    assert seen["body"]["code"] == "code_abc"
+    assert seen["body"]["client_id"] == "client_123"
+    assert seen["body"]["client_secret"] == "sk_test_123"
+    assert session.workos_user_id == "user_01"
+
+
+def test_a_rejected_authorization_code_raises():
+    client = _real(lambda _r: httpx.Response(400, json={"code": "invalid_grant"}))
+    with pytest.raises(WorkOsError):
+        client.authenticate_with_authorization_code("nope")
+
+
+def test_the_fake_round_trips_an_authorization_code():
+    fake = FakeWorkOsClient()
+    code = fake.issue_authorization_code("a@b.com")
+    session = fake.authenticate_with_authorization_code(code)
+    assert session.email == "a@b.com"
+
+
+def test_the_fake_refuses_an_authorization_code_twice():
+    # A code is single-use at WorkOS. A double that let it be replayed would
+    # hide a callback page that posts on every render.
+    fake = FakeWorkOsClient()
+    code = fake.issue_authorization_code("a@b.com")
+    fake.authenticate_with_authorization_code(code)
+    with pytest.raises(WorkOsError):
+        fake.authenticate_with_authorization_code(code)

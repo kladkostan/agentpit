@@ -14,3 +14,10 @@ class CodeSignInRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
+
+
+class CallbackRequest(BaseModel):
+    # The opaque code WorkOS put in the redirect's query string. No shape to
+    # validate beyond being present, so an empty one costs a 422 rather than a
+    # round-trip.
+    code: str = Field(min_length=1)

@@ -7,6 +7,7 @@ from agentpit.datastructures.auth_response import (
     UserPublic,
 )
 from agentpit.datastructures.authkit_requests import (
+    CallbackRequest,
     CodeSignInRequest,
     RefreshRequest,
     SendCodeRequest,
@@ -53,6 +54,29 @@ def sign_in_with_code(
     payload: CodeSignInRequest, service: AuthKitServiceDep
 ) -> AuthResponse:
     session = service.sign_in(payload.email, payload.code)
+    return AuthResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        user=UserPublic.model_validate(session.user.model_dump()),
+    )
+
+
+@router.post("/auth/callback", response_model=AuthResponse)
+def complete_callback(
+    payload: CallbackRequest, service: AuthKitServiceDep
+) -> AuthResponse:
+    """Exchange the code a WorkOS redirect came back with.
+
+    Provider-agnostic on purpose: `authorization_code` is not a Google grant,
+    so this route takes a code from any provider WorkOS is configured with, and
+    from the AuthKit Hosted UI, without a line of new code. Hence
+    `/auth/callback` and not `/auth/google/callback`.
+
+    The exchange is server-side because `client_secret` is our API key. That is
+    why the redirect lands on a page and the code arrives here by POST: the
+    browser may carry the code, never the secret.
+    """
+    session = service.sign_in_with_authorization_code(payload.code)
     return AuthResponse(
         access_token=session.access_token,
         refresh_token=session.refresh_token,

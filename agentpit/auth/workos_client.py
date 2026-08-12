@@ -62,6 +62,16 @@ class WorkOsClient(Protocol):
     def authenticate_with_code(self, email: str, code: str) -> WorkOsSession:
         ...
 
+    def authenticate_with_authorization_code(self, code: str) -> WorkOsSession:
+        """Exchange the code a provider redirect came back with.
+
+        The `/user_management` flow, NOT the `/oauth2/*` endpoints on the
+        AuthKit domain: those issue tokens whose `iss` is the AuthKit domain,
+        and `AuthKitVerifier` pins `api.workos.com/user_management/<client_id>`.
+        Both are advertised by WorkOS and only one of them is ours.
+        """
+        ...
+
     def refresh_session(self, refresh_token: str) -> WorkOsSession:
         ...
 
@@ -286,6 +296,9 @@ class RealWorkOsClient:
             {"grant_type": self._MAGIC_AUTH_GRANT, "code": code, "email": email}
         )
 
+    def authenticate_with_authorization_code(self, code: str) -> WorkOsSession:
+        return self._authenticate({"grant_type": "authorization_code", "code": code})
+
     def refresh_session(self, refresh_token: str) -> WorkOsSession:
         # Measured: WorkOS does NOT rotate the refresh token, so a client that
         # refreshes twice concurrently keeps a working credential either way.
@@ -301,6 +314,7 @@ class FakeWorkOsClient:
         self._by_email: dict[str, WorkOsUser] = {}
         self._next = 1
         self._codes: dict[str, str] = {}
+        self._auth_codes: dict[str, str] = {}
         #: How many codes this double has mailed. Doubles as the source of the
         #: code itself, so that no two addresses are ever issued the same one.
         self._codes_sent = 0
@@ -353,6 +367,31 @@ class FakeWorkOsClient:
             access_token=f"at-{user.workos_user_id}",
             refresh_token=f"rt-{user.workos_user_id}",
         )
+
+    def issue_authorization_code(self, email: str) -> str:
+        """Test-only: the code a provider redirect would have come back with."""
+        user = self.create_user(email=email, password_hash=None)
+        code = f"authcode-{len(self._auth_codes) + 1}-{user.workos_user_id}"
+        self._auth_codes[code] = user.workos_user_id
+        return code
+
+    def authenticate_with_authorization_code(self, code: str) -> WorkOsSession:
+        self.authenticate_calls += 1
+        # `pop`, not `get`: WorkOS burns an authorization code on use, and a
+        # double that allowed a replay would hide a callback page that posts on
+        # every render.
+        workos_user_id = self._auth_codes.pop(code, None)
+        if workos_user_id is None:
+            raise WorkOsError("WorkOS rejected the authorization code")
+        for user in self._by_email.values():
+            if user.workos_user_id == workos_user_id:
+                return WorkOsSession(
+                    workos_user_id=user.workos_user_id,
+                    email=user.email,
+                    access_token=f"at-{workos_user_id}",
+                    refresh_token=f"rt-{workos_user_id}",
+                )
+        raise WorkOsError("WorkOS rejected the authorization code")
 
     def refresh_session(self, refresh_token: str) -> WorkOsSession:
         if not refresh_token.startswith("rt-"):

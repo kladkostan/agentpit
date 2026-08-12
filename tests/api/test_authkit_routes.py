@@ -251,3 +251,29 @@ def test_a_workos_rate_limit_reaches_the_caller_as_429():
         assert resp.status_code == 429, resp.text
         # The diagnostic message names our endpoint; it is logged, not returned.
         assert "user_management" not in resp.text
+
+
+# --- /auth/callback: a provider redirect landing back on us ---------------
+
+
+def test_post_auth_callback_returns_a_session(workos):
+    code = workos.issue_authorization_code("cb@example.com")
+    with TestClient(app) as client:
+        resp = client.post("/auth/callback", json={"code": code})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["access_token"] and body["refresh_token"]
+    assert body["user"]["eth_address"].startswith("0x")
+
+
+def test_a_bad_authorization_code_is_401(workos):
+    with TestClient(app) as client:
+        resp = client.post("/auth/callback", json={"code": "not-a-code"})
+    assert resp.status_code == 401, resp.text
+
+
+def test_an_empty_authorization_code_is_422_and_never_reaches_workos(workos):
+    with TestClient(app) as client:
+        resp = client.post("/auth/callback", json={"code": ""})
+    assert resp.status_code == 422
+    assert workos.authenticate_calls == 0

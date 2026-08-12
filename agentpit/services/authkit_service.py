@@ -54,6 +54,21 @@ class AuthKitService:
             refresh_token=session.refresh_token,
         )
 
+    def sign_in_with_authorization_code(self, code: str) -> AuthKitSession:
+        """A provider redirect (today: Google) landing back on our callback.
+
+        Deliberately identical to `sign_in` past the exchange: whichever door
+        an identity arrives through, the account is resolved and created the
+        same way. `repair=True` for the same reason as `sign_in` -- a person is
+        at the screen, having just come back from Google.
+        """
+        session = self._workos.authenticate_with_authorization_code(code)
+        return AuthKitSession(
+            user=self._resolve_account(session, create=True, repair=True),
+            access_token=session.access_token,
+            refresh_token=session.refresh_token,
+        )
+
     def refresh(self, refresh_token: str) -> AuthKitSession:
         session = self._workos.refresh_session(refresh_token)
         return AuthKitSession(

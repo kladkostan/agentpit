@@ -432,3 +432,45 @@ def test_refresh_never_runs_the_chain_wipe_repair():
     svc.refresh(first.refresh_token)
 
     assert reonboarder.calls == []
+
+
+# --- sign_in_with_authorization_code: a provider redirect landing back on us -
+
+
+def test_a_first_authorization_code_creates_the_account_and_onboards_it():
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, _db = _service(workos, onboarder)
+
+    code = workos.issue_authorization_code("g@example.com")
+    session = svc.sign_in_with_authorization_code(code)
+
+    assert session.user.email == "g@example.com"
+    assert session.user.eth_address.startswith("0x")
+    assert onboarder.calls == [session.user.user_id]
+
+
+def test_a_google_account_that_already_exists_here_is_adopted_not_duplicated():
+    # Today's Google users have a row with GOOGLE_SUB and no password. Coming
+    # back through the WorkOS redirect they must land on it: a second row is a
+    # second wallet and a person whose positions have disappeared.
+    #
+    # Marked onboarded, like every other "already exists here" row in this
+    # file (see `_legacy_password_row`): a Google account that signed in
+    # before already has a funded wallet, and `onboarder.calls == []` below is
+    # what proves adoption doesn't redo that work. The un-onboarded case --
+    # a row stranded mid-onboarding -- has its own test:
+    # `test_a_stranded_legacy_row_is_finished_on_adoption_too`.
+    workos, onboarder = FakeWorkOsClient(), _Onboarder()
+    svc, db = _service(workos, onboarder)
+    with db.write() as conn:
+        user_id, _acct, _key = TableWrite.create_user(
+            conn, email="old@example.com", password_hash=None, handle=None,
+            google_sub="google-sub-1",
+        )
+        TableWrite.mark_user_onboarded(conn, user_id)
+
+    code = workos.issue_authorization_code("old@example.com")
+    session = svc.sign_in_with_authorization_code(code)
+
+    assert session.user.user_id == user_id
+    assert onboarder.calls == []
