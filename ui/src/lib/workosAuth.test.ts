@@ -1,9 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuthorizeUrl,
+  createState,
+  present,
   readCallbackParams,
   stateMatches,
 } from "./workosAuth";
+
+describe("present", () => {
+  // Mirrors `readGoogleClientId` in `googleAuth.ts` — same rule, same cases,
+  // because this is the function that decides whether `WORKOS_CLIENT_ID` /
+  // `WORKOS_REDIRECT_URI` count as set, which gates whether the Google button
+  // renders at all in `AuthDialog`.
+  it("returns the value when set", () => {
+    expect(present("client_1")).toBe("client_1");
+  });
+
+  it("treats a non-string as off", () => {
+    expect(present(undefined)).toBeNull();
+    expect(present(null)).toBeNull();
+  });
+
+  it("treats an empty or blank string as off", () => {
+    // A build arg that resolved to nothing must switch the feature off, not
+    // send WorkOS a `client_id` of spaces.
+    expect(present("")).toBeNull();
+    expect(present("   ")).toBeNull();
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(present(" client_1 \n")).toBe("client_1");
+  });
+});
 
 describe("buildAuthorizeUrl", () => {
   it("targets the user_management authorize endpoint, not oauth2", () => {
@@ -74,5 +102,37 @@ describe("stateMatches", () => {
 
   it("is false for the empty string on both sides", () => {
     expect(stateMatches("", "")).toBe(false);
+  });
+});
+
+describe("createState", () => {
+  it("returns 16 bytes as lowercase hex, from whatever source it's given", () => {
+    // Deterministic in shape only — the value itself must not be asserted,
+    // or the test would just be re-deriving the fill pattern below.
+    const fakeCrypto = {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.forEach((_, i) => {
+          bytes[i] = i;
+        });
+        return bytes;
+      },
+    } as unknown as Crypto;
+
+    const state = createState(fakeCrypto);
+    expect(state).toHaveLength(32);
+    expect(state).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("asks the injected source for randomness rather than always using the global", () => {
+    let calls = 0;
+    const fakeCrypto = {
+      getRandomValues: (bytes: Uint8Array) => {
+        calls += 1;
+        return bytes;
+      },
+    } as unknown as Crypto;
+
+    createState(fakeCrypto);
+    expect(calls).toBe(1);
   });
 });

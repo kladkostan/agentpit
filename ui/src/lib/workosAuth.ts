@@ -21,8 +21,13 @@ const AUTHORIZE_URL = "https://api.workos.com/user_management/authorize";
 /** Trim to null, so a variable set to whitespace means "off" like an unset one.
  *  Read as a value rather than by dynamic key: `import.meta.env` is a typed
  *  interface, and indexing it with a union widens to `any` under
- *  `noImplicitAny` or fails outright. */
-function present(raw: unknown): string | null {
+ *  `noImplicitAny` or fails outright.
+ *
+ *  Exported so this decision — which gates whether the Google button renders
+ *  at all — is covered directly, the way `readGoogleClientId` is covered in
+ *  `googleAuth.test.ts` rather than only through whatever happens to import
+ *  the module. */
+export function present(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : null;
