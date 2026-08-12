@@ -448,13 +448,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # its own connection pool, and a per-request instance would open a new TLS
     # connection to api.workos.com for every code mailed.
     workos_client = build_workos_client(settings)
-    if workos_client is None:
-        # Same reason as the Google line above: with no key the three /auth
-        # code routes 503, which is indistinguishable from a broken deploy
-        # unless startup says which it is.
-        log.info(
-            "Email code sign-in disabled (set WORKOS_API_KEY and "
-            "WORKOS_CLIENT_ID to enable)"
+    if workos_client is None or authkit_verifier is None:
+        # log.error, not a raise. Since the cutover WorkOS is the ONLY way to
+        # sign in, so this is not the minor gap the Google line above is -- but
+        # raising here would stop the app serving `X-API-Key` traffic too, and
+        # the trading bots authenticate with an api_key that has nothing to do
+        # with WorkOS. Taking their `/order` down to protest a sign-in
+        # misconfiguration would turn a bad deploy into a worse one.
+        #
+        # Compose cannot catch this for us: on the api side these arrive
+        # through `env_file`, which has no `:?` form. The UI half IS gated, in
+        # deploy/docker-compose.prod.yml.
+        log.error(
+            "WorkOS is not configured (WORKOS_API_KEY / WORKOS_CLIENT_ID): "
+            "NOBODY CAN SIGN IN -- /auth/code and /auth/session 503, AuthKit "
+            "sessions are rejected, and private-key export is disabled. "
+            "X-API-Key traffic is unaffected."
         )
 
     @asynccontextmanager

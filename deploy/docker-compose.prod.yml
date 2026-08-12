@@ -110,10 +110,12 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set in .env}
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
-        # Baked in, not read at runtime. Missing either one leaves the Google
-        # button out of the shipped bundle -- see Dockerfile.ui.
-        VITE_WORKOS_CLIENT_ID: ${VITE_WORKOS_CLIENT_ID:-}
-        VITE_WORKOS_REDIRECT_URI: ${VITE_WORKOS_REDIRECT_URI:-}
+        # Baked in, not read at runtime -- see Dockerfile.ui. These two fail
+        # loudly like VITE_API_BASE_URL above because AuthKit is now the only
+        # way in: a bundle built without them has no working sign-in at all,
+        # and the old silent `:-` default shipped that bundle without a word.
+        VITE_WORKOS_CLIENT_ID: ${VITE_WORKOS_CLIENT_ID:?set in .env}
+        VITE_WORKOS_REDIRECT_URI: ${VITE_WORKOS_REDIRECT_URI:?set in .env}
     restart: unless-stopped
     logging: *default-logging
     ports:
