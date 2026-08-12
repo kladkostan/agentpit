@@ -162,3 +162,49 @@ def test_an_empty_list_excludes_nothing(catalogue):
         assert (
             TableRead.count_active_markets(catalogue, excluded_categories=empty) == 2
         ), empty
+
+
+# ----- the sidebar ------------------------------------------------------------
+
+
+def _tagged(db, market_id: int, slug: str):
+    TableWrite.replace_market_tags(
+        db, market_id=market_id, tags=[(slug, slug.title())]
+    )
+
+
+def test_an_excluded_category_gets_no_sidebar_entry(db):
+    """The sidebar is built from the TAG graph, not the CATEGORY column, so
+    filtering the category list alone left a "Sports 2035" entry whose every
+    click returned an empty grid. Counting excluded events out drops the slug
+    below `min_events` on its own."""
+    sport = _event(db, "cs2-match", "Sports")
+    politics = _event(db, "election", "Politics")
+    m1 = _market(db, "themongolz", sport.event_id)
+    m2 = _market(db, "candidate-a", politics.event_id)
+    _tagged(db, m1.market_id, "sports")
+    _tagged(db, m2.market_id, "politics")
+
+    unfiltered = TableRead.list_tag_nav(db, slugs=["sports", "politics"], min_events=1)
+    assert {s for s, _l, _c in unfiltered} == {"sports", "politics"}
+
+    filtered = TableRead.list_tag_nav(
+        db, slugs=["sports", "politics"], min_events=1, excluded_categories=SPORTS
+    )
+    assert [s for s, _l, _c in filtered] == ["politics"]
+
+
+def test_a_tag_that_survives_on_other_events_keeps_its_place(db):
+    """`esports` events that upstream never filed under Sports are still real
+    listings — the count drops, the entry stays."""
+    sport = _event(db, "cs2-match", "Sports")
+    other = _event(db, "gamedev-award", "Pop Culture")
+    m1 = _market(db, "themongolz", sport.event_id)
+    m2 = _market(db, "best-indie", other.event_id)
+    _tagged(db, m1.market_id, "esports")
+    _tagged(db, m2.market_id, "esports")
+
+    rows = TableRead.list_tag_nav(
+        db, slugs=["esports"], min_events=1, excluded_categories=SPORTS
+    )
+    assert rows == [("esports", "Esports", 1)]

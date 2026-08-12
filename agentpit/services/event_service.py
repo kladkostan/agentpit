@@ -122,7 +122,10 @@ class EventService:
             present = {
                 slug: (label, count)
                 for slug, label, count in TableRead.list_tag_nav(
-                    conn, slugs=list(NAV_SLUGS), min_events=MIN_NAV_EVENTS
+                    conn,
+                    slugs=list(NAV_SLUGS),
+                    min_events=MIN_NAV_EVENTS,
+                    excluded_categories=self._excluded_categories,
                 )
             }
             entries: list[TagNavEntry] = []

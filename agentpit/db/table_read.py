@@ -1005,7 +1005,11 @@ class TableRead:
 
     @staticmethod
     def list_tag_nav(
-        db: psycopg.Connection, *, slugs: list[str], min_events: int
+        db: psycopg.Connection,
+        *,
+        slugs: list[str],
+        min_events: int,
+        excluded_categories: "Iterable[str] | None" = None,
     ) -> "list[tuple[str, str, int]]":
         """``(slug, label, event_count)`` for each requested slug that carries
         at least ``min_events`` events. Unordered — the caller restores the
@@ -1018,20 +1022,34 @@ class TableRead:
         ``MIN(LABEL)`` rather than an arbitrary pick: after an upstream rename
         the same slug can briefly carry two labels across markets, and the
         answer must not flicker between calls.
+
+        The count must honour `excluded_categories` for the same reason the
+        category list does, and this is the surface that actually renders the
+        sidebar: excluded events left in the count kept a "Sports 2035" entry
+        whose every click returned an empty grid. Counting them out drops the
+        slug below `min_events` on its own, so no separate deny-list is needed
+        and a tag that survives on non-excluded events keeps its place.
         """
         if not slugs:
             return []
+        excluded = _excluded_lower(excluded_categories)
+        clause = ""
+        params: list[object] = [list(slugs)]
+        if excluded:
+            clause = f" AND {_market_category_excluded_clause('m')}"
+            params.append(excluded)
+        params.append(min_events)
         cur = db.execute(
-            """
+            f"""
             SELECT mt.SLUG AS SLUG, MIN(mt.LABEL) AS LABEL,
                    COUNT(DISTINCT m.EVENT_ID) AS CNT
             FROM market_tags mt
             JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
-            WHERE m.EVENT_ID IS NOT NULL AND mt.SLUG = ANY(%s)
+            WHERE m.EVENT_ID IS NOT NULL AND mt.SLUG = ANY(%s){clause}
             GROUP BY mt.SLUG
             HAVING COUNT(DISTINCT m.EVENT_ID) >= %s
             """,
-            (list(slugs), min_events),
+            tuple(params),
         )
         return [(str(r["SLUG"]), str(r["LABEL"]), int(r["CNT"])) for r in cur.fetchall()]
 
