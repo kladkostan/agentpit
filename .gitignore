@@ -174,3 +174,9 @@ agentpit_bots/
 docs/HANDOFF.md
 docs/ROLLBACK.md
 docs/superpowers/
+
+# Chain deployment addresses are per-environment and written by
+# scripts/deploy_exchange.sh — never committed. A symlink to another
+# machine's copy got committed once and took the prod API down: docker
+# could not bind-mount it.
+deployments/
