@@ -14,7 +14,10 @@ import re
 from fastapi.testclient import TestClient
 
 from agentpit.api.main import app
+from agentpit.auth.passwords import hash_password, verify_password
 from agentpit.db.table_read import TableRead
+from agentpit.db.table_write import TableWrite
+from tests.db_helpers import fresh_test_conn
 
 
 def _hdr(token: str) -> dict[str, str]:
@@ -110,8 +113,88 @@ def test_patch_me_rejects_invalid_handle_format(sign_in):
         assert resp.status_code == 422
 
 
+# ----- /me/password, which is live for the accounts that predate the cutover --
+#
+# No door left open creates a row with a password, but plenty of rows have one:
+# `TableWrite.link_workos_identity` preserves PASSWORD_HASH deliberately (see
+# its docstring -- it is the rollback), so each of the 17 legacy accounts keeps
+# `has_password=True` after its first mailed-code sign-in and is still shown the
+# Settings page's password form. So the row is seeded directly and driven over
+# `X-API-Key`, which resolves it exactly as it resolves a bot.
+
+
+def _seed_password_account(email: str, password: str) -> tuple[str, str]:
+    """A row that still carries a bcrypt hash. Returns (user_id, api_key)."""
+    with fresh_test_conn() as conn:
+        user_id, _acct, api_key = TableWrite.create_user(
+            conn, email=email, password_hash=hash_password(password), handle=None
+        )
+    return user_id, api_key
+
+
+def _stored_hash(user_id: str) -> str | None:
+    with fresh_test_conn() as conn:
+        return TableRead.get_password_hash_by_userid(conn, user_id)
+
+
+def test_a_legacy_account_can_still_change_its_password():
+    # The live success path. It writes through `update_user_password_hash`, so
+    # assert the hash actually moved rather than trusting the 200 -- a
+    # change_password that validated and then wrote nothing would pass on the
+    # status code alone, and the holder would find out at the next sign-in
+    # after a revert.
+    old, new = "hunter22hunter22", "newhunter22hunter22"
+    user_id, api_key = _seed_password_account("legacypw@example.com", old)
+
+    with TestClient(app) as client:
+        resp = client.patch(
+            "/me/password",
+            headers={"X-API-Key": api_key},
+            json={"current_password": old, "new_password": new},
+        )
+    assert resp.status_code == 200, resp.text
+
+    stored = _stored_hash(user_id)
+    assert stored is not None
+    assert verify_password(new, stored), "the new password did not take"
+    assert not verify_password(old, stored), "the old password still works"
+
+
+def test_changing_a_password_with_the_wrong_current_one_is_401():
+    _user_id, api_key = _seed_password_account("wrongpw@example.com", "hunter22hunter22")
+
+    with TestClient(app) as client:
+        resp = client.patch(
+            "/me/password",
+            headers={"X-API-Key": api_key},
+            json={
+                "current_password": "not-the-current-one",
+                "new_password": "newhunter22hunter22",
+            },
+        )
+    assert resp.status_code == 401, resp.text
+
+
+def test_changing_a_password_to_the_same_one_is_400():
+    same = "hunter22hunter22"
+    user_id, api_key = _seed_password_account("samepw@example.com", same)
+    before = _stored_hash(user_id)
+
+    with TestClient(app) as client:
+        resp = client.patch(
+            "/me/password",
+            headers={"X-API-Key": api_key},
+            json={"current_password": same, "new_password": same},
+        )
+    assert resp.status_code == 400, resp.text
+    # bcrypt salts every hash, so a re-hash of the same password would look
+    # like a change to any test comparing strings. Assert the column is
+    # untouched: the refusal must happen before the write, not after it.
+    assert _stored_hash(user_id) == before
+
+
 def test_changing_a_password_on_a_mailed_code_account_is_refused(sign_in):
-    """Nobody signing in today has a password to change.
+    """Nobody signing in *today* has a password to change.
 
     `change_password` refuses any row with a null PASSWORD_HASH, which is
     every account created since the cutover -- and it does so with the wrong
