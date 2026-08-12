@@ -1,10 +1,16 @@
 # Where things stand — 2026-08-12
 
-Written to hand this work to a fresh session. Everything below is on branch
-`mvp`; **nothing here is deployed**. Production runs `mvp` at `1d7484d`, which
-predates all of it by 55 commits.
+Written to hand this work to a fresh session.
 
-## The WorkOS migration is finished in code
+**Deployed 2026-08-12.** Production runs branch `main` at `998caad` — it used to
+track `mvp` at `1d7484d`; `mvp` was merged into `main` (133 commits, a
+fast-forward) and the box was switched to `main`, so that is the branch to
+deploy from now. Verified live after the deploy: `POST /register` → 410,
+`POST /auth/code` → 202, and the Production WorkOS API key's `lastUsedAt` went
+from `null` to a real timestamp, which is the proof that production reached
+WorkOS at all for the first time.
+
+## The WorkOS migration is finished and live
 
 Sign-in is a six-digit code mailed by WorkOS, or Google through a WorkOS
 redirect. There are no passwords anywhere in the sign-in path.
@@ -52,30 +58,31 @@ tokens.
   **same** `USER_ID`, the **same** `ETH_ADDRESS`, the same `ONBOARDED_AT`, no
   second wallet, and no change in the user count.
 
-## Before the deploy, in this order
+## What the deploy needed, all of it now done
 
-1. **`WORKOS_API_KEY` and `WORKOS_CLIENT_ID` on the box**, in the prod `.env` —
-   they reach the api container through `env_file`, which is the only route.
-   Use the **Production** client id, not staging's. Partial configuration is
-   worse than none: api key alone means nobody can get a token, client id alone
-   means everyone is signed in and then 401'd. Before this branch, a
-   misconfigured deployment still worked on legacy JWTs; now it is a total
-   human lockout, with `X-API-Key` still serving the bots.
-2. **`WORKOS_AUTHKIT_DOMAIN`: set it correctly or leave it blank.** Nothing
-   reads it. It used to crash-loop the whole API on a schemeless value; that now
-   logs instead, but a wrong value still buys nothing.
-3. **Google in WorkOS Production.** Decided 2026-08-12: use the **same** Google
-   OAuth client as Staging. The reason a separate client was once required —
-   protecting the live in-page flow — died with the cutover, which turns
-   `/auth/google` into a 410. Add the production callback to that client:
-   `https://auth.workos.com/sso/oauth/google/aceN1OYh0PviHcYaWNvumSv4y/callback`,
-   then enable Google in WorkOS Production. **Deploying without this leaves the
-   mailed code as the only door, which the spec forbids** — one WorkOS mail
-   outage locks out all 17 accounts at once.
-4. **`VITE_WORKOS_CLIENT_ID` and `VITE_WORKOS_REDIRECT_URI` in the prod `.env`.**
-   `deploy/docker-compose.prod.yml` now refuses to build `caddy` without them,
-   deliberately. Vite bakes them at build time, so a rebuild is required.
-Done 2026-08-12: both environments' WorkOS applications are named `AgentPit`
+Kept as the checklist for any future environment, because every item was a way
+to ship something broken.
+
+1. **`WORKOS_API_KEY` and `WORKOS_CLIENT_ID` in the prod `.env`** — they reach
+   the api container through `env_file`, which is the only route. Use the
+   **Production** client id, not staging's. Partial configuration is worse than
+   none: api key alone means nobody can get a token, client id alone means
+   everyone signs in and is then 401'd. Before this branch a misconfigured
+   deployment still worked on legacy JWTs; now it is a total human lockout,
+   with `X-API-Key` still serving the bots.
+2. **`WORKOS_AUTHKIT_DOMAIN`: correct or blank.** Nothing reads it. It used to
+   crash-loop the whole API on a schemeless value; that now logs instead.
+3. **Google in WorkOS Production**, using the **same** OAuth client as Staging.
+   The reason a separate client was once required — protecting the live in-page
+   flow — died with the cutover, which turns `/auth/google` into a 410. The
+   production callback registered on that client is
+   `https://auth.workos.com/sso/oauth/google/aceN1OYh0PviHcYaWNvumSv4y/callback`
+   (Staging's is different). Deploying without this would have left the mailed
+   code as the only door, which the spec forbids.
+4. **`VITE_WORKOS_CLIENT_ID` and `VITE_WORKOS_REDIRECT_URI` in the prod `.env`**,
+   and a `caddy` rebuild, because vite bakes them at build time.
+
+Both WorkOS applications are named `AgentPit`
 (Staging by hand, Production through the API — they are separate objects and
 renaming one does not touch the other). Verified by sending a Production test
 email: no `[STAGING]` prefix, sender `AgentPit <welcome@workos-mail.com>`.
@@ -144,13 +151,37 @@ changing it breaks the liquidity engine; and `TableWrite.create_user`'s docstrin
 still claims every account has a password hash or a `google_sub`, which
 AuthKit-created accounts disprove.
 
+## The disk incident of 2026-08-12, and what it means
+
+Found by accident while preparing the deploy: **production's disk was at 100%
+and Postgres was rejecting connections** — it could not write WAL. Nothing to do
+with this migration; `agentpit-anvil-1` had accumulated **65 GB of temp files in
+its writable layer**, up from the 47 GB recorded a day earlier.
+
+Fixed by pruning the build cache (4.3 GB, which alone brought Postgres back to
+`healthy`) and then recreating the anvil container, which freed **64 GB** — from
+97% used to 12%. The chain survived intact: block 38300 → 38469 across the
+recreate, because `/state` is the named volume `agentpit_agentpit_anvil` and the
+283 MB `anvil-state.json` was 16 seconds old when checked.
+
+**Check that freshness before ever recreating anvil.** The compose file records
+an earlier incident where the dump failed silently for twelve days and the chain
+was wiped by the first recreate; `user: root` is the fix for that, and it is why
+the file says so.
+
+Growth is ~17 GB/day and unaddressed. Deliberately not fixed with a scheduled
+recreate: the plan is to move off the local anvil onto a real chain, which
+retires the problem rather than managing it.
+
 ## Still waiting on a person, unrelated to auth
 
-- **62 GB in `~/.foundry/anvil/tmp`**, ~15 GB free. It is already flaking the
-  local suite with `Web3RPCError -32003 replacement transaction underpriced`.
-- **47 GB on prod's `agentpit-anvil-1`** writable layer — recreating the
-  container (not restarting) frees it; the chain lives in a 263 MB volume.
+- **62 GB in the laptop's `~/.foundry/anvil/tmp`**, same pathology as prod's was.
+  It is already flaking the local suite with `Web3RPCError -32003 replacement
+  transaction underpriced` on a random test per run.
 - **The SKALE operator key.** The configured `ADMIN` is anvil's account #0, whose
   private key ships with every Foundry install.
-- **The catalogue churn filter** (`1d024a7`, `3e1ff72`, `3ae4ea7`) is still
-  undeployed and will ride along with whatever carries this.
+- **A stray test user in Production WorkOS**, `deploy-probe@agentpit.dev`, left
+  by the post-deploy smoke test of `POST /auth/code`. Harmless; delete it when
+  convenient.
+- The catalogue churn filter (`1d024a7`, `3e1ff72`, `3ae4ea7`) shipped with this
+  deploy, having ridden along in the 133 commits.
