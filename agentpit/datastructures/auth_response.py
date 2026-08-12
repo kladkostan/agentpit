@@ -16,9 +16,11 @@ class UserPublic(BaseModel):
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    # Present only on the AuthKit paths. The legacy `/register` and `/login`
-    # issue a 24-hour JwtCoder token with nothing to refresh, so they leave
-    # this null rather than growing a second response model.
+    # Present only on the AuthKit paths, which are now the only ones serving
+    # traffic. `AuthService.register`/`login` still build this model and still
+    # leave the field null -- their 24-hour JwtCoder token has nothing to
+    # refresh -- but their routes answer 410 since the cutover; they are kept
+    # only so reverting that commit restores a working sign-in.
     refresh_token: str | None = None
     user: UserPublic
 

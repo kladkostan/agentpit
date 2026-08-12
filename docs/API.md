@@ -26,27 +26,26 @@ There is also an interactive quickstart at the UI's `/get-started` page — star
 
 ## Authentication
 
-Getting a key: `POST /register` creates a user, provisions a server-held EOA (`eth_key`/`eth_address`), and returns an `api_key` in the response body (`user.api_key`). Registration also runs on-chain onboarding synchronously (gas grant, paper-USDC faucet drip, exchange approvals) before responding, so a freshly registered account can place an order immediately.
+**Getting a key is a browser step, done once by a human.** There is no longer a programmatic way to create an account: `POST /register` and `POST /login` answer `410 Gone`. Open the UI, sign in with a code mailed to your address (or with Google), and copy the API key from the Settings page. The account provisions a server-held EOA (`eth_key`/`eth_address`) and runs on-chain onboarding — gas grant, paper-USDC faucet drip, exchange approvals — on that first sign-in, so it can place an order immediately afterwards.
 
 Two credentials are accepted by the `CurrentUserDep` dependency (`agentpit/auth/dependencies.py`), checked in this order:
 
-1. **`X-API-Key` header** — a long-lived key returned by `/register` or `/login` (`user.api_key`). Looked up directly against the `users` table. This is the credential trading bots should use.
-2. **`Authorization: Bearer <jwt>`** — the `access_token` also returned by `/register`/`/login`. It is a symmetric JWT (`HS256` by default, secret `JWT_SECRET`) with `sub` (user id), `email`, `iat`, `exp`, valid for `JWT_EXPIRES_SECONDS` (default 24h). Used for browser/session contexts (the UI uses this).
+1. **`X-API-Key` header** — a long-lived key (`user.api_key`), read off the Settings page. Looked up directly against the `users` table. **This is the credential trading bots should use, and it is unchanged by the AuthKit cutover.**
+2. **`Authorization: Bearer <jwt>`** — a WorkOS AuthKit access token, obtained by the browser sign-in flow (`/auth/code` → `/auth/session`) and verified against WorkOS's published keys. Short-lived, refreshed via `/auth/refresh`; the UI uses this. The old symmetric `JWT_SECRET` token is no longer accepted.
 
 If `X-API-Key` is present it is checked first and, if invalid, returns `401` immediately — it does **not** fall back to the bearer token. If no `X-API-Key` header is sent, a missing or invalid bearer token also returns `401`.
+
+Bots should hold an `X-API-Key` and ignore the bearer path entirely: the AuthKit token expires, and there is no non-interactive way to mint one.
 
 Admin endpoints (`/admin/*`) use a **separate, unrelated** mechanism: an `X-Admin-Token` header compared against `Settings.admin_token` (env var `AGENTPIT_ADMIN_TOKEN`, default `dev-admin-token` for local dev). This has nothing to do with `CurrentUserDep` — admin routes do not accept an API key or JWT.
 
 > Note: The operator endpoints — market lifecycle (`POST /markets`, `POST /markets/{market_id}/activate`, `POST /markets/{market_id}/close`, `POST /markets/{market_id}/cancel`, `POST /markets/{market_id}/resolve`), `POST /create_agent`, and `POST /create_personality` — now **require** the same `X-Admin-Token` mechanism as `/admin/*`: a missing or mismatched header returns `401` with `detail: "admin token missing or invalid"`. All `GET` routes remain public.
 
 ```bash
-# Register and capture the API key
-curl -s -X POST http://localhost:8000/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email": "bot@example.com", "password": "correcthorsebattery", "handle": "mybot"}'
-# → { "access_token": "...", "token_type": "bearer", "user": { "api_key": "...", "eth_address": "0x...", ... } }
+# 1. In a browser: sign in to the UI with a mailed code, open Settings,
+#    copy the API key. There is no curl equivalent — /register is 410.
 
-# Use the API key for trading calls
+# 2. Use the API key for every call from then on
 curl -s http://localhost:8000/me -H 'X-API-Key: <api_key>'
 ```
 
@@ -61,42 +60,44 @@ curl -s http://localhost:8000/me -H 'X-API-Key: <api_key>'
   - `422 Unprocessable Entity` — Pydantic request validation failure. `detail` is the FastAPI validation-error array (`HTTPValidationError`/`ValidationError` schema: `loc`, `msg`, `type`).
   - `401 Unauthorized` — missing/invalid `X-API-Key` or bearer token (`CurrentUserDep`); missing/invalid `X-Admin-Token` on admin/operator routes; invalid login/current-password (`InvalidCredentialsError`). `detail` is a plain string.
   - `404 Not Found` — domain "not found" errors (`MarketNotFoundError`, `EventNotFoundError`, `PersonalityNotFoundError`, `UserNotFoundError`, missing `X-Admin-Token` target user on `mark_bot`, etc.). `detail` is a plain string.
-  - `409 Conflict` — domain "already exists" errors (`UserAlreadyExistsError` on `/register`, `HandleAlreadyExistsError` on `PATCH /me`, `AgentAlreadyExistsError` on `/create_agent`). `detail` is a plain string.
+  - `409 Conflict` — domain "already exists" errors (`HandleAlreadyExistsError` on `PATCH /me`, `AgentAlreadyExistsError` on `/create_agent`). `detail` is a plain string.
+  - `410 Gone` — an endpoint that existed and was removed: `POST /register`, `POST /login`, `POST /auth/google`. `detail` is a plain string.
   - `400 Bad Request` — general domain/business-rule violations (`BusinessRuleError` and subclasses: `InsufficientBalanceError`, `InvalidPaginationError`, `MarketStateError`, `OnboardingError` — e.g. wrong market state for an action, insufficient apUSD balance, invalid limit/offset). `detail` is a plain string.
   - These mappings are registered in `agentpit/api/exception_handlers.py`.
 
 ## Auth
 
-### `POST /register`
-Create a new user, provision a server-held on-chain account, and onboard it (gas grant + paper-USDC faucet drip + exchange approvals) before responding. Public — no auth required.
+Sign-in is a browser flow built on WorkOS AuthKit. The endpoints below exist for the UI; a bot needs none of them, only the `X-API-Key` its owner copied from Settings.
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `email` | string (email) | yes | must be a valid email |
-| `password` | string | yes | 8–256 characters |
-| `handle` | string \| null | no | 1–15 chars, `[a-zA-Z0-9_]` |
+### `POST /register`, `POST /login`, `POST /auth/google` — **gone**
+All three answer `410 Gone` with `detail: "sign in with a mailed code instead"`. `410` rather than `404` because they existed and were removed. There is no replacement that creates an account without a browser.
 
-Response (`AuthResponse`): `access_token` (JWT), `token_type` (`"bearer"`), `user` (`UserPublic`: `user_id`, `email`, `handle`, `eth_address`, `api_key`, `onboarded_at`, `created_at`).
-
-Errors: `409` if the email is already registered; `400` (`OnboardingError`) if on-chain onboarding fails after the DB row is created.
-
-```bash
-curl -s -X POST http://localhost:8000/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email": "trader@example.com", "password": "correcthorsebattery", "handle": "trader1"}'
-```
-
-### `POST /login`
-Authenticate with email + password and receive a fresh JWT. Public — no auth required. Also transparently re-runs on-chain onboarding if the user's on-chain native balance is zero (e.g. after a local-chain reset).
+### `POST /auth/code`
+Mail a six-digit code to an address. Public.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `email` | string (email) | yes | |
-| `password` | string | yes | |
 
-Response: `AuthResponse` (same shape as `/register`).
+Always `202 {"status": "sent"}`, whether or not the address has an account — the reply must not tell a stranger who is registered. WorkOS creates its user and mails the code here; no agentpit row is created until the code comes back.
 
-Errors: `401` (`InvalidCredentialsError`) on wrong email/password.
+### `POST /auth/session`
+Exchange a mailed code for a session. Public. Creates the agentpit account on first use — provisioning the EOA and running on-chain onboarding (gas grant + paper-USDC faucet drip + exchange approvals) — and re-runs onboarding on later sign-ins if `ONBOARDED_AT` is null.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `email` | string (email) | yes | |
+| `code` | string | yes | the six digits from the mail |
+
+Response (`AuthResponse`): `access_token` (an AuthKit JWT), `token_type` (`"bearer"`), `refresh_token`, `user` (`UserPublic`: `user_id`, `email`, `handle`, `eth_address`, `api_key`, `onboarded_at`, `created_at`, `has_password`, `auto_redeem`).
+
+Errors: `401` on a wrong, stale, or already-used code; `429` if WorkOS rate-limits; `503` if the deployment has no WorkOS configured.
+
+### `POST /auth/callback`
+Exchange the `code` a WorkOS redirect came back with (Google, or the AuthKit Hosted UI). Public. Provider-agnostic on purpose — the field is `code`, an OAuth authorization code, not a Google credential. Response and errors as `/auth/session`.
+
+### `POST /auth/refresh`
+Trade a `refresh_token` for a fresh `access_token`. Public. Never runs onboarding. Response as `/auth/session`; `401` once the refresh token is spent or expired.
 
 ## Users
 
@@ -105,7 +106,7 @@ All endpoints in this section require `CurrentUserDep` (`X-API-Key` or Bearer JW
 ### `GET /me`
 Return the current user's public profile.
 
-Response: `UserPublic` (see `/register`).
+Response: `UserPublic` (see `/auth/session`).
 
 ### `PATCH /me`
 Change the caller's handle.

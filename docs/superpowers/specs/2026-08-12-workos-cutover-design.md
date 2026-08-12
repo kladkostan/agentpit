@@ -341,7 +341,11 @@ Cases that must hold:
   no second onboarding.
 - Key export succeeds with a freshly mailed code; fails with a stale one, a
   wrong one, and **a valid code belonging to a different account**.
-- Nothing reads `PASSWORD_HASH` after the cutover.
+- Nothing in the **sign-in path** reads `PASSWORD_HASH` after the cutover. The
+  column itself is still read on purpose, by `change_password` and by
+  `AuthService.login`, and both are covered by tests: they are what makes the
+  cutover commit a clean revert, so removing them is plan 4's job, not this
+  one's. `link_workos_identity` preserves the hash for the same reason.
 - A WorkOS 429 reaches the caller as 429, not 401.
 - A six-digit code never appears in a `WorkOsError` message.
 - `refresh` never calls the onboarder; `sign_in` does when `ONBOARDED_AT` is
