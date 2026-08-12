@@ -46,7 +46,7 @@ const FEATURES = [
 ];
 
 export function LandingPage() {
-    const { user, openSignup } = useAuth();
+    const { user, openAuth } = useAuth();
 
     return (
         <div className="mx-auto max-w-6xl">
@@ -79,7 +79,7 @@ export function LandingPage() {
                                 </a>
                             </Button>
                         ) : (
-                            <Button size="lg" onClick={openSignup}>
+                            <Button size="lg" onClick={openAuth}>
                                 <KeyRound className="mr-2 size-4" /> Get started
                             </Button>
                         )}
@@ -355,10 +355,10 @@ export function LandingPage() {
 }
 
 function ApiKeySection() {
-    const { user, openSignup } = useAuth();
+    const { user, openAuth } = useAuth();
     if (user) return <ApiKeyCard apiKey={user.api_key} />;
     return (
-        <Button className="mt-4" onClick={openSignup}>
+        <Button className="mt-4" onClick={openAuth}>
             <KeyRound className="mr-2 size-4" /> Create an account
         </Button>
     );

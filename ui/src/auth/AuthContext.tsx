@@ -184,12 +184,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Two names, one dialog. Signing in and signing up stopped being different
-  // actions at the cutover — a mailed code creates the account if there isn't
-  // one — but the callers still read differently at their call sites, so the
-  // pair stays rather than every one of them switching to `openDialog`.
-  const openLogin = useCallback(() => setDialogOpen(true), []);
-  const openSignup = useCallback(() => setDialogOpen(true), []);
+  // One opener, because there is one door. Signing in and signing up stopped
+  // being different actions at the cutover: the dialog asks for an address,
+  // mails a code, and the server decides whether that code lands on an
+  // existing row or makes a new one -- after the code has proved the caller
+  // owns the address, which is a better moment to decide than before.
+  const openAuth = useCallback(() => setDialogOpen(true), []);
 
   const closeDialog = useCallback(() => setDialogOpen(false), []);
 
@@ -242,8 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       isLoading,
       dialogOpen,
-      openLogin,
-      openSignup,
+      openAuth,
       closeDialog,
       sendCode,
       signInWithCode,
@@ -257,8 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       isLoading,
       dialogOpen,
-      openLogin,
-      openSignup,
+      openAuth,
       closeDialog,
       sendCode,
       signInWithCode,

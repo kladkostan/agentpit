@@ -6,12 +6,18 @@ export type AuthValue = {
   setUser: (user: UserPublic | null) => void;
   accessToken: string | null;
   isLoading: boolean;
-  /** Both open the same dialog. Signing in and signing up are one action now
-   *  — a mailed code creates the account if there isn't one — but the two
-   *  names are kept because the callers still mean different things by them:
-   *  a nav button, a landing-page call to action, a gate on a click. */
-  openLogin: () => void;
-  openSignup: () => void;
+  /** Open the sign-in dialog. There is one, because signing in and signing up
+   *  stopped being different actions at the cutover: a mailed code signs you
+   *  in, and creates the account first if there isn't one.
+   *
+   *  Deliberately NOT two entry points that check first whether the address is
+   *  known. `POST /auth/code` answers 202 either way precisely so a stranger
+   *  cannot use it to discover who has an account here — and since the cutover
+   *  retired `/register`'s 409, it is the only endpoint left that could leak
+   *  that. Branching the UI on a lookup would hand back what the status code
+   *  withholds. The branch happens on the server, after the code proves the
+   *  caller owns the address. */
+  openAuth: () => void;
   closeDialog: () => void;
   dialogOpen: boolean;
   /** Mail a six-digit code to this address. Resolves whether or not the
