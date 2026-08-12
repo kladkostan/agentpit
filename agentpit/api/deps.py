@@ -175,7 +175,10 @@ TradeServiceDep = Annotated[TradeService, Depends(get_trade_service)]
 # Below `AuthServiceDep` because it depends on it, and these annotations are
 # evaluated at def time.
 def get_authkit_service(
-    db: SessionDep, workos: WorkOsClientDep, auth: AuthServiceDep
+    db: SessionDep,
+    workos: WorkOsClientDep,
+    auth: AuthServiceDep,
+    settings: SettingsDep,
 ) -> AuthKitService:
     if workos is None:
         # No WORKOS_API_KEY: the same shape Google sign-in takes without a
@@ -192,6 +195,8 @@ def get_authkit_service(
         workos=workos,
         onboard=auth._onboard_new_account,
         reonboard=auth._maybe_reonboard,
+        per_email_hourly=settings.auth_code_per_email_hourly,
+        per_ip_hourly=settings.auth_code_per_ip_hourly,
     )
 
 

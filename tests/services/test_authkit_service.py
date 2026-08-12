@@ -60,20 +60,6 @@ class _Reonboarder:
         self.calls.append(user.user_id)
 
 
-def _a_minute_later(db, email: str) -> None:
-    """Age the per-address code window so another code may be requested.
-
-    `send_code` allows one code per address per 60 seconds. These tests are
-    about identity, not about the limiter, and a returning visitor in real life
-    comes back minutes or days later -- so expire the window rather than sleep
-    through it. Ageing it, rather than deleting the row, keeps the hourly rule
-    counting, which is what a real returning visitor would also face.
-    """
-    with db.write() as conn:
-        conn.execute(
-            "UPDATE auth_code_attempts SET WINDOW_START = 0 WHERE BUCKET = %s",
-            (f"email:60s:{email.strip().lower()}",),
-        )
 
 
 def _service(workos=None, onboarder=None, reonboarder=None):
@@ -114,7 +100,6 @@ def test_a_returning_address_lands_on_the_same_row_without_a_second_wallet():
 
     svc.send_code("a@example.com")
     first = svc.sign_in("a@example.com", workos.last_code("a@example.com"))
-    _a_minute_later(_db, "a@example.com")
     svc.send_code("a@example.com")
     second = svc.sign_in("a@example.com", workos.last_code("a@example.com"))
 
@@ -251,7 +236,6 @@ def test_onboarding_that_failed_on_the_first_sign_in_is_finished_later():
         stranded = TableRead.get_user_by_email_ci(conn, "new@example.com")
     assert stranded is not None and stranded.onboarded_at is None
 
-    _a_minute_later(db, "new@example.com")
     svc.send_code("new@example.com")
     session = svc.sign_in("new@example.com", workos.last_code("new@example.com"))
 
@@ -353,7 +337,6 @@ def test_sign_in_finishes_an_onboarding_that_never_completed():
         TableWrite.clear_user_onboarded(conn, first.user.user_id)
     onboarder.calls.clear()
 
-    _a_minute_later(db, "b@example.com")
     svc.send_code("b@example.com")
     svc.sign_in("b@example.com", workos.last_code("b@example.com"))
 
@@ -370,7 +353,6 @@ def test_sign_in_runs_the_chain_wipe_repair_for_an_onboarded_account():
     svc.send_code("c@example.com")
     first = svc.sign_in("c@example.com", workos.last_code("c@example.com"))
 
-    _a_minute_later(_db, "c@example.com")
     svc.send_code("c@example.com")
     second = svc.sign_in("c@example.com", workos.last_code("c@example.com"))
 

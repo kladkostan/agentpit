@@ -45,13 +45,6 @@ def workos():
         yield fake
 
 
-def _a_minute_later(email: str) -> None:
-    """Age the per-address code window, so a second request is not rate limited."""
-    with DbSession(Settings().database_url).write() as conn:
-        conn.execute(
-            "UPDATE auth_code_attempts SET WINDOW_START = 0 WHERE BUCKET = %s",
-            (f"email:60s:{email.strip().lower()}",),
-        )
 
 
 def _code(workos: FakeWorkOsClient, email: str) -> str:
@@ -82,7 +75,6 @@ def test_post_auth_code_says_the_same_thing_for_known_and_unknown_addresses(work
         # exists, and it applies identically to addresses that have one and
         # addresses that do not. Ageing it here keeps this test measuring the
         # oracle it was written for rather than the limiter.
-        _a_minute_later("known@example.com")
         again = client.post("/auth/code", json={"email": "known@example.com"})
         stranger = client.post("/auth/code", json={"email": "stranger@example.com"})
     assert first.status_code == again.status_code == stranger.status_code == 202

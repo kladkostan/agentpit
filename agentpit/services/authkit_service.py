@@ -37,7 +37,16 @@ class AuthKitSession:
 
 
 class AuthKitService:
-    def __init__(self, *, db: DbSession, workos: WorkOsClient, onboard, reonboard):
+    def __init__(
+        self,
+        *,
+        db: DbSession,
+        workos: WorkOsClient,
+        onboard,
+        reonboard,
+        per_email_hourly: int = 20,
+        per_ip_hourly: int = 60,
+    ):
         self._db = db
         self._workos = workos
         # `AuthService._onboard_new_account` and `AuthService._maybe_reonboard`
@@ -46,23 +55,20 @@ class AuthKitService:
         # construction.
         self._onboard = onboard
         self._reonboard = reonboard
+        self._per_email_hourly = per_email_hourly
+        self._per_ip_hourly = per_ip_hourly
 
-    #: `POST /auth/code` is unauthenticated, is the only door into the product,
-    #: and every request that gets past these costs a WorkOS email. So it is
-    #: both a denial-of-service vector and a bill.
+    #: One hour, fixed window. Two subjects, because either alone leaves the
+    #: other's hole open: keyed on the ADDRESS an attacker rotates addresses and
+    #: still spends our money, keyed on the IP alone one inbox can be filled
+    #: from many hosts.
     #:
-    #: Two subjects, because one alone leaves half the door open: keyed on the
-    #: ADDRESS an attacker rotates addresses and still spends our money, and
-    #: keyed on the IP alone one person's inbox can be filled from many hosts.
-    #:
-    #: 60s per address matches the dialog's own resend cooldown
-    #: (`RESEND_COOLDOWN_SECONDS` in `ui/src/components/auth/codeFlow.ts`), so
-    #: the server rule and the button never disagree about when a resend is due.
-    RATE_LIMITS = (
-        ("email:60s", 60, 1),
-        ("email:1h", 3600, 5),
-        ("ip:1h", 3600, 20),
-    )
+    #: There is deliberately NO per-minute rule. One existed and was removed:
+    #: the dialog's own cooldown guards only its resend button, not a fresh
+    #: submit, so a person who closed the dialog and tried the same address
+    #: again -- exactly what somebody does when the mail is slow -- was told
+    #: "too many attempts" for behaving normally.
+    RATE_LIMIT_WINDOW_SECONDS = 3600
 
     def send_code(self, email: str, *, client_ip: str | None = None) -> None:
         """Mail a code, unless this address or this caller has had enough.
@@ -77,24 +83,27 @@ class AuthKitService:
         rule into a global kill switch, which is a denial of service somebody
         could trigger on purpose.
         """
-        subjects = {"email": email.strip().lower(), "ip": client_ip}
+        rules = (
+            ("email", email.strip().lower(), self._per_email_hourly),
+            ("ip", client_ip, self._per_ip_hourly),
+        )
         with self._db.write() as conn:
-            for rule, window_seconds, limit in self.RATE_LIMITS:
-                kind, _ = rule.split(":", 1)
-                subject = subjects[kind]
+            for kind, subject, limit in rules:
                 if subject is None:
                     continue
                 allowed = TableWrite.claim_auth_code_attempt(
                     conn,
-                    f"{rule}:{subject}",
+                    f"{kind}:1h:{subject}",
                     int(time.time()),
-                    window_seconds,
+                    self.RATE_LIMIT_WINDOW_SECONDS,
                     limit,
                 )
                 if not allowed:
                     # The window length is the honest `Retry-After`: a fixed
                     # window can free up sooner, never later.
-                    raise AuthCodeRateLimitedError(retry_after=window_seconds)
+                    raise AuthCodeRateLimitedError(
+                        retry_after=self.RATE_LIMIT_WINDOW_SECONDS
+                    )
 
         self._workos.send_magic_auth_code(email)
 

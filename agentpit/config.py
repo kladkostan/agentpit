@@ -236,6 +236,26 @@ class Settings(BaseSettings):
     )
 
     # Auth
+    # `POST /auth/code` is unauthenticated and, since the cutover, the only
+    # door into the product -- and every request past the limit costs a WorkOS
+    # email. Both are per hour, in a fixed window.
+    #
+    # Per address is the honest-user number: somebody whose mail is slow closes
+    # the dialog and tries again, and the UI does NOT stop them (its cooldown
+    # guards only the resend button, not a fresh submit), so this has to be
+    # generous enough to forgive that.
+    #
+    # Per IP is deliberately higher than per address rather than equal: an
+    # office behind one NAT is several people, while one address is one person.
+    # It exists to catch address ROTATION, which the per-address rule cannot
+    # see at all.
+    auth_code_per_email_hourly: int = Field(
+        default=20, validation_alias="AGENTPIT_AUTH_CODE_PER_EMAIL_HOURLY"
+    )
+    auth_code_per_ip_hourly: int = Field(
+        default=60, validation_alias="AGENTPIT_AUTH_CODE_PER_IP_HOURLY"
+    )
+
     jwt_secret: str = Field(
         default="dev-only-insecure-secret-change-me",
         validation_alias="JWT_SECRET",

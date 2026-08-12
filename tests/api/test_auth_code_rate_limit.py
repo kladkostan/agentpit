@@ -5,6 +5,12 @@ cutover, and every request that reaches WorkOS costs an email. So these tests
 care about two things a status code alone cannot show: that a refused request
 is refused BEFORE WorkOS is called, and that the two rules key on different
 subjects so neither leaves the other's hole open.
+
+The service is driven directly rather than over HTTP wherever the limit itself
+is the subject. Going through `TestClient` would mean sending the production
+allowance -- twenty requests per address, sixty per IP -- for every assertion.
+The two HTTP tests below are the ones that need the route: they check the
+status code, the header, and that the client IP reaches the rule at all.
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -15,83 +21,119 @@ from agentpit.auth.workos_client import FakeWorkOsClient
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
 from agentpit.db.table_write import TableWrite
+from agentpit.domain.exceptions import AuthCodeRateLimitedError
 from agentpit.services.authkit_service import AuthKitService
+from tests.api.conftest import _overriding
 
 
 @pytest.fixture
 def workos():
+    # `_overriding` restores rather than pops: `create_app` installs the
+    # production client under this key and conftest replaces it with the
+    # offline default, so a bare `pop` deletes THEIR value and every later test
+    # in the session 500s on the raising placeholder. That exact bug was found
+    # and fixed here once already; it is not worth finding twice.
     fake = FakeWorkOsClient()
-    app.dependency_overrides[deps.get_workos_client] = lambda: fake
-    yield fake
-    app.dependency_overrides.pop(deps.get_workos_client, None)
+    with _overriding(deps.get_workos_client, lambda: fake):
+        yield fake
 
 
-def _limit(rule: str) -> int:
-    """The configured allowance for one rule, read rather than duplicated."""
-    return next(n for r, _w, n in AuthKitService.RATE_LIMITS if r == rule)
+def _service(workos: FakeWorkOsClient, *, per_email: int, per_ip: int):
+    """The service with small allowances, so a test states its own numbers."""
+    return AuthKitService(
+        db=DbSession(Settings().database_url),
+        workos=workos,
+        onboard=lambda *_a, **_k: None,
+        reonboard=lambda *_a, **_k: None,
+        per_email_hourly=per_email,
+        per_ip_hourly=per_ip,
+    )
 
 
-def test_a_second_code_for_one_address_inside_a_minute_is_refused(workos):
-    with TestClient(app) as client:
-        first = client.post("/auth/code", json={"email": "a@example.com"})
-        second = client.post("/auth/code", json={"email": "a@example.com"})
-    assert first.status_code == 202, first.text
-    assert second.status_code == 429, second.text
-    # The client is told when to come back, not merely that it failed.
-    assert second.headers["Retry-After"] == "60"
+def test_an_address_past_its_allowance_is_refused():
+    workos = FakeWorkOsClient()
+    svc = _service(workos, per_email=2, per_ip=1000)
+
+    svc.send_code("a@example.com")
+    svc.send_code("a@example.com")
+    with pytest.raises(AuthCodeRateLimitedError) as excinfo:
+        svc.send_code("a@example.com")
+
+    # The window length is what the caller is told to wait.
+    assert excinfo.value.retry_after == 3600
 
 
-def test_a_refused_request_never_reaches_workos(workos):
-    # The whole point of the ordering. A status code cannot show this: a local
-    # refusal and a refusal from WorkOS both end in 429.
-    with TestClient(app) as client:
-        client.post("/auth/code", json={"email": "b@example.com"})
-        before = len(workos._codes)
-        client.post("/auth/code", json={"email": "b@example.com"})
+def test_a_refused_request_never_reaches_workos():
+    # The whole point of the ordering, and something a status code cannot show:
+    # a local refusal and a refusal from WorkOS both end in 429.
+    workos = FakeWorkOsClient()
+    svc = _service(workos, per_email=1, per_ip=1000)
+
+    svc.send_code("b@example.com")
+    before = len(workos._codes)
+    with pytest.raises(AuthCodeRateLimitedError):
+        svc.send_code("b@example.com")
+
     assert len(workos._codes) == before
 
 
-def test_the_hourly_address_rule_survives_the_per_minute_one(workos):
-    # Walk past the 60s rule by advancing the stored window instead of sleeping,
-    # and confirm the hourly ceiling still stops the fifth-and-onwards attempt.
-    db = DbSession(Settings().database_url)
-    hourly = _limit("email:1h")
-    email = "c@example.com"
-    with TestClient(app) as client:
-        for _ in range(hourly):
-            resp = client.post("/auth/code", json={"email": email})
-            assert resp.status_code == 202, resp.text
-            with db.write() as conn:
-                conn.execute(
-                    "UPDATE auth_code_attempts SET WINDOW_START = 0 "
-                    "WHERE BUCKET = %s",
-                    (f"email:60s:{email}",),
-                )
-        # The per-minute rule is clear again, the hourly one is spent.
-        resp = client.post("/auth/code", json={"email": email})
-    assert resp.status_code == 429, resp.text
-    assert resp.headers["Retry-After"] == "3600"
+def test_a_second_code_for_one_address_is_fine_inside_the_allowance():
+    # There is deliberately no per-minute rule. A person whose mail is slow
+    # closes the dialog and submits the same address again, and the dialog's
+    # cooldown does not stop them -- it guards only its resend button. That
+    # person must not be told "too many attempts" for behaving normally.
+    workos = FakeWorkOsClient()
+    svc = _service(workos, per_email=20, per_ip=1000)
+
+    svc.send_code("c@example.com")
+    svc.send_code("c@example.com")  # immediately, no waiting
+    svc.send_code("c@example.com")
 
 
-def test_a_different_address_is_not_blocked_by_another_s_limit(workos):
-    with TestClient(app) as client:
-        client.post("/auth/code", json={"email": "d@example.com"})
-        other = client.post("/auth/code", json={"email": "e@example.com"})
-    assert other.status_code == 202, other.text
+def test_one_address_does_not_spend_another_s_allowance():
+    workos = FakeWorkOsClient()
+    svc = _service(workos, per_email=1, per_ip=1000)
+
+    svc.send_code("d@example.com")
+    svc.send_code("e@example.com")  # a different address, its own budget
 
 
-def test_rotating_the_address_still_runs_into_the_per_ip_rule(workos):
+def test_rotating_the_address_still_runs_into_the_per_ip_rule():
     # The reason the address rule alone is not enough: an attacker who changes
     # the address on every request pays nothing under it, and every request is
     # an email we are billed for.
-    per_ip = _limit("ip:1h")
-    with TestClient(app) as client:
-        codes = [
-            client.post("/auth/code", json={"email": f"rot{i}@example.com"}).status_code
-            for i in range(per_ip + 1)
-        ]
-    assert codes[:per_ip] == [202] * per_ip
-    assert codes[-1] == 429
+    workos = FakeWorkOsClient()
+    svc = _service(workos, per_email=1000, per_ip=3)
+
+    for i in range(3):
+        svc.send_code(f"rot{i}@example.com", client_ip="9.9.9.9")
+    with pytest.raises(AuthCodeRateLimitedError):
+        svc.send_code("rot3@example.com", client_ip="9.9.9.9")
+
+
+def test_a_request_with_no_trusted_ip_skips_the_ip_rule_rather_than_sharing_one():
+    # A shared "unknown" bucket would turn the per-IP rule into a global kill
+    # switch that anybody could trip on purpose.
+    workos = FakeWorkOsClient()
+    svc = _service(workos, per_email=1000, per_ip=1)
+
+    svc.send_code("f@example.com", client_ip=None)
+    svc.send_code("g@example.com", client_ip=None)
+
+
+def test_the_route_answers_429_with_retry_after(workos):
+    tight = Settings(AGENTPIT_AUTH_CODE_PER_EMAIL_HOURLY=1)
+    with _overriding(deps.get_settings, lambda: tight):
+        with TestClient(app) as client:
+            first = client.post("/auth/code", json={"email": "h@example.com"})
+            second = client.post("/auth/code", json={"email": "h@example.com"})
+
+    assert first.status_code == 202, first.text
+    assert second.status_code == 429, second.text
+    assert second.headers["Retry-After"] == "3600"
+    # Deliberately the same wording WorkOS's own rate limit produces: a caller
+    # learns to wait, not whose ceiling they hit.
+    assert "too many attempts" in second.json()["detail"]
 
 
 def test_the_counter_is_atomic_under_a_lost_race():
