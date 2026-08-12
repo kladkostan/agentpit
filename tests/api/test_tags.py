@@ -68,13 +68,15 @@ def test_tags_hides_a_slug_below_the_threshold(client):
 
 
 def test_tags_returns_present_slugs_in_curated_order(client):
-    # 10 sports events and 10 politics events; politics leads NAV_SLUGS.
+    # 10 crypto events and 10 politics events; politics leads NAV_SLUGS.
+    # Crypto rather than sports: `sports` is in `Settings.excluded_tags` by
+    # default, so it can no longer stand in for an ordinary tab.
     _seed(
-        {f"s{i}": ["sports"] for i in range(10)}
+        {f"s{i}": ["crypto"] for i in range(10)}
         | {f"p{i}": ["politics"] for i in range(10)}
     )
     tags = client.get("/tags").json()["tags"]
-    assert [t["slug"] for t in tags] == ["politics", "sports"]
+    assert [t["slug"] for t in tags] == ["politics", "crypto"]
     assert tags[0]["label"] == "Politics"
     assert tags[0]["count"] == 10
 
@@ -121,15 +123,15 @@ def test_tags_omits_blocked_slugs_from_facets(client):
 def test_tags_response_is_cached_within_the_ttl(client):
     _seed({f"p{i}": ["politics"] for i in range(10)})
     first = client.get("/tags").json()
-    _seed({f"s{i}": ["sports"] for i in range(10)})
-    # Sports now clears the threshold, but the cached response predates it.
+    _seed({f"s{i}": ["crypto"] for i in range(10)})
+    # Crypto now clears the threshold, but the cached response predates it.
     assert client.get("/tags").json() == first
 
     from agentpit.api.routes import tags as tags_route
 
     tags_route._tags_cache = None
     after = client.get("/tags").json()
-    assert [t["slug"] for t in after["tags"]] == ["politics", "sports"]
+    assert [t["slug"] for t in after["tags"]] == ["politics", "crypto"]
 
 
 # ----- GET /events tag filtering ----------------------------------------------
@@ -140,7 +142,7 @@ def _event_slugs(response) -> set[str]:
 
 
 def test_events_filters_by_tag(client):
-    _seed({"a": ["politics", "trump"], "b": ["sports", "tennis"]})
+    _seed({"a": ["politics", "trump"], "b": ["crypto", "btc"]})
     assert _event_slugs(client.get("/events?limit=10&tag=politics")) == {"a"}
 
 
@@ -164,14 +166,14 @@ def test_events_tag_is_case_insensitive(client):
 
 
 def test_events_blank_tag_does_not_collapse_the_page(client):
-    _seed({"a": ["politics"], "b": ["sports"]})
+    _seed({"a": ["politics"], "b": ["crypto"]})
     assert len(_event_slugs(client.get("/events?limit=10&tag=%20"))) == 2
 
 
 def test_events_cache_does_not_serve_a_filtered_page_to_an_unfiltered_request(client):
     """The cache key must include the tag. Without it, the filtered page below
     would be served to the unfiltered request for up to one TTL."""
-    _seed({"a": ["politics"], "b": ["sports"]})
+    _seed({"a": ["politics"], "b": ["crypto"]})
     assert _event_slugs(client.get("/events?limit=10&offset=0&tag=politics")) == {"a"}
     assert len(_event_slugs(client.get("/events?limit=10&offset=0"))) == 2
 

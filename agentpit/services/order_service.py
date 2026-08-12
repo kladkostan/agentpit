@@ -550,10 +550,29 @@ class OrderService:
                   "ORDER BY MATCH_TIME ASC",
                 ([token_id], [token_id], start, end),
             ).fetchall()
+            # A price holds until the next trade, so a window containing no
+            # trade is not a window with no price. Without this the one-day
+            # series of a market whose last print is 26 hours old came back
+            # empty and the card drew its no-data placeholder beside a live
+            # headline -- with the tape as sparse as it is, that is most cards.
+            #
+            # Stamped AT `start`, not at its own time: left where it happened, a
+            # month-old print would stretch a one-day chart back over a range
+            # the caller never asked for.
+            opening = conn.execute(
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT PRICE FROM prints WHERE MATCH_TIME < %s "
+                  "ORDER BY MATCH_TIME DESC LIMIT 1",
+                ([token_id], [token_id], start),
+            ).fetchone()
         points = [
             {"t": int(r["MATCH_TIME"]), "p": price_to_float(int(r["PRICE"]))}
             for r in rows
         ]
+        if opening is not None:
+            points.insert(
+                0, {"t": start, "p": price_to_float(int(opening["PRICE"]))}
+            )
         # Optional fidelity thinning (minutes between kept points).
         if fidelity > 0 and points:
             step = fidelity * 60
