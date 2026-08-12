@@ -72,7 +72,16 @@ export function SettingsPage() {
             </div>
             <AutoRedeemRow user={user} onUpdated={setUser} />
             <ApiKeyRow apiKey={user.api_key} />
-            <ChangePasswordRow />
+            {/* Only the accounts that predate the cutover have a password.
+                `link_workos_identity` preserves their PASSWORD_HASH on
+                purpose (it is what the rollback rests on), so `has_password`
+                stays true for them and the form keeps working. Every account
+                created since signs in by mailed code with a null hash, and
+                for those `change_password` raises "this account signs in with
+                Google" -> 400, which the handler below renders as "New
+                password must be different from current password" -- three
+                fields and a falsehood about a password they never had. */}
+            {user.has_password && <ChangePasswordRow />}
           </CardContent>
         </Card>
       </div>
