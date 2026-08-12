@@ -87,12 +87,14 @@ def require_admin_token(
 # --- service factories ---------------------------------------------------
 
 
-def get_market_service(db: SessionDep, onchain: OnchainAdminDep) -> MarketService:
-    return MarketService(db, onchain)
+def get_market_service(
+    db: SessionDep, onchain: OnchainAdminDep, settings: SettingsDep
+) -> MarketService:
+    return MarketService(db, onchain, settings.excluded_categories)
 
 
-def get_event_service(db: SessionDep) -> EventService:
-    return EventService(db)
+def get_event_service(db: SessionDep, settings: SettingsDep) -> EventService:
+    return EventService(db, settings.excluded_categories)
 
 
 def get_usdc_service(db: SessionDep, onchain: OnchainAdminDep) -> UsdcService:

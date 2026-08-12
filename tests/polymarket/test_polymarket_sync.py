@@ -386,7 +386,7 @@ def _candidate(**over):
     return m
 
 
-def _kept(*, exclude_churn_series=True, **over):
+def _kept(*, exclude_churn_series=True, excluded_categories=(), **over):
     """Does this market survive the catalogue filter?"""
     m = _normalize_market_fields(_candidate(**over))
     return _passes_market_filters(
@@ -395,6 +395,7 @@ def _kept(*, exclude_churn_series=True, **over):
         closed=False,
         archived=False,
         exclude_churn_series=exclude_churn_series,
+        excluded_categories=excluded_categories,
     )
 
 
@@ -626,3 +627,79 @@ def test_the_sync_entry_point_forwards_the_flag_to_both_passes(monkeypatch):
             db=None, admin=None, event_max_outcomes=12, exclude_churn_series=flag,
         )
         assert seen == {"primary": flag, "siblings": flag}, flag
+
+
+# ----- categories the product does not carry at all --------------------------
+#
+# Distinct from the churn filter above: that one drops the prop tail and keeps
+# the headline game, this one drops the whole category. Sports is excluded
+# because the UI has no rendering for it — a match resolves in hours and its
+# book empties the moment it does, leaving rows that read as broken.
+
+
+def test_a_sports_market_is_dropped_by_its_category():
+    assert (
+        _kept(
+            excluded_categories=["Sports"],
+            sportsMarketType="moneyline",
+            tags=[{"slug": "sports", "label": "Sports"}],
+        )
+        is False
+    )
+
+
+def test_an_esports_market_is_dropped_though_it_carries_no_tags():
+    """The shape this was built for. `cs2-mgc-mglz-2026-08-12` arrives from
+    Gamma with `tags: []` and `sportsMarketType: 'moneyline'`, so
+    `resolve_category` has nothing to reduce and only the upstream sports field
+    identifies it. A tag-only check would let every esports match through."""
+    assert (
+        _kept(excluded_categories=["Sports"], sportsMarketType="moneyline", tags=[])
+        is False
+    )
+
+
+def test_a_headline_game_is_dropped_even_though_the_churn_filter_keeps_it():
+    """`moneyline` is the one sportsMarketType the churn filter allows through
+    — it is the game, not a prop. Excluding the category has to drop it anyway,
+    or the filter removes the props and leaves exactly the rows complained
+    about."""
+    assert _kept(sportsMarketType="moneyline") is True
+    assert _kept(sportsMarketType="moneyline", excluded_categories=["Sports"]) is False
+
+
+def test_the_category_match_is_case_insensitive():
+    """The setting is operator-typed; `resolve_category` returns "Sports"."""
+    for spelling in ("sports", "SPORTS", "  Sports  "):
+        assert (
+            _kept(excluded_categories=[spelling], sportsMarketType="moneyline")
+            is False
+        ), spelling
+
+
+def test_a_market_outside_the_excluded_categories_is_untouched():
+    assert (
+        _kept(
+            excluded_categories=["Sports"],
+            tags=[{"slug": "politics", "label": "Politics"}],
+        )
+        is True
+    )
+
+
+def test_an_empty_exclusion_list_carries_everything():
+    """Restores the pre-2026-08-12 catalogue without a code change."""
+    assert _kept(excluded_categories=[], sportsMarketType="moneyline") is True
+
+
+def test_the_exclusion_is_independent_of_the_churn_flag():
+    """Two separate decisions: someone turning the churn filter off to get the
+    prop tail back must not silently re-admit a category the UI cannot draw."""
+    assert (
+        _kept(
+            exclude_churn_series=False,
+            excluded_categories=["Sports"],
+            sportsMarketType="spreads",
+        )
+        is False
+    )

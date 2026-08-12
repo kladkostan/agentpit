@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
+import { carryPriceForward } from "@/lib/eventChartSeries";
 import {
   closeLabel,
   formatProbabilityPct,
@@ -55,7 +56,16 @@ export function MarketCard({
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;
 
-  const points = spark?.history ?? [];
+  // Close the sparkline on the CURRENT price rather than the last trade. The
+  // big number beside it is book-derived, so a stalled tape drew a line ending
+  // somewhere the card never claims — this card read "<1% chance" under a line
+  // rising to 71%. It also makes "today" mean now-vs-24h-ago instead of
+  // last-trade-vs-24h-ago, which is what the label promises.
+  const points = carryPriceForward(
+    spark?.history ?? [],
+    Math.floor(Date.now() / 1000),
+    yesPrice,
+  );
   // Change is expressed in percentage points of probability (Δcents).
   // Prices are probabilities in [0, 1] → multiply by 100 to get cents.
   const change =

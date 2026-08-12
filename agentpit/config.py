@@ -58,6 +58,23 @@ class Settings(BaseSettings):
     sync_exclude_churn_series: bool = Field(
         default=True, validation_alias="AGENTPIT_SYNC_EXCLUDE_CHURN_SERIES"
     )
+    # Categories the product does not carry at all. Unlike the churn filter
+    # above -- which drops the prop tail and keeps the headline game -- this
+    # drops the whole category: no sync, no listing, no mirrored liquidity.
+    #
+    # Sports is here because the UI has no rendering for it: a match resolves
+    # in hours and its book empties the moment it does, so the grid fills with
+    # rows that read as broken (see the "<1% chance" beside a 71% chart that
+    # started this). Esports needs no entry of its own -- `resolve_category`
+    # files it under Sports, which is 68.6% of the standing catalogue (1097 of
+    # 1600 events measured on production 2026-08-12), so this is the single
+    # biggest lever on gas and anvil growth as well.
+    #
+    # Matched case-insensitively against the labels in CATEGORY_PRIORITY.
+    # Empty list = carry everything, which is the pre-2026-08-12 behaviour.
+    excluded_categories: list[str] = Field(
+        default=["Sports"], validation_alias="AGENTPIT_EXCLUDED_CATEGORIES"
+    )
     resolution_mirror_enabled: bool | None = Field(
         default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
     )

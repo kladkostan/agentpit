@@ -1,5 +1,6 @@
 import json
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 import psycopg
 from eth_account import Account
@@ -21,6 +22,43 @@ class TradedAccount:
     user_id: str
     eth_address: str
     handle: str | None
+
+
+def _excluded_lower(excluded: "Iterable[str] | None") -> "list[str]":
+    """Normalise an excluded-category list for SQL: lowercased, blanks dropped.
+
+    Empty result means "exclude nothing", which every caller below turns into
+    no predicate at all rather than an always-true one — so the default path
+    produces byte-identical SQL to before this existed.
+    """
+    if not excluded:
+        return []
+    return sorted({c.strip().lower() for c in excluded if c and c.strip()})
+
+
+def _event_category_excluded_clause(categories: "list[str]") -> str:
+    """Predicate for a query over `events` itself.
+
+    A NULL CATEGORY must PASS: `LOWER(NULL) <> ALL (...)` evaluates to NULL,
+    which WHERE treats as false, so without the explicit IS NULL arm every
+    uncategorised event would silently vanish along with the excluded ones.
+    """
+    del categories  # shape only; the value binds as a parameter
+    return "(CATEGORY IS NULL OR LOWER(CATEGORY) <> ALL(%s))"
+
+
+def _market_category_excluded_clause(alias: str = "markets") -> str:
+    """Predicate for a query over `markets`, reaching the category through the
+    event that groups them.
+
+    NOT EXISTS rather than a join: a market with no event, or an event with no
+    category, matches no row in the subquery and is therefore KEPT — the same
+    "exclude only on positive evidence" rule the sync filter follows.
+    """
+    return (
+        f"NOT EXISTS (SELECT 1 FROM events ev WHERE ev.EVENT_ID = {alias}.EVENT_ID "
+        "AND LOWER(ev.CATEGORY) = ANY(%s))"
+    )
 
 
 _MARKET_COLS = (
@@ -606,7 +644,9 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def count_active_markets(db: psycopg.Connection) -> int:
+    def count_active_markets(
+        db: psycopg.Connection, excluded_categories: "Iterable[str] | None" = None
+    ) -> int:
         """How many markets are ACTIVE, platform-wide.
 
         This is the same predicate the UI calls "live", reduced. `to_gamma_market`
@@ -615,10 +655,20 @@ class TableRead:
         closed, and since ACTIVE is in neither closed set that collapses to the
         single comparison below. If either mapping changes, this must follow, or
         the headline number stops agreeing with the grid it labels.
+
+        `excluded_categories` must be the SAME list the grid's query gets, for
+        exactly that reason: a headline counting markets the grid refuses to
+        show is the bug this docstring already warns about, in a new place.
         """
+        excluded = _excluded_lower(excluded_categories)
+        clause = ""
+        params: list[object] = [MarketState.ACTIVE.value]
+        if excluded:
+            clause = f" AND {_market_category_excluded_clause()}"
+            params.append(excluded)
         row = db.execute(
-            "SELECT COUNT(*) as CNT FROM markets WHERE MARKET_STATE = %s",
-            (MarketState.ACTIVE.value,),
+            f"SELECT COUNT(*) as CNT FROM markets WHERE MARKET_STATE = %s{clause}",
+            tuple(params),
         ).fetchone()
         return int(row["CNT"]) if row else 0
 
@@ -740,6 +790,7 @@ class TableRead:
         tag: str | None = None,
         subtags: "list[str] | None" = None,
         sort: "EventSort | None" = None,
+        excluded_categories: "Iterable[str] | None" = None,
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ranked by upstream 24h volume, each paired with its
         child markets.
@@ -785,6 +836,13 @@ class TableRead:
         resolved_sort = sort or EventSort.DEFAULT
         clauses: list[str] = []
         params: list[object] = []
+        # Applied before the caller's own `category` filter, and independent of
+        # it: a request for an excluded category returns an empty page rather
+        # than resurrecting it, so a stale UI tab cannot reach the rows.
+        excluded = _excluded_lower(excluded_categories)
+        if excluded:
+            clauses.append(_event_category_excluded_clause(excluded))
+            params.append(excluded)
         normalized_category = category.strip() if category else None
         if normalized_category:
             clauses.append("LOWER(CATEGORY) = LOWER(%s)")
@@ -862,9 +920,21 @@ class TableRead:
         condition_ids: list[str] | None = None,
         clob_token_ids: list[str] | None = None,
         polymarket_condition_id: str | None = None,
+        excluded_categories: "Iterable[str] | None" = None,
     ) -> "list[Market]":
+        """Paged/filtered market list.
+
+        `excluded_categories` hides whole categories from BROWSING. It is a
+        parameter rather than a fixed rule because the direct lookups that also
+        come through here — `pinned.py` resolving one slug — are addressing a
+        known market, not browsing, and must keep resolving it.
+        """
         clauses: list[str] = []
         params: list = []
+        excluded = _excluded_lower(excluded_categories)
+        if excluded:
+            clauses.append(_market_category_excluded_clause())
+            params.append(excluded)
         if market_id is not None:
             clauses.append("MARKET_ID = %s")
             params.append(market_id)
@@ -900,23 +970,36 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def list_event_categories(db: psycopg.Connection) -> "list[str]":
+    def list_event_categories(
+        db: psycopg.Connection, excluded_categories: "Iterable[str] | None" = None
+    ) -> "list[str]":
         """Every distinct, non-blank event category, case-insensitively sorted.
 
         Postgres rejects ``SELECT DISTINCT ... ORDER BY <expr>`` when the
         expression is not in the select list, so the DISTINCT happens in a
         subquery. ``COLLATE "C"`` is the explicit tiebreak that keeps the order
         total (and "Sports" before "sports") whatever the server's lc_collate.
+
+        This is what the UI builds its category tabs from, so it MUST honour the
+        same exclusions the event grid does. Leaving an excluded category in the
+        list renders a tab whose every click returns an empty page.
         """
+        excluded = _excluded_lower(excluded_categories)
+        clause = ""
+        params: tuple = ()
+        if excluded:
+            clause = " AND LOWER(CATEGORY) <> ALL(%s)"
+            params = (excluded,)
         cur = db.execute(
-            """
+            f"""
             SELECT c FROM (
                 SELECT DISTINCT CATEGORY AS c
                 FROM events
-                WHERE CATEGORY IS NOT NULL AND TRIM(CATEGORY) <> ''
+                WHERE CATEGORY IS NOT NULL AND TRIM(CATEGORY) <> ''{clause}
             ) s
             ORDER BY LOWER(c) ASC, c COLLATE "C" ASC
-            """
+            """,
+            params,
         )
         return [str(row["c"]) for row in cur.fetchall()]
 
@@ -1034,15 +1117,31 @@ class TableRead:
         return [TableRead._row_to_user(r) for r in rows]
 
     @staticmethod
-    def list_active_synced_markets(db: psycopg.Connection) -> "list[Market]":
+    def list_active_synced_markets(
+        db: psycopg.Connection, excluded_categories: "Iterable[str] | None" = None
+    ) -> "list[Market]":
         """Markets the liquidity engine should make liquidity for.
 
-        Criteria: MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL.
+        Criteria: MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL,
+        minus any market in an excluded category.
+
+        Quoting a market the catalogue refuses to list is pure cost: the mirror
+        splits collateral, signs orders and burns gas on a book nobody can
+        reach. Sports alone was 68.6% of the standing catalogue when this was
+        added, so the exclusion is also the largest single reduction in the
+        engine's on-chain footprint.
         """
+        excluded = _excluded_lower(excluded_categories)
+        clause = ""
+        params: tuple = ()
+        if excluded:
+            clause = f" AND {_market_category_excluded_clause()}"
+            params = (excluded,)
         rows = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
-            "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL "
-            "ORDER BY MARKET_ID"
+            "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL"
+            f"{clause} ORDER BY MARKET_ID",
+            params,
         ).fetchall()
         return [_row_to_market(row) for row in rows]
 

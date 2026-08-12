@@ -23,8 +23,13 @@ from agentpit.polymarket.tag_taxonomy import (
 
 
 class EventService:
-    def __init__(self, db: DbSession):
+    def __init__(self, db: DbSession, excluded_categories: "list[str] | None" = None):
         self._db = db
+        # Defaults to "exclude nothing" so the internal constructions of this
+        # service (orphan wrapping, singleton creation) keep their old
+        # behaviour: those write rows, and a write path has no business
+        # consulting a browse filter.
+        self._excluded_categories = excluded_categories or []
 
     def list_events(
         self,
@@ -48,6 +53,7 @@ class EventService:
                 tag=tag,
                 subtags=subtags,
                 sort=sort,
+                excluded_categories=self._excluded_categories,
             )
         events = [
             EventWithMarkets(event=event, markets=markets) for event, markets in pairs
@@ -78,6 +84,7 @@ class EventService:
                 tag=tag,
                 subtags=subtags,
                 sort=sort,
+                excluded_categories=self._excluded_categories,
             )
             all_markets = [m for _event, markets in pairs for m in markets]
             prices = prices_for_markets(conn, all_markets)
@@ -94,7 +101,9 @@ class EventService:
 
     def list_categories(self) -> ListEventCategoriesResponse:
         with self._db.read() as conn:
-            categories = TableRead.list_event_categories(conn)
+            categories = TableRead.list_event_categories(
+                conn, excluded_categories=self._excluded_categories
+            )
         return ListEventCategoriesResponse(categories=categories)
 
     def list_tags(self) -> ListTagsResponse:
