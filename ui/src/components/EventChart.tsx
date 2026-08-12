@@ -8,7 +8,7 @@ import type {
 } from "@/components/MultiSparkline";
 import { niceChartScale } from "@/lib/chartGeometry";
 import { CHART_PALETTE } from "@/lib/chartPalette";
-import { carryLastPriceForward, pickChartSeries } from "@/lib/eventChartSeries";
+import { carryPriceForward, pickChartSeries } from "@/lib/eventChartSeries";
 import { formatClock, formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types/market";
@@ -89,19 +89,24 @@ export function EventChart({ markets, midByMarket }: EventChartProps) {
   const queryData = queries.map((q) => q.data);
   const series = useMemo<MultiSparklineSeries[]>(
     () => {
-      // A price holds until the next trade, so every line runs to today. A
-      // market that traded once would otherwise be a single coordinate, which
-      // draws nothing at all.
+      // Every line runs to today. A market that traded once would otherwise be
+      // a single coordinate, which draws nothing at all. The closing point is
+      // the CURRENT (book) price rather than the last trade, so the line ends
+      // where the legend and the headline say it does — see carryPriceForward.
       const now = Math.floor(Date.now() / 1000);
       return picked.map((s, i) => ({
         id: s.market.market_id,
         color: s.color,
         label: s.label,
-        points: carryLastPriceForward(queryData[i]?.history ?? [], now),
+        points: carryPriceForward(
+          queryData[i]?.history ?? [],
+          now,
+          midByMarket.get(s.market.market_id),
+        ),
       }));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [picked, ...queryData],
+    [picked, midByMarket, ...queryData],
   );
 
   // An outcome with no trades draws no line. Listing it anyway sends the
