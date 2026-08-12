@@ -1,115 +1,148 @@
-# Where things stand — 2026-08-11
+# Where things stand — 2026-08-12
 
 Written to hand this work to a fresh session. Everything below is on branch
 `mvp`; **nothing here is deployed**. Production runs `mvp` at `1d7484d`, which
-predates all of it.
+predates all of it by 55 commits.
 
-## Two streams of work, both finished-but-unshipped
+## The WorkOS migration is finished in code
 
-### 1. Catalogue churn filter — done, waiting to deploy
+Sign-in is a six-digit code mailed by WorkOS, or Google through a WorkOS
+redirect. There are no passwords anywhere in the sign-in path.
 
-Stops syncing two upstream series: the daily temperature markets and sports
-props. Commits `1d024a7`, `3e1ff72`, `3ae4ea7`.
+Plans 1–2 shipped earlier. **Plan 3 completed 2026-08-12** — all eight tasks,
+each through an independent review, with a fix round wherever one found
+something:
 
-`3ae4ea7` is the **last commit before the WorkOS work begins**, which makes it
-the clean point to deploy from: prod gets the filter without a line of
-half-built authentication.
+- `/register`, `/login` and the old in-page `POST /auth/google` answer **410**.
+- A bearer token is verified by `AuthKitVerifier` or refused. The legacy
+  `JwtCoder` path is gone from the request path.
+- **`X-API-Key` is untouched.** Checked first, before any bearer path. Every
+  trading bot keeps working across the cutover.
+- Private-key export re-authenticates with a code mailed to the account's own
+  address, pinned to `WORKOS_USER_ID`.
+- Google is `GET /user_management/authorize?provider=GoogleOAuth` → our
+  `/auth/callback` page → `POST /auth/callback` → `grant_type=authorization_code`.
 
-Why it matters, in the order the reasons actually weigh:
+Spec: `docs/superpowers/specs/2026-08-12-workos-cutover-design.md`.
+Plan: `docs/superpowers/plans/2026-08-12-workos-cutover.md`.
+Rollback: `docs/ROLLBACK.md` — read it before reverting, there is one expected
+conflict and the instinct to hand-merge it is wrong.
 
-1. The product does not render these markets. A set handicap
-   (`atp-halys-kwon-2026-08-11-set-handicap-home-1pt5`) has no reading on the
-   site.
-2. `CONDITION_ID` is `keccak(question)`, and upstream reuses prop question text
-   between games. **251 of 529 sync attempts in three hours died on
-   `UniqueViolation`**, and the row squatting on each reused string is a market
-   from a game weeks past. Props are those strings.
-3. The two series are 89% of new market creations, and creations plus
-   resolutions are ~71% of ~870M gas/day. The same churn is what grows anvil's
-   memory ~350MB/day — the reason the box needed 16GB.
+**853 backend tests, 360 UI, all four UI gates green.**
 
-Only new syncs are affected; markets already in the catalogue drain as they
-resolve, over 2–8 days.
+## Verified against the live account, not inferred
 
-### 2. WorkOS AuthKit — plans 1 and 2 built, plan 3 unwritten
+Task 7 ran the Google redirect end to end against WorkOS Staging with a real
+Google account. This is the class of check this project has already paid for
+skipping once — the first token verifier was written from documentation, was
+wrong in two ways, and every test passed because the tests minted their own
+tokens.
 
-Sign-in moves to a six-digit code mailed by WorkOS. **No passwords at all.**
+- The access token carries `iss = https://api.workos.com/user_management/<client_id>`,
+  **no `aud`**, `client_id` matching, lifetime exactly 300s, and exactly these
+  claims: `auth_time, client_id, exp, iat, iss, jti, sid, sub`.
+- WorkOS's own `state` JWT to Google decodes to `{"api": "user_management", …}` —
+  WorkOS confirming the flow is User Management, not OIDC. **The `/oauth2/*`
+  endpoints on the AuthKit domain issue a different issuer and must never be
+  used.** Never introduce `WORKOS_ISSUER` or `WORKOS_JWKS_URL` as config: both
+  are derived from `client_id`, and the value the OIDC discovery document hands
+  an operator is the wrong one.
+- Adoption was measured, not assumed: nulling `WORKOS_USER_ID` on a real row —
+  the shape of all 17 production accounts — and signing in again produced the
+  **same** `USER_ID`, the **same** `ETH_ADDRESS`, the same `ONBOARDED_AT`, no
+  second wallet, and no change in the user count.
 
-- Spec: `docs/superpowers/specs/2026-08-11-workos-authkit-design.md`
-- Plan 1 (done): `docs/superpowers/plans/2026-08-11-workos-authkit-foundation.md`
-- Plan 2 (done): `docs/superpowers/plans/2026-08-11-workos-magic-auth.md`
+## Before the deploy, in this order
 
-What exists: the WorkOS client, JWKS verification of their tokens,
-`users.WORKOS_USER_ID`, a migration script, `/auth/code`, `/auth/session`,
-`/auth/refresh`, AuthKit tokens accepted **alongside** the legacy JWT, and the
-dialog's code step. 836 backend tests and 331 UI tests pass.
+1. **`WORKOS_API_KEY` and `WORKOS_CLIENT_ID` on the box**, in the prod `.env` —
+   they reach the api container through `env_file`, which is the only route.
+   Use the **Production** client id, not staging's. Partial configuration is
+   worse than none: api key alone means nobody can get a token, client id alone
+   means everyone is signed in and then 401'd. Before this branch, a
+   misconfigured deployment still worked on legacy JWTs; now it is a total
+   human lockout, with `X-API-Key` still serving the bots.
+2. **`WORKOS_AUTHKIT_DOMAIN`: set it correctly or leave it blank.** Nothing
+   reads it. It used to crash-loop the whole API on a schemeless value; that now
+   logs instead, but a wrong value still buys nothing.
+3. **Google in WorkOS Production.** Decided 2026-08-12: use the **same** Google
+   OAuth client as Staging. The reason a separate client was once required —
+   protecting the live in-page flow — died with the cutover, which turns
+   `/auth/google` into a 410. Add the production callback to that client:
+   `https://auth.workos.com/sso/oauth/google/aceN1OYh0PviHcYaWNvumSv4y/callback`,
+   then enable Google in WorkOS Production. **Deploying without this leaves the
+   mailed code as the only door, which the spec forbids** — one WorkOS mail
+   outage locks out all 17 accounts at once.
+4. **`VITE_WORKOS_CLIENT_ID` and `VITE_WORKOS_REDIRECT_URI` in the prod `.env`.**
+   `deploy/docker-compose.prod.yml` now refuses to build `caddy` without them,
+   deliberately. Vite bakes them at build time, so a rebuild is required.
+5. **Rename the WorkOS application** from `skalelabs.com's Application`. It is
+   the sender name on the email that is now the only way anyone gets in, and the
+   only thing distinguishing a sign-in code from a key-export code.
 
-Nothing is removed yet: `/register`, `/login`, Google, `JwtCoder` and
-`PASSWORD_HASH` all still work.
+Not a prerequisite: `scripts/migrate_users_to_workos.py`. It cannot run before
+the deploy — it selects `WORKOS_USER_ID` with `create_tables=False`, and the
+column is added by the new image at startup. Run it after, or not at all:
+`_link_existing_account` adopts an unmigrated row on its owner's first sign-in,
+which is the path task 7 measured.
 
-## Facts that were measured, not read
+## What the deploy does to each kind of visitor
 
-The first version of the token verifier was written from documentation and was
-wrong in two ways that **every test still passed**, because the tests minted
-their own tokens carrying exactly the claims the code assumed. These came off a
-real staging token:
+- **A returning browser** holding a legacy JWT: signed out exactly once,
+  cleanly. `/me` 401s, there is no refresh token to try, `logout()` runs. The
+  product already killed every session at 24 hours, so this is a disruption it
+  inflicted daily anyway.
+- **A browser already on an AuthKit session:** unaffected.
+- **A bot on `X-API-Key`:** unaffected.
+- **The 17 production accounts:** email → six digits → their existing row, wallet
+  and positions. Their `PASSWORD_HASH` is deliberately preserved, which is what
+  makes the rollback work.
 
-- `iss` is `https://api.workos.com/user_management/<client_id>` — **not** the
-  AuthKit domain, which only hosts the sign-in surface and a JWKS.
-- **There is no `aud` claim.** Passing `audience=` to `jwt.decode` rejects every
-  valid token. Application pinning is done against the `client_id` claim.
-- The access token lives **300 seconds**; the refresh token does **not** rotate.
-- `POST /user_management/magic_auth` **creates the user** when the address is
-  new and **returns the code in its response** — so the API key alone can sign
-  in as anybody, and tests need no mailbox.
+## Known gaps, in the order they matter
 
-## The trap to not walk into
+- **`tests/onchain/` is dark.** Nine files POST `/register`: `_helpers.py:37`,
+  `test_trade_flow.py:34,66,69,160,163`, `test_data_positions.py:31,33`,
+  `test_data_trades.py:32,34,90`, `test_activity.py:32,34`,
+  `test_balance_allowance.py:27,37`, `test_trade_enrichment.py:33,35`. Plus
+  `scripts/seed_*.py`. That is the tier that catches trading regressions.
+- **No programmatic account creation.** A bot author must now create the account
+  in a browser and copy the key from Settings. `docs/API.md` says so; whether
+  that is acceptable is a product decision nobody has made.
+- **No server-side session revocation.** Measured: `maxSessionTime` is a year,
+  `inactivityTimeout` 48 hours, the refresh token does not rotate and lives in
+  `localStorage`. `logout` clears storage only. A leaked refresh token cannot be
+  killed short of deleting the WorkOS user.
+- **No rate limit on either code-mailing endpoint.** `/auth/code` is
+  unauthenticated and is now the only door; the only ceiling is WorkOS's own
+  429, and tripping it locks everybody out at once.
+- **Not measured:** whether a second `magic_auth` send invalidates the first.
+  `FakeWorkOsClient` assumes "latest wins" without evidence. Measure before
+  relying on it.
+- **Nobody is greeted on first sign-in.** `showWelcomeToast` is reachable only
+  from `signInWithGoogle`, which no UI path calls any more.
 
-`export_private_key` picks its second factor by whether a password hash exists:
-a hash means "prove the password", none means "prove the Google identity".
-**Clearing `PASSWORD_HASH` on an account with no Google identity — the shape of
-all 17 production accounts — locks the holder out of their own wallet key
-permanently.** A reviewer caught this after it had already been written and
-committed.
+## Plan 4 — the removal
 
-Adoption therefore leaves the hash alone. It goes only in plan 3, together with
-the replacement: re-authentication by mailed code, one mechanism for everyone.
+`JwtCoder`, `JWT_SECRET` as an auth secret, the `PASSWORD_HASH` column,
+`change_password` and its Settings row, `agentpit/auth/passwords.py`, the Google
+verifier, `GoogleSignInButton.tsx`, `googleAuth.ts`, `loginRequest`/
+`registerRequest`, and the 410 stubs.
 
-## Plan 3, when someone writes it
+**Doing it is what makes the rollback stop being cheap** — do not start until
+the cutover has stood in production long enough to trust.
 
-1. Google moves to the WorkOS redirect (`?provider=GoogleOAuth`). Staging works
-   on WorkOS's demo credentials; production needs our own Google client — and
-   a **new** OAuth client, not the live one, so the two flows cannot break each
-   other during the transition.
-2. Cutover: stop issuing our own JWT, accept only AuthKit tokens. Everyone is
-   logged out once.
-3. Removal: `JwtCoder`, `PASSWORD_HASH`, `change_password`, the Google verifier,
-   the bcrypt-hash import in the migration script.
-4. `export_private_key` re-auth becomes a mailed code.
+Two traps recorded for it: `liquidity/house_accounts.py` hashes a fixed constant
+for accounts that never log in over HTTP, so deleting `passwords.py` without
+changing it breaks the liquidity engine; and `TableWrite.create_user`'s docstring
+still claims every account has a password hash or a `google_sub`, which
+AuthKit-created accounts disprove.
 
-Plus five Minor findings parked from plan 2's final review: the six-digit code
-is not redacted from error bodies; a WorkOS 429 is collapsed into 401, telling a
-rate-limited caller to do the throttled thing and leaving the UI's 429 copy
-unreachable; `refresh()` can trigger on-chain onboarding; code sign-in skips
-`_maybe_reonboard`, so the chain-wipe repair never runs for it; and two
-concurrent first sign-ins for one new address answer 500 instead of a clean
-retry.
+## Still waiting on a person, unrelated to auth
 
-## Waiting on a person
-
-- **Deploy.** `3ae4ea7` to prod is the safe, valuable step.
-- **47GB on prod.** `agentpit-anvil-1`'s writable layer holds anvil's temp
-  files — recreating the container (not restarting) frees it; the chain lives
-  in a 263MB volume and survives.
-- **WorkOS Production** needs a card. Staging covers all development.
-- **Rename** the WorkOS team/application from `skalelabs.com's Application` to
-  AgentPit before any real user gets a code from it.
-- **The SKALE operator key.** The configured `ADMIN` is anvil's account #0,
-  whose private key is in every Foundry install — credits sent there are swept
-  within seconds. A fresh key is needed before SKALE.
-
-## Also stale
-
-`README.md` still documents `POST /orders`, `/mint_usdc`, `/usdc_balance` and
-`/transfer_usdc`, none of which exist, and predates the liquidity mirror, the
-Arena, Google sign-in and everything above.
+- **62 GB in `~/.foundry/anvil/tmp`**, ~15 GB free. It is already flaking the
+  local suite with `Web3RPCError -32003 replacement transaction underpriced`.
+- **47 GB on prod's `agentpit-anvil-1`** writable layer — recreating the
+  container (not restarting) frees it; the chain lives in a 263 MB volume.
+- **The SKALE operator key.** The configured `ADMIN` is anvil's account #0, whose
+  private key ships with every Foundry install.
+- **The catalogue churn filter** (`1d024a7`, `3e1ff72`, `3ae4ea7`) is still
+  undeployed and will ride along with whatever carries this.
