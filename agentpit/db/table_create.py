@@ -477,6 +477,34 @@ class TableCreate:
         )
 
     @staticmethod
+    def create_auth_code_attempts_table(conn: psycopg.Connection) -> None:
+        """Fixed-window counters for `POST /auth/code`.
+
+        One row per (rule, subject) pair -- `email:60s:a@b.com`, `ip:1h:1.2.3.4`
+        -- rather than a column per rule, so adding a rule costs a constant
+        rather than a migration.
+
+        Deliberately NOT on `users`: this endpoint is unauthenticated and the
+        subject usually has no row here at all. That is the point of it -- an
+        address that never answers must cost us nothing, and a counter hanging
+        off a user row cannot count what has no user row.
+
+        Rows are tiny and self-expiring in meaning (a stale WINDOW_START simply
+        resets on the next hit), so there is no cleanup job. If the table ever
+        grows enough to matter, delete where WINDOW_START is old -- nothing
+        reads it.
+        """
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_code_attempts (
+                BUCKET       TEXT PRIMARY KEY,
+                WINDOW_START BIGINT NOT NULL,
+                HITS         INTEGER NOT NULL
+            )
+            """
+        )
+
+    @staticmethod
     def create_all_tables(conn: psycopg.Connection) -> None:
         # errors propagate; no exception handling here
         TableCreate.create_orders_table(conn)
@@ -491,3 +519,4 @@ class TableCreate:
         TableCreate.create_price_snapshots_table(conn)
         TableCreate.create_account_snapshots_table(conn)
         TableCreate.create_idempotency_keys_table(conn)
+        TableCreate.create_auth_code_attempts_table(conn)

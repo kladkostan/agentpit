@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from agentpit.api.deps import AuthKitServiceDep
 from agentpit.datastructures.auth_response import AuthResponse, UserPublic
@@ -49,7 +49,9 @@ def google_sign_in() -> dict:
 
 
 @router.post("/auth/code", status_code=202)
-def send_auth_code(payload: SendCodeRequest, service: AuthKitServiceDep) -> dict:
+def send_auth_code(
+    payload: SendCodeRequest, request: Request, service: AuthKitServiceDep
+) -> dict:
     """Mail a six-digit code to this address.
 
     Always 202, whether or not the address has an account here: the reply must
@@ -57,7 +59,15 @@ def send_auth_code(payload: SendCodeRequest, service: AuthKitServiceDep) -> dict
     and mails the code; nothing is created on our side until the code comes
     back.
     """
-    service.send_code(payload.email)
+    # `request.client.host` is the real caller only because uvicorn runs with
+    # `--proxy-headers`, which rewrites it from `X-Forwarded-For` -- and only
+    # from a proxy it is told to trust. Without that flag every caller would
+    # look like Caddy and the per-IP rule would become a global kill switch;
+    # trusting the header from anywhere would let a caller forge it and skip
+    # the rule entirely. The precondition is that the api container publishes
+    # no ports, so Caddy is the only thing that can reach it.
+    client_ip = request.client.host if request.client else None
+    service.send_code(payload.email, client_ip=client_ip)
     return {"status": "sent"}
 
 

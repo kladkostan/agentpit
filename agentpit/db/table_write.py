@@ -111,6 +111,56 @@ class TableWrite:
         return cur.rowcount > 0
 
     @staticmethod
+    def claim_auth_code_attempt(
+        db: psycopg.Connection,
+        bucket: str,
+        at: int,
+        window_seconds: int,
+        limit: int,
+    ) -> bool:
+        """Spend one hit against a fixed window. False when the window is full.
+
+        The same idiom as `mark_key_export_attempt` below and for the same
+        reason: the predicate and the increment are ONE statement, so two
+        concurrent callers cannot both read the same stale count, both find it
+        under the limit, and both proceed. Postgres serialises them on the row
+        lock; the loser re-evaluates its `WHERE` against the count the winner
+        just committed.
+
+        Fixed window, not sliding: a caller who spends the whole allowance in
+        the last second of a window gets a fresh one immediately after, so the
+        true worst case is twice the limit across a window boundary. Accepted --
+        the rule exists to stop a flood and a bill, not to be a precise quota,
+        and a sliding window costs a row per request instead of a row per
+        subject.
+
+        A bucket nobody has hit yet takes the INSERT path and is always allowed.
+        """
+        expired_before = at - window_seconds
+        cur = db.execute(
+            """
+            INSERT INTO auth_code_attempts (BUCKET, WINDOW_START, HITS)
+            VALUES (%(bucket)s, %(at)s, 1)
+            ON CONFLICT (BUCKET) DO UPDATE SET
+                WINDOW_START = CASE
+                    WHEN auth_code_attempts.WINDOW_START <= %(expired)s
+                    THEN %(at)s ELSE auth_code_attempts.WINDOW_START END,
+                HITS = CASE
+                    WHEN auth_code_attempts.WINDOW_START <= %(expired)s
+                    THEN 1 ELSE auth_code_attempts.HITS + 1 END
+            WHERE auth_code_attempts.WINDOW_START <= %(expired)s
+               OR auth_code_attempts.HITS < %(limit)s
+            """,
+            {
+                "bucket": bucket,
+                "at": at,
+                "expired": expired_before,
+                "limit": limit,
+            },
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
     def mark_key_export_attempt(
         db: psycopg.Connection, user_id: str, at: int, not_before: int
     ) -> bool:

@@ -10,6 +10,7 @@ from agentpit.auth.workos_client import (
 )
 from agentpit.domain.exceptions import (
     AlreadyExistsError,
+    AuthCodeRateLimitedError,
     BusinessRuleError,
     FeatureDisabledError,
     InsufficientGasError,
@@ -32,6 +33,23 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(InvalidCredentialsError)
     async def _invalid_creds(_: Request, exc: InvalidCredentialsError) -> JSONResponse:
         return JSONResponse(status_code=401, content={"detail": str(exc)})
+
+    @app.exception_handler(AuthCodeRateLimitedError)
+    async def _auth_code_rate_limited(
+        _: Request, exc: AuthCodeRateLimitedError
+    ) -> JSONResponse:
+        """Our own ceiling on `POST /auth/code`, not WorkOS's.
+
+        Same status and deliberately the same wording as the WorkOS rate-limit
+        handler below, so a caller cannot tell whose ceiling they hit. INFO, not
+        WARNING: a limiter refusing a request is the limiter working.
+        """
+        log.info("auth-code rate limit refused a request: %s", exc)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": str(exc)},
+            headers={"Retry-After": str(exc.retry_after)},
+        )
 
     @app.exception_handler(FeatureDisabledError)
     async def _feature_disabled(_: Request, exc: FeatureDisabledError) -> JSONResponse:

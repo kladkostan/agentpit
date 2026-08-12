@@ -53,6 +53,20 @@ class InvalidCredentialsError(BusinessRuleError):
     pass
 
 
+class AuthCodeRateLimitedError(DomainError):
+    """Too many code requests for this address or from this caller.
+
+    Not a `BusinessRuleError`: that maps to 400, and this is a 429 carrying a
+    `Retry-After`. It is deliberately indistinguishable in wording from
+    WorkOS's own rate limit -- a caller learns that they must wait, and nothing
+    about whether the ceiling they hit was ours or the provider's.
+    """
+
+    def __init__(self, retry_after: int):
+        super().__init__("too many attempts — wait a moment and try again")
+        self.retry_after = retry_after
+
+
 class FeatureDisabledError(DomainError):
     """Raised when a feature is switched off by configuration rather than broken."""
 

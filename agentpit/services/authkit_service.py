@@ -10,6 +10,7 @@ never been here and a person who signs in daily take the same path; the only
 difference is whether `WORKOS_USER_ID` already matches a row.
 """
 import logging
+import time
 from dataclasses import dataclass
 
 from psycopg.errors import UniqueViolation
@@ -18,7 +19,10 @@ from agentpit.datastructures.user import User
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
-from agentpit.domain.exceptions import InvalidCredentialsError
+from agentpit.domain.exceptions import (
+    AuthCodeRateLimitedError,
+    InvalidCredentialsError,
+)
 from agentpit.domain.handles import pick_handle
 from agentpit.auth.workos_client import WorkOsClient, WorkOsSession
 
@@ -43,7 +47,55 @@ class AuthKitService:
         self._onboard = onboard
         self._reonboard = reonboard
 
-    def send_code(self, email: str) -> None:
+    #: `POST /auth/code` is unauthenticated, is the only door into the product,
+    #: and every request that gets past these costs a WorkOS email. So it is
+    #: both a denial-of-service vector and a bill.
+    #:
+    #: Two subjects, because one alone leaves half the door open: keyed on the
+    #: ADDRESS an attacker rotates addresses and still spends our money, and
+    #: keyed on the IP alone one person's inbox can be filled from many hosts.
+    #:
+    #: 60s per address matches the dialog's own resend cooldown
+    #: (`RESEND_COOLDOWN_SECONDS` in `ui/src/components/auth/codeFlow.ts`), so
+    #: the server rule and the button never disagree about when a resend is due.
+    RATE_LIMITS = (
+        ("email:60s", 60, 1),
+        ("email:1h", 3600, 5),
+        ("ip:1h", 3600, 20),
+    )
+
+    def send_code(self, email: str, *, client_ip: str | None = None) -> None:
+        """Mail a code, unless this address or this caller has had enough.
+
+        Every rule is checked BEFORE the WorkOS call, and that ordering is the
+        whole point: a refused request must cost one row write, not an email
+        and an HTTP round trip to another provider.
+
+        `client_ip` is None when the request arrived without one the app is
+        willing to trust. That skips the per-IP rule rather than lumping every
+        caller into a single bucket -- a shared bucket would turn the per-IP
+        rule into a global kill switch, which is a denial of service somebody
+        could trigger on purpose.
+        """
+        subjects = {"email": email.strip().lower(), "ip": client_ip}
+        with self._db.write() as conn:
+            for rule, window_seconds, limit in self.RATE_LIMITS:
+                kind, _ = rule.split(":", 1)
+                subject = subjects[kind]
+                if subject is None:
+                    continue
+                allowed = TableWrite.claim_auth_code_attempt(
+                    conn,
+                    f"{rule}:{subject}",
+                    int(time.time()),
+                    window_seconds,
+                    limit,
+                )
+                if not allowed:
+                    # The window length is the honest `Retry-After`: a fixed
+                    # window can free up sooner, never later.
+                    raise AuthCodeRateLimitedError(retry_after=window_seconds)
+
         self._workos.send_magic_auth_code(email)
 
     def sign_in(self, email: str, code: str) -> AuthKitSession:
