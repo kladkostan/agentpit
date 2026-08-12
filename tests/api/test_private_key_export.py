@@ -229,8 +229,16 @@ def test_export_succeeds_with_a_freshly_mailed_code(workos):
 
 
 def test_a_code_belonging_to_a_different_account_is_refused(workos):
-    # THE test in this task. Without the workos_user_id pin this passes and
-    # the key goes to whoever authenticated last.
+    # NOT a test of the workos_user_id pin -- `export_private_key` calls
+    # `authenticate_with_code(user.email, code)` with THIS account's own
+    # (correct) email, so a code mailed to a different address is refused by
+    # the email/code pairing itself (WorkOsError -> 401, same as a wrong
+    # digit), before the pin is ever reached. Real WorkOS enforces that
+    # pairing the same way `FakeWorkOsClient` does. What this proves is that
+    # protection: presenting a genuinely-mailed, currently-valid code for the
+    # wrong account does not work. See
+    # `test_a_stale_email_pins_to_the_row_s_own_identity` below for the pin
+    # itself -- the case this one cannot reach.
     with TestClient(app) as client:
         mine = _sign_in(client, workos, "mine@example.com")
         _sign_in(client, workos, "theirs@example.com")
@@ -240,6 +248,45 @@ def test_a_code_belonging_to_a_different_account_is_refused(workos):
             "/me/private-key",
             json={"code": workos.last_code("theirs@example.com")},
             headers=_auth(mine),
+        )
+    assert resp.status_code == 401, resp.text
+    assert "private_key" not in resp.text
+
+
+def test_a_stale_email_pins_to_the_row_s_own_identity(workos, db_conn):
+    """The pin's actual job, per its own comment in `auth_service.py`: a
+    stale `users.EMAIL` -- the address changed hands upstream, so the row's
+    stored email no longer belongs to the identity `WORKOS_USER_ID` names.
+
+    Reproduced directly rather than via a second account signing in (EMAIL is
+    UNIQUE, so two rows could never share one anyway): repoint this row's
+    EMAIL at an address with its OWN distinct WorkOS identity, while leaving
+    WORKOS_USER_ID untouched. The code that gets mailed now proves that
+    OTHER identity, not the one signed in here -- exactly the gap
+    `authenticate_with_code`'s email/code pairing (see the test above) cannot
+    close, because the service still calls it with the row's own email and
+    that call still succeeds.
+
+    Confirmed this fails with the pin (the `session.workos_user_id !=
+    user.workos_user_id` check in `export_private_key`) commented out: the
+    export then returns 200 instead of 401 -- see the task report.
+    """
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "victim@example.com")
+        user_id = session["user"]["user_id"]
+
+        db_conn.execute(
+            "UPDATE users SET EMAIL = %s WHERE USER_ID = %s",
+            ("stranger@example.com", user_id),
+        )
+
+        assert client.post(
+            "/me/private-key/code", headers=_auth(session)
+        ).status_code == 202
+        resp = client.post(
+            "/me/private-key",
+            json={"code": workos.last_code("stranger@example.com")},
+            headers=_auth(session),
         )
     assert resp.status_code == 401, resp.text
     assert "private_key" not in resp.text
@@ -291,6 +338,35 @@ def test_the_cooldown_still_applies(workos):
             "/me/private-key",
             json={"code": workos.last_code("c@example.com")},
             headers=_auth(session),
+        )
+    assert resp.status_code == 400, resp.text
+    assert "too many attempts" in resp.text
+
+
+def test_a_failed_attempt_still_starts_the_cooldown(workos):
+    # The regression the cooldown block's own long comment in `auth_service.py`
+    # exists to prevent: every failure branch used to raise INSIDE the same
+    # transaction as the attempt stamp, so psycopg rolled the stamp back along
+    # with the exception and a REJECTED guess cost nothing. A wrong code, then
+    # the RIGHT one immediately after, must still be refused by the cooldown
+    # the first (failed) attempt opened -- or an attacker can guess at full
+    # speed while only the legitimate owner ever waits. `test_the_cooldown_
+    # still_applies` above is `success` -> retry, not this: a first attempt
+    # that succeeds proves nothing about whether a REJECTED one still stamps,
+    # because a working implementation and one that rolls the stamp back on
+    # failure look identical when the first attempt never fails.
+    with TestClient(app) as client:
+        session = _sign_in(client, workos, "guess@example.com")
+        client.post("/me/private-key/code", headers=_auth(session))
+        correct_code = workos.last_code("guess@example.com")
+
+        wrong = client.post(
+            "/me/private-key", json={"code": "000000"}, headers=_auth(session)
+        )
+        assert wrong.status_code == 401, wrong.text
+
+        resp = client.post(
+            "/me/private-key", json={"code": correct_code}, headers=_auth(session)
         )
     assert resp.status_code == 400, resp.text
     assert "too many attempts" in resp.text
