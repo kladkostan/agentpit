@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  completeCallbackRequest,
   googleSignInRequest,
   loginRequest,
   meRequest,
@@ -228,6 +229,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [persistRefreshToken, persistToken],
   );
 
+  const signInWithCallbackCode = useCallback<
+    AuthValue["signInWithCallbackCode"]
+  >(
+    async (code) => {
+      const resp = await completeCallbackRequest(code);
+      persistToken(resp.access_token);
+      persistRefreshToken(resp.refresh_token);
+      setUser(resp.user);
+      setDialogOpen(false);
+    },
+    [persistRefreshToken, persistToken],
+  );
+
   const signInWithGoogle = useCallback<AuthValue["signInWithGoogle"]>(
     async (credential) => {
       const resp = await googleSignInRequest(credential);
@@ -259,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sendCode,
       signInWithCode,
       signInWithGoogle,
+      signInWithCallbackCode,
       logout,
     }),
     [
@@ -276,6 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sendCode,
       signInWithCode,
       signInWithGoogle,
+      signInWithCallbackCode,
       logout,
     ],
   );

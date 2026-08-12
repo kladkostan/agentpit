@@ -10,8 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/useAuth";
 import { ApiError } from "@/api/client";
-import { GOOGLE_CLIENT_ID } from "@/lib/googleAuth";
-import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import {
+  buildAuthorizeUrl,
+  createState,
+  STATE_KEY,
+  WORKOS_CLIENT_ID,
+  WORKOS_REDIRECT_URI,
+} from "@/lib/workosAuth";
 import {
   CODE_LENGTH,
   canResend,
@@ -57,7 +62,6 @@ export function AuthDialog() {
     register,
     sendCode,
     signInWithCode,
-    signInWithGoogle,
   } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -103,18 +107,6 @@ export function AuthDialog() {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [step]);
-
-  const onGoogleCredential = async (credential: string) => {
-    setError(null);
-    setSubmitting(true);
-    try {
-      await signInWithGoogle(credential);
-    } catch (err) {
-      setError(extractDetail(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   // Shared by the first send and every resend. Only advances to the code step
   // when the send actually succeeded — otherwise the user is asked for a code
@@ -242,7 +234,22 @@ export function AuthDialog() {
     </div>
   );
 
-  const googleBlock = GOOGLE_CLIENT_ID && (
+  const onGoogleAuthorize = () => {
+    // Narrowing an imported const doesn't survive into this closure (see
+    // GoogleSignInButton), so re-check rather than trust the render guard
+    // that decided whether this block exists at all.
+    if (!WORKOS_CLIENT_ID || !WORKOS_REDIRECT_URI) return;
+    const state = createState();
+    sessionStorage.setItem(STATE_KEY, state);
+    window.location.href = buildAuthorizeUrl({
+      clientId: WORKOS_CLIENT_ID,
+      redirectUri: WORKOS_REDIRECT_URI,
+      provider: "GoogleOAuth",
+      state,
+    });
+  };
+
+  const googleBlock = WORKOS_CLIENT_ID && WORKOS_REDIRECT_URI && (
     <div className="space-y-4">
       {/* Below the fields, not above them: the emailed code is the primary
           path, and the divider reads as "or, instead of the above". */}
@@ -251,10 +258,14 @@ export function AuthDialog() {
         <span className={fieldLabelClass}>or</span>
         <span className="h-px flex-1 bg-border" />
       </div>
-      <GoogleSignInButton
-        onCredential={(credential) => void onGoogleCredential(credential)}
-        onError={setError}
-      />
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={onGoogleAuthorize}
+      >
+        Continue with Google
+      </Button>
     </div>
   );
 

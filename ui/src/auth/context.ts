@@ -21,6 +21,8 @@ export type AuthValue = {
   sendCode: (email: string) => Promise<void>;
   signInWithCode: (email: string, code: string) => Promise<void>;
   signInWithGoogle: (credential: string) => Promise<void>;
+  /** Finish a provider redirect: exchange its code for a session. */
+  signInWithCallbackCode: (code: string) => Promise<void>;
   logout: () => void;
 };
 

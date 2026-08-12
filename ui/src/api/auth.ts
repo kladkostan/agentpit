@@ -84,6 +84,16 @@ export function signInWithCodeRequest(
   });
 }
 
+export function completeCallbackRequest(code: string): Promise<AuthResponse> {
+  return apiFetch<AuthResponse>("/auth/callback", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+    // A 401 here is a rejected authorization code, not a dead session — there
+    // is no session yet. Same reasoning as signInWithCodeRequest.
+    skipAuthEvent: true,
+  });
+}
+
 export function refreshSessionRequest(
   refreshToken: string,
 ): Promise<AuthResponse> {
