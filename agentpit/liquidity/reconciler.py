@@ -212,23 +212,34 @@ def inventory_mint_micro(need_micro: int, held_micro: int, seed_micro: int) -> i
 
 def _ensure_inventory(
     onchain: OnchainAdmin, user: User, ref, snap: BookSnapshot, cfg: Settings
-) -> int:
+) -> "tuple[int, dict[str, int] | None]":
     """Split-mint CTF inventory to back every SELL, a block at a time.
-    Returns the number of split txs performed (0 or 1 per call — splits are
-    admin txs behind the global send_lock, budgeted by the caller)."""
+
+    Returns `(splits, held)`: the number of split txs performed (0 or 1 per
+    call — splits are admin txs behind the global send_lock, budgeted by the
+    caller) and the CTF holdings this call read, so the caller can reuse them
+    rather than ask the chain for the same two numbers again.
+
+    `held` is None whenever this call has nothing trustworthy to hand over:
+    either it read nothing (no requirement), or it minted and what it read is
+    now stale. Re-reading after a split is deliberate — inferring the new
+    balance as `held + add` assumes the mint moved exactly what was asked and
+    that nothing else touched the position meanwhile, and a wrong number here
+    backs asks the house cannot cover.
+    """
     need = int(Decimal(str(cfg.mirror_inventory_buffer)) * split_target_micro(snap))
     if need <= 0:
-        return 0
+        return 0, None
     held_yes = onchain.ctf_balance(user.eth_address, int(ref.yes_token))
     held_no = onchain.ctf_balance(user.eth_address, int(ref.no_token))
     add = inventory_mint_micro(
         need, min(held_yes, held_no), cfg.mirror_inventory_seed_micro
     )
     if add <= 0:
-        return 0
+        return 0, {ref.yes_token: held_yes, ref.no_token: held_no}
     condition_bytes = bytes.fromhex(ref.condition_id[2:])
     onchain.user_split_position(user.eth_key, condition_bytes, add)
-    return 1
+    return 1, None
 
 
 def _crosses(p: Placement, foreign_bid: int | None, foreign_ask: int | None) -> bool:
@@ -291,14 +302,23 @@ def reconcile_market(
     cancels, places = diff_levels(desired, current, protect=protect)
 
     splits = 0
+    held: "dict[str, int] | None" = None
     try:
-        splits = _ensure_inventory(onchain, user, ref, snap, cfg)
+        splits, held = _ensure_inventory(onchain, user, ref, snap, cfg)
     except Exception:
         log.exception("inventory split failed for market %s", ref.market_id)
-    inventory = {
-        ref.yes_token: onchain.ctf_balance(user.eth_address, int(ref.yes_token)),
-        ref.no_token: onchain.ctf_balance(user.eth_address, int(ref.no_token)),
-    }
+    if held is None:
+        # Only the split path and the no-requirement path land here; the pass
+        # that does neither reuses what `_ensure_inventory` already asked for.
+        # Each of these is a remote round trip — measured 0.53s against the
+        # SKALE node against 0.001s against a local anvil — so re-reading the
+        # same two balances was most of a pass's wall clock on a real chain
+        # and invisible on the one this was written against.
+        held = {
+            ref.yes_token: onchain.ctf_balance(user.eth_address, int(ref.yes_token)),
+            ref.no_token: onchain.ctf_balance(user.eth_address, int(ref.no_token)),
+        }
+    inventory = dict(held)
     # Cache this cycle's house balances for the placement loop below: calm
     # (resting) placements never move them, so one read per balance replaces one
     # on-chain read per order — the dominant cost when replicating a deep book.
