@@ -196,6 +196,24 @@ suffices to export a key that cannot be revoked — the holder must also be at t
 mailbox at that moment. That is the entire argument for it, and it is written
 down so that nobody later reads the symmetry as an oversight.
 
+**Where that argument stops: the mail cannot say what the code is for.**
+`send_key_export_code` and `AuthKitService.send_code` both post to the same
+`POST /user_management/magic_auth` with `{"email": email}` — no scope, no
+purpose, no audience. The six digits that sign a person in and the six digits
+that release an unrevocable private key are one credential, and the message
+carrying them is the generic AuthKit sign-in mail from an application still
+named `skalelabs.com's Application`.
+
+The cryptographic half of the freshness argument is unaffected: the holder of a
+stolen token still cannot export without reaching the mailbox. The human-facing
+half is weaker than it looks. Somebody phished with "confirm your sign-in" reads
+a plausible mail, types the code, and has authorised a key export instead —
+nothing in front of them distinguishes the two purposes. There is no in-product
+mitigation for this while both flows share one WorkOS primitive; the
+**application rename** listed under Plan 3's prerequisites is most of what is
+available, since it at least puts our name on the mail the user is deciding
+about. Recorded as a known limit rather than a solved problem.
+
 ## The five findings parked from plan 2's review
 
 All five were re-checked against the code on 2026-08-12 and all five are still
