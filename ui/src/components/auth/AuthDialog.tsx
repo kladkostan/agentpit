@@ -201,28 +201,31 @@ export function AuthDialog() {
         className="w-[calc(100%-2rem)] sm:max-w-md"
         aria-describedby={undefined}
       >
-        <DialogHeader className="pr-6 text-left">
-          <DialogTitle className="text-xl font-semibold tracking-tight">
+        {/* Centred, and the only thing at this size. With the explanatory copy
+            gone the dialog is a title, a field and a button, so the title has
+            to carry the weight the paragraph used to. `pt-1` because Radix
+            pins its close button top-right and an optically centred line wants
+            a little air above it. */}
+        <DialogHeader className="pt-1 text-center sm:text-center">
+          <DialogTitle className="text-2xl font-semibold tracking-tight">
             {title}
           </DialogTitle>
         </DialogHeader>
 
         {step === "email" ? (
           <form onSubmit={onSendCode} className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              We&rsquo;ll email you a {CODE_LENGTH}-digit code. No password
-              needed — if you don&rsquo;t have an account yet, this creates one.
-            </p>
             {emailField}
             {errorBlock}
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Sending…" : "Email me a code"}
+              {submitting ? "Sending…" : "Send code"}
             </Button>
             {googleBlock}
           </form>
         ) : (
           <form onSubmit={onVerifyCode} className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+            {/* Kept, and centred under the title: this line is not an
+                explanation, it names the address to go and look in. */}
+            <p className="text-center text-sm text-muted-foreground">
               We sent a {CODE_LENGTH}-digit code to{" "}
               <span className="font-medium text-foreground">{email}</span>.
             </p>
