@@ -41,11 +41,15 @@ def _ref_of(m) -> "MarketRef | None":
 
 
 def _load_refs(
-    db: DbSession, excluded_categories: "list[str] | None" = None
+    db: DbSession,
+    excluded_categories: "list[str] | None" = None,
+    excluded_tags: "list[str] | None" = None,
 ) -> list[MarketRef]:
     with db.read() as conn:
         markets = TableRead.list_active_synced_markets(
-            conn, excluded_categories=excluded_categories
+            conn,
+            excluded_categories=excluded_categories,
+            excluded_tags=excluded_tags,
         )
     return [r for r in (_ref_of(m) for m in markets) if r is not None]
 
@@ -241,7 +245,8 @@ class MirrorEngine:
 
     async def _refresh_targets(self) -> None:
         refs = await asyncio.to_thread(
-            _load_refs, self._db, self._cfg.excluded_categories
+            _load_refs, self._db, self._cfg.excluded_categories,
+            self._cfg.excluded_tags,
         )
         added, removed = self.state.set_targets(refs)
         # An excluded market leaves the target set exactly as a resolved one

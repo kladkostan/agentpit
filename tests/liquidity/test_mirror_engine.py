@@ -29,13 +29,13 @@ class FlakyOrders:
 
 def _engine(monkeypatch, refs_box, orders):
     monkeypatch.setattr(
-        mirror, "_load_refs", lambda db, excluded=None: refs_box["refs"]
+        mirror, "_load_refs", lambda db, cats=None, tags=None: refs_box["refs"]
     )
     eng = MirrorEngine.__new__(MirrorEngine)   # skip __init__ deps (db/onchain)
     eng._db = None
     # Only the fields `_refresh_targets` actually reads; the engine is built
     # by __new__ precisely to keep the real Settings/db/chain out of the test.
-    eng._cfg = SimpleNamespace(excluded_categories=[])
+    eng._cfg = SimpleNamespace(excluded_categories=[], excluded_tags=[])
     eng._user = None
     eng._order = orders
     from agentpit.liquidity.feed import MirrorState

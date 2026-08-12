@@ -23,13 +23,19 @@ from agentpit.polymarket.tag_taxonomy import (
 
 
 class EventService:
-    def __init__(self, db: DbSession, excluded_categories: "list[str] | None" = None):
+    def __init__(
+        self,
+        db: DbSession,
+        excluded_categories: "list[str] | None" = None,
+        excluded_tags: "list[str] | None" = None,
+    ):
         self._db = db
         # Defaults to "exclude nothing" so the internal constructions of this
         # service (orphan wrapping, singleton creation) keep their old
         # behaviour: those write rows, and a write path has no business
         # consulting a browse filter.
         self._excluded_categories = excluded_categories or []
+        self._excluded_tags = excluded_tags or []
 
     def list_events(
         self,
@@ -54,6 +60,7 @@ class EventService:
                 subtags=subtags,
                 sort=sort,
                 excluded_categories=self._excluded_categories,
+                excluded_tags=self._excluded_tags,
             )
         events = [
             EventWithMarkets(event=event, markets=markets) for event, markets in pairs
@@ -85,6 +92,7 @@ class EventService:
                 subtags=subtags,
                 sort=sort,
                 excluded_categories=self._excluded_categories,
+                excluded_tags=self._excluded_tags,
             )
             all_markets = [m for _event, markets in pairs for m in markets]
             prices = prices_for_markets(conn, all_markets)
@@ -102,7 +110,9 @@ class EventService:
     def list_categories(self) -> ListEventCategoriesResponse:
         with self._db.read() as conn:
             categories = TableRead.list_event_categories(
-                conn, excluded_categories=self._excluded_categories
+                conn,
+                excluded_categories=self._excluded_categories,
+                excluded_tags=self._excluded_tags,
             )
         return ListEventCategoriesResponse(categories=categories)
 
@@ -126,6 +136,7 @@ class EventService:
                     slugs=list(NAV_SLUGS),
                     min_events=MIN_NAV_EVENTS,
                     excluded_categories=self._excluded_categories,
+                    excluded_tags=self._excluded_tags,
                 )
             }
             entries: list[TagNavEntry] = []

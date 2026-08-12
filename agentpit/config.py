@@ -75,6 +75,18 @@ class Settings(BaseSettings):
     excluded_categories: list[str] = Field(
         default=["Sports"], validation_alias="AGENTPIT_EXCLUDED_CATEGORIES"
     )
+    # The same decision, reached through the tag graph instead of the CATEGORY
+    # column. Upstream does not file everything sporting under Sports: three
+    # esports events (two season-winner futures and a game-release question)
+    # sat in the catalogue carrying the `esports` tag with a Technology or
+    # Culture category, so a category-only rule left an Esports sidebar entry
+    # that still listed them.
+    #
+    # Matched against `market_tags.SLUG`, which is Polymarket's own slug — an
+    # event is excluded when ANY of its markets carries one of these.
+    excluded_tags: list[str] = Field(
+        default=["sports", "esports"], validation_alias="AGENTPIT_EXCLUDED_TAGS"
+    )
     resolution_mirror_enabled: bool | None = Field(
         default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
     )

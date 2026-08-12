@@ -36,29 +36,66 @@ def _excluded_lower(excluded: "Iterable[str] | None") -> "list[str]":
     return sorted({c.strip().lower() for c in excluded if c and c.strip()})
 
 
-def _event_category_excluded_clause(categories: "list[str]") -> str:
-    """Predicate for a query over `events` itself.
+def _tag_excluded_subquery(event_id_expr: str) -> str:
+    """EXISTS test: does any market of this event carry an excluded tag?
 
-    A NULL CATEGORY must PASS: `LOWER(NULL) <> ALL (...)` evaluates to NULL,
-    which WHERE treats as false, so without the explicit IS NULL arm every
-    uncategorised event would silently vanish along with the excluded ones.
-    """
-    del categories  # shape only; the value binds as a parameter
-    return "(CATEGORY IS NULL OR LOWER(CATEGORY) <> ALL(%s))"
-
-
-def _market_category_excluded_clause(alias: str = "markets") -> str:
-    """Predicate for a query over `markets`, reaching the category through the
-    event that groups them.
-
-    NOT EXISTS rather than a join: a market with no event, or an event with no
-    category, matches no row in the subquery and is therefore KEPT — the same
-    "exclude only on positive evidence" rule the sync filter follows.
+    The tag graph is the second half of the exclusion. Upstream does not file
+    everything sporting under the Sports CATEGORY — two season-winner futures
+    and a game-release question sat under Technology/Culture carrying
+    `esports` — so a category-only rule left them listed under an Esports
+    sidebar entry.
     """
     return (
-        f"NOT EXISTS (SELECT 1 FROM events ev WHERE ev.EVENT_ID = {alias}.EVENT_ID "
-        "AND LOWER(ev.CATEGORY) = ANY(%s))"
+        "EXISTS (SELECT 1 FROM markets mx JOIN market_tags mtx "
+        f"ON mtx.MARKET_ID = mx.MARKET_ID WHERE mx.EVENT_ID = {event_id_expr} "
+        "AND mtx.SLUG = ANY(%s))"
     )
+
+
+def _event_excluded_clause(
+    categories: "list[str]", tags: "list[str]"
+) -> "tuple[str, list[object]]":
+    """`(sql, params)` keeping only events that are in neither list.
+
+    For a query over `events` itself. A NULL CATEGORY must PASS: `LOWER(NULL)
+    <> ALL (...)` evaluates to NULL, which WHERE treats as false, so without
+    the explicit IS NULL arm every uncategorised event would vanish along with
+    the excluded ones.
+    """
+    parts: list[str] = []
+    params: list[object] = []
+    if categories:
+        parts.append("(CATEGORY IS NULL OR LOWER(CATEGORY) <> ALL(%s))")
+        params.append(categories)
+    if tags:
+        parts.append(f"NOT {_tag_excluded_subquery('events.EVENT_ID')}")
+        params.append(tags)
+    return " AND ".join(parts), params
+
+
+def _market_excluded_clause(
+    categories: "list[str]", tags: "list[str]", alias: str = "markets"
+) -> "tuple[str, list[object]]":
+    """`(sql, params)` for a query over `markets`, reaching both signals through
+    the event that groups them.
+
+    NOT EXISTS rather than a join: a market with no event, or an event with no
+    category and no tags, matches no row in either subquery and is therefore
+    KEPT — the same "exclude only on positive evidence" rule the sync filter
+    follows.
+    """
+    parts: list[str] = []
+    params: list[object] = []
+    if categories:
+        parts.append(
+            f"NOT EXISTS (SELECT 1 FROM events ev WHERE ev.EVENT_ID = {alias}.EVENT_ID "
+            "AND LOWER(ev.CATEGORY) = ANY(%s))"
+        )
+        params.append(categories)
+    if tags:
+        parts.append(f"NOT {_tag_excluded_subquery(f'{alias}.EVENT_ID')}")
+        params.append(tags)
+    return " AND ".join(parts), params
 
 
 _MARKET_COLS = (
@@ -645,7 +682,9 @@ class TableRead:
 
     @staticmethod
     def count_active_markets(
-        db: psycopg.Connection, excluded_categories: "Iterable[str] | None" = None
+        db: psycopg.Connection,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> int:
         """How many markets are ACTIVE, platform-wide.
 
@@ -660,12 +699,11 @@ class TableRead:
         exactly that reason: a headline counting markets the grid refuses to
         show is the bug this docstring already warns about, in a new place.
         """
-        excluded = _excluded_lower(excluded_categories)
-        clause = ""
-        params: list[object] = [MarketState.ACTIVE.value]
-        if excluded:
-            clause = f" AND {_market_category_excluded_clause()}"
-            params.append(excluded)
+        sql, extra = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        clause = f" AND {sql}" if sql else ""
+        params: list[object] = [MarketState.ACTIVE.value, *extra]
         row = db.execute(
             f"SELECT COUNT(*) as CNT FROM markets WHERE MARKET_STATE = %s{clause}",
             tuple(params),
@@ -791,6 +829,7 @@ class TableRead:
         subtags: "list[str] | None" = None,
         sort: "EventSort | None" = None,
         excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ranked by upstream 24h volume, each paired with its
         child markets.
@@ -839,10 +878,12 @@ class TableRead:
         # Applied before the caller's own `category` filter, and independent of
         # it: a request for an excluded category returns an empty page rather
         # than resurrecting it, so a stale UI tab cannot reach the rows.
-        excluded = _excluded_lower(excluded_categories)
-        if excluded:
-            clauses.append(_event_category_excluded_clause(excluded))
-            params.append(excluded)
+        excl_sql, excl_params = _event_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        if excl_sql:
+            clauses.append(excl_sql)
+            params.extend(excl_params)
         normalized_category = category.strip() if category else None
         if normalized_category:
             clauses.append("LOWER(CATEGORY) = LOWER(%s)")
@@ -921,6 +962,7 @@ class TableRead:
         clob_token_ids: list[str] | None = None,
         polymarket_condition_id: str | None = None,
         excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "list[Market]":
         """Paged/filtered market list.
 
@@ -931,10 +973,12 @@ class TableRead:
         """
         clauses: list[str] = []
         params: list = []
-        excluded = _excluded_lower(excluded_categories)
-        if excluded:
-            clauses.append(_market_category_excluded_clause())
-            params.append(excluded)
+        excl_sql, excl_params = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        if excl_sql:
+            clauses.append(excl_sql)
+            params.extend(excl_params)
         if market_id is not None:
             clauses.append("MARKET_ID = %s")
             params.append(market_id)
@@ -971,7 +1015,9 @@ class TableRead:
 
     @staticmethod
     def list_event_categories(
-        db: psycopg.Connection, excluded_categories: "Iterable[str] | None" = None
+        db: psycopg.Connection,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "list[str]":
         """Every distinct, non-blank event category, case-insensitively sorted.
 
@@ -984,12 +1030,11 @@ class TableRead:
         same exclusions the event grid does. Leaving an excluded category in the
         list renders a tab whose every click returns an empty page.
         """
-        excluded = _excluded_lower(excluded_categories)
-        clause = ""
-        params: tuple = ()
-        if excluded:
-            clause = " AND LOWER(CATEGORY) <> ALL(%s)"
-            params = (excluded,)
+        excl_sql, excl_params = _event_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        clause = f" AND {excl_sql}" if excl_sql else ""
+        params: tuple = tuple(excl_params)
         cur = db.execute(
             f"""
             SELECT c FROM (
@@ -1010,6 +1055,7 @@ class TableRead:
         slugs: list[str],
         min_events: int,
         excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "list[tuple[str, str, int]]":
         """``(slug, label, event_count)`` for each requested slug that carries
         at least ``min_events`` events. Unordered — the caller restores the
@@ -1032,13 +1078,11 @@ class TableRead:
         """
         if not slugs:
             return []
-        excluded = _excluded_lower(excluded_categories)
-        clause = ""
-        params: list[object] = [list(slugs)]
-        if excluded:
-            clause = f" AND {_market_category_excluded_clause('m')}"
-            params.append(excluded)
-        params.append(min_events)
+        excl_sql, excl_params = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags), "m"
+        )
+        clause = f" AND {excl_sql}" if excl_sql else ""
+        params: list[object] = [list(slugs), *excl_params, min_events]
         cur = db.execute(
             f"""
             SELECT mt.SLUG AS SLUG, MIN(mt.LABEL) AS LABEL,
@@ -1136,7 +1180,9 @@ class TableRead:
 
     @staticmethod
     def list_active_synced_markets(
-        db: psycopg.Connection, excluded_categories: "Iterable[str] | None" = None
+        db: psycopg.Connection,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "list[Market]":
         """Markets the liquidity engine should make liquidity for.
 
@@ -1149,12 +1195,11 @@ class TableRead:
         added, so the exclusion is also the largest single reduction in the
         engine's on-chain footprint.
         """
-        excluded = _excluded_lower(excluded_categories)
-        clause = ""
-        params: tuple = ()
-        if excluded:
-            clause = f" AND {_market_category_excluded_clause()}"
-            params = (excluded,)
+        sql, extra = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        clause = f" AND {sql}" if sql else ""
+        params: tuple = tuple(extra)
         rows = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
             "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL"

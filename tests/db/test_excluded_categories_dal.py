@@ -208,3 +208,56 @@ def test_a_tag_that_survives_on_other_events_keeps_its_place(db):
         db, slugs=["esports"], min_events=1, excluded_categories=SPORTS
     )
     assert rows == [("esports", "Esports", 1)]
+
+
+# ----- the tag half of the exclusion ------------------------------------------
+
+ESPORTS = ["esports"]
+
+
+def test_a_tagged_event_is_excluded_though_its_category_is_not(db):
+    """Upstream files "LPL 2026 Season Winner" and "Will Valve release Deadlock
+    before 2027?" under Technology/Culture while tagging them `esports`, so a
+    category-only rule left three of them listed."""
+    tech = _event(db, "deadlock-2027", "Technology")
+    m = _market(db, "deadlock", tech.event_id)
+    _tagged(db, m.market_id, "esports")
+
+    pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, excluded_categories=SPORTS, excluded_tags=ESPORTS
+    )
+    assert (pairs, total) == ([], 0)
+    assert (
+        TableRead.list_markets_filtered(
+            db, limit=10, excluded_categories=SPORTS, excluded_tags=ESPORTS
+        )
+        == []
+    )
+    assert (
+        TableRead.count_active_markets(
+            db, excluded_categories=SPORTS, excluded_tags=ESPORTS
+        )
+        == 0
+    )
+
+
+def test_the_tag_exclusion_does_not_reach_untagged_events(db):
+    politics = _event(db, "election", "Politics")
+    _market(db, "candidate-a", politics.event_id)
+    _pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, excluded_categories=SPORTS, excluded_tags=ESPORTS
+    )
+    assert total == 1
+
+
+def test_one_tagged_market_excludes_its_whole_event(db):
+    """The tag lands on markets, the listing is of events: a single tagged leg
+    is enough, or a multi-outcome event would half-vanish."""
+    ev = _event(db, "mixed", "Technology")
+    m1 = _market(db, "leg-a", ev.event_id)
+    _market(db, "leg-b", ev.event_id)
+    _tagged(db, m1.market_id, "esports")
+    _pairs, total = TableRead.list_events_with_markets(
+        db, limit=10, offset=0, excluded_tags=ESPORTS
+    )
+    assert total == 0
