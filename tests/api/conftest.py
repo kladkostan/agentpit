@@ -1,6 +1,6 @@
 """Getting a signed-in account over HTTP, now that AuthKit is the only way in.
 
-`/register` answers 410 since the cutover, so every test that needs an
+`/register` was deleted in the cutover, so every test that needs an
 authenticated caller goes through the flow the product itself uses: POST
 /auth/code, then POST /auth/session with the mailed code. Two doubles make
 that work offline, and they are useless apart, so one fixture installs both.

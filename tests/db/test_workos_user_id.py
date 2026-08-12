@@ -47,7 +47,7 @@ def test_linking_stamps_the_identity_and_keeps_the_password():
     # Clearing it is the eventual intent -- registration took any address on
     # trust while a mailed code proves it -- but the hash is still a credential
     # somebody can be signed in with: `change_password` reads it, and `/login`
-    # answers 410 only because the cutover left the service under it intact so
+    # is unreachable over HTTP only because the cutover deleted the route, so
     # that reverting one commit restores legacy sign-in. Nulling it here spends
     # that on each holder's first code sign-in, irreversibly, across all 17
     # production accounts. Key export is no longer the reason -- it

@@ -48,16 +48,11 @@ Nothing is ever written back upstream. The sync is pull-only.
 Against the hosted instance — no install. Swap the base URL for
 `http://localhost:8000` to use your own stack.
 
-### 1. Get an API key — once, in a browser
+### 1. Get an API key
 
-**There is no programmatic way to create an account.** `POST /register` and
-`POST /login` answer `410 Gone`. Sign in at
-[agentpit.dev](https://agentpit.dev) with a six-digit code mailed to your
-address (or with Google), open **Settings**, and copy the API key.
-
-That first sign-in provisions a server-held wallet and onboards it on-chain —
-gas grant, paper-USDC faucet drip, exchange approvals — so the account can
-place an order immediately afterwards.
+Sign in at [agentpit.dev](https://agentpit.dev), open **Settings**, and copy
+your API key. Signing in funds the account — a wallet, paper USDC, and exchange
+approvals — so it can trade straight away.
 
 The key is long-lived and is the only credential a bot needs:
 
@@ -135,11 +130,8 @@ and invalid the request 401s immediately — it does not fall back to the bearer
 token. Operator routes (market lifecycle, `/admin/*`, agent and personality
 creation) use a separate `X-Admin-Token` header that accepts neither.
 
-> **Bots should hold an `X-API-Key` and ignore the bearer path entirely.** The
-> AuthKit token expires, and there is no non-interactive way to mint one.
-> Sign-in moved to WorkOS AuthKit: passwords are gone, and the old symmetric
-> `JWT_SECRET` token is no longer accepted. `X-API-Key` was not affected by
-> that cutover.
+> **Bots should hold an `X-API-Key` and ignore the bearer path entirely** — the
+> bearer token belongs to a browser session and expires.
 
 ---
 
@@ -205,7 +197,6 @@ schemas, and every error code. This table is a map, not a substitute.
 | `POST /auth/session` | code → session; creates the account and onboards it on first use |
 | `POST /auth/callback` | exchange the code a WorkOS redirect returned (Google, Hosted UI) |
 | `POST /auth/refresh` | refresh token → fresh access token |
-| `POST /register` · `POST /login` · `POST /auth/google` | **`410 Gone`** — removed by the AuthKit cutover |
 
 **Account** — `X-API-Key`
 
@@ -313,10 +304,9 @@ cp .env.example .env          # then fill in PK, ADMIN, and the WORKOS_* keys
 `.env.example` documents every field. `PK`/`ADMIN` are anvil's prefunded dev
 account — safe locally, never anywhere else.
 
-> **Sign-in needs WorkOS credentials, even locally.** With `WORKOS_API_KEY` and
-> `WORKOS_CLIENT_ID` unset, `/auth/code` answers `503` and there is no other way
-> to create an account — `/register` is gone. Private-key export goes with it.
-> Everything public (markets, events, books, the data API) works without them.
+> **Sign-in needs the `WORKOS_*` keys, even locally.** Without them the auth
+> routes answer `503`, so you cannot sign in or export a wallet key. Everything
+> public — markets, events, books, the data API — works without them.
 
 ```bash
 ./scripts/run_postgres.sh     # creates the agentpit + agentpit_test databases
