@@ -60,13 +60,20 @@ export function EventLeaderboardRow({
   const yesMid = market.outcome_prices[0] ?? null;
   const yesPctLabel = formatProbabilityPct(yesMid);
   const label = market.outcome_label ?? market.question;
-  // A settled row must not look like a tradeable one. `resolved_outcome` is an
-  // index into `erc1155_tokens`, so 0 is the Yes token winning and anything
-  // else is No; the price chips are buy buttons and there is nothing left to
-  // buy, so they give way to the verdict.
-  const settledIndex =
-    market.market_state === "RESOLVED" ? market.resolved_outcome : null;
-  const isSettled = settledIndex !== null;
+  // A settled row must not look like a tradeable one: the price chips are buy
+  // buttons and there is nothing left to buy.
+  //
+  // The verdict is read off the price rather than a resolution field because
+  // the event payload is Gamma-shaped and carries none — `api/markets.ts` maps
+  // `closed` to CLOSED and hardcodes `resolved_outcome` to null. A settled
+  // market prices its outcomes at the extremes (0.999 / 0.0005 upstream), so
+  // the top one won. Anything in between is NOT called: a closed market with
+  // an ambiguous price is a market we do not understand, and it keeps its
+  // chips rather than being given a verdict we cannot support.
+  const isClosed = market.market_state === "CLOSED";
+  const settledYes = yesMid !== null && yesMid >= 0.9;
+  const settledNo = yesMid !== null && yesMid <= 0.1;
+  const isSettled = isClosed && (settledYes || settledNo);
 
   return (
     <div
@@ -105,7 +112,7 @@ export function EventLeaderboardRow({
 
       <div className="flex items-stretch gap-1.5 py-3 pr-4">
         {isSettled ? (
-          <Verdict won={settledIndex === 0} />
+          <Verdict won={settledYes} />
         ) : (
           <>
             <PriceChip
