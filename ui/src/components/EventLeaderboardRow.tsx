@@ -60,6 +60,13 @@ export function EventLeaderboardRow({
   const yesMid = market.outcome_prices[0] ?? null;
   const yesPctLabel = formatProbabilityPct(yesMid);
   const label = market.outcome_label ?? market.question;
+  // A settled row must not look like a tradeable one. `resolved_outcome` is an
+  // index into `erc1155_tokens`, so 0 is the Yes token winning and anything
+  // else is No; the price chips are buy buttons and there is nothing left to
+  // buy, so they give way to the verdict.
+  const settledIndex =
+    market.market_state === "RESOLVED" ? market.resolved_outcome : null;
+  const isSettled = settledIndex !== null;
 
   return (
     <div
@@ -97,22 +104,52 @@ export function EventLeaderboardRow({
       </button>
 
       <div className="flex items-stretch gap-1.5 py-3 pr-4">
-        <PriceChip
-          tone="yes"
-          label="Yes"
-          price={formatCents(yesCents)}
-          isActive={isSelected && selectedOutcome === yesLabel}
-          onClick={() => onPickOutcome(market.market_id, yesLabel ?? "")}
-        />
-        <PriceChip
-          tone="no"
-          label="No"
-          price={formatCents(noCents)}
-          isActive={isSelected && selectedOutcome === noLabel}
-          onClick={() => onPickOutcome(market.market_id, noLabel ?? "")}
-        />
+        {isSettled ? (
+          <Verdict won={settledIndex === 0} />
+        ) : (
+          <>
+            <PriceChip
+              tone="yes"
+              label="Yes"
+              price={formatCents(yesCents)}
+              isActive={isSelected && selectedOutcome === yesLabel}
+              onClick={() => onPickOutcome(market.market_id, yesLabel ?? "")}
+            />
+            <PriceChip
+              tone="no"
+              label="No"
+              price={formatCents(noCents)}
+              isActive={isSelected && selectedOutcome === noLabel}
+              onClick={() => onPickOutcome(market.market_id, noLabel ?? "")}
+            />
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function Verdict({ won }: { won: boolean }) {
+  /* Deliberately not a button: it occupies the width of both price chips so a
+     part-settled event keeps one column, and it states the outcome in words as
+     well as colour — a red and a green pill are the same pill to a reader who
+     cannot tell them apart. */
+  return (
+    <span
+      className={cn(
+        "flex min-w-[162px] items-center justify-center gap-1.5 rounded-lg border",
+        "px-2.5 py-1.5 text-sm font-semibold leading-tight",
+        won
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+      )}
+    >
+      {won ? "Yes" : "No"}
+      <span aria-hidden="true" className="text-xs opacity-80">
+        {won ? "✓" : "✗"}
+      </span>
+      <span className="sr-only">— settled</span>
+    </span>
   );
 }
 
