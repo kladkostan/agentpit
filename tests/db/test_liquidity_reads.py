@@ -136,6 +136,10 @@ def test_list_active_synced_markets_empty_when_none_qualify():
 
 
 def test_list_active_synced_markets_ordered_by_market_id():
+    # Market id is the TIE-BREAK, not the sort key: neither market here belongs
+    # to an event with a captured volume, so both fall to the bottom of the
+    # volume ranking and this is what decides between them. The test above it
+    # covers the ranking itself.
     conn = fresh_test_conn()
     pcid_a = "0x" + "aa" * 32
     pcid_b = "0x" + "bb" * 32
@@ -155,3 +159,46 @@ def test_list_active_synced_markets_ordered_by_market_id():
     )
     got = TableRead.list_active_synced_markets(conn)
     assert [m.market_id for m in got] == sorted([m1.market_id, m2.market_id])
+
+
+def test_active_markets_come_back_busiest_first():
+    """Volume beats id, and the mirror deepens books in exactly this order.
+
+    The quiet market is created FIRST, so it holds the lower market id. If the
+    ranking ever regresses to `ORDER BY MARKET_ID` this test fails, which is
+    the point — the regression is invisible in production until somebody
+    notices the popular markets filled in last.
+    """
+    conn = fresh_test_conn()
+    quiet = TableWrite.upsert_event(conn, slug="quiet-ev", title="Quiet")
+    busy = TableWrite.upsert_event(conn, slug="busy-ev", title="Busy")
+    TableWrite.update_event_volume(conn, quiet.event_id, 10.0)
+    TableWrite.update_event_volume(conn, busy.event_id, 9_000_000.0)
+
+    low_id = _make_market(
+        conn,
+        question="Quiet one?",
+        cond_id=_hex32("quiet"),
+        polymarket_condition_id="0x" + "cc" * 32,
+        state=MarketState.ACTIVE,
+    )
+    high_id = _make_market(
+        conn,
+        question="Busy one?",
+        cond_id=_hex32("busy"),
+        polymarket_condition_id="0x" + "dd" * 32,
+        state=MarketState.ACTIVE,
+    )
+    conn.execute(
+        "UPDATE markets SET EVENT_ID = %s WHERE MARKET_ID = %s",
+        (quiet.event_id, low_id.market_id),
+    )
+    conn.execute(
+        "UPDATE markets SET EVENT_ID = %s WHERE MARKET_ID = %s",
+        (busy.event_id, high_id.market_id),
+    )
+
+    got = TableRead.list_active_synced_markets(conn)
+
+    assert [m.market_id for m in got] == [high_id.market_id, low_id.market_id]
+    conn.close()

@@ -9,7 +9,6 @@ Two lifespan tasks (siblings of polymarket_sync / snapshot):
 Blocking work (DB/chain/REST) runs via asyncio.to_thread.
 """
 import asyncio
-import hashlib
 import logging
 
 from agentpit.config import Settings
@@ -54,23 +53,26 @@ def _load_refs(
     return [r for r in (_ref_of(m) for m in markets) if r is not None]
 
 
-def cold_seed(asset: str, interval: float, now: float) -> float:
-    """Initial `last_cold` for an asset, offset deterministically.
+def cold_seed(priority: float, interval: float, now: float) -> float:
+    """Initial `last_cold` for an asset, placed in the queue by priority.
 
-    Without this every market is due for its first cold sweep the moment the
-    process starts, and a boot would place the whole deep book for every
-    market at once. Hashing with hashlib (not the salted built-in hash) keeps
-    a market's slot stable across restarts. The offset is a fraction of the
-    interval rather than `% int(interval)`, so this is well-defined for any
-    positive interval — including sub-second ones, where the integer modulo
-    raised `ZeroDivisionError`, and ones in `[1, 2)`, where it collapsed to a
-    constant 0 and defeated the stagger.
+    Without an offset every market is due for its first cold sweep the moment
+    the process starts, and a boot would place the whole deep book for every
+    market at once. So the first sweeps are spread across one interval — but
+    WHERE in that interval a market lands is a decision, and it used to be a
+    hash of the asset id, which is to say a coin toss.
+
+    `priority` is 1.0 for the market that should deepen first and 0.0 for the
+    one that can wait a full interval; the mirror derives it from 24h volume,
+    so the books a person is most likely to open fill in first. The offset is
+    a fraction of the interval rather than `% int(interval)`, so this is
+    well-defined for any positive interval — including sub-second ones, where
+    the integer modulo raised `ZeroDivisionError`, and ones in `[1, 2)`, where
+    it collapsed to a constant 0 and defeated the stagger.
     """
     if interval <= 0:
         return now
-    digest = hashlib.sha256(asset.encode()).digest()
-    frac = int.from_bytes(digest[:8], "big") / 2**64  # [0, 1)
-    return now - frac * interval
+    return now - max(0.0, min(1.0, priority)) * interval
 
 
 def cold_due(last_cold: float, interval: float, now: float) -> bool:
@@ -88,6 +90,10 @@ class MirrorEngine:
         self._user = user
         self._order = OrderService(db, onchain)
         self.state = MirrorState([])
+        # asset -> [0,1] priority for its FIRST cold sweep; rebuilt whenever
+        # the target set is reloaded, so a market that climbs the volume
+        # ranking moves up the queue the next time it is seeded.
+        self._cold_priority: "dict[str, float]" = {}
         self._resubscribe = asyncio.Event()
         self._pending_cancel: list[MarketRef] = []
 
@@ -220,7 +226,12 @@ class MirrorEngine:
                         continue
                     interval = self._cfg.mirror_cold_interval_seconds
                     if asset not in last_cold:
-                        last_cold[asset] = cold_seed(asset, interval, now)
+                        last_cold[asset] = cold_seed(
+                            # Unknown asset (seen by the feed before the next
+                            # target reload) goes to the back rather than the
+                            # front: a market nobody ranked is not urgent.
+                            self._cold_priority.get(asset, 0.0), interval, now
+                        )
                     cold = cold_due(last_cold[asset], interval, now)
                     if cold:
                         last_cold[asset] = now
@@ -248,6 +259,12 @@ class MirrorEngine:
             _load_refs, self._db, self._cfg.excluded_categories,
             self._cfg.excluded_tags,
         )
+        # `_load_refs` returns them busiest first, and that order is the whole
+        # point: it becomes each market's place in the cold-sweep queue.
+        n = max(1, len(refs))
+        self._cold_priority = {
+            r.pm_yes_token: 1.0 - i / n for i, r in enumerate(refs)
+        }
         added, removed = self.state.set_targets(refs)
         # An excluded market leaves the target set exactly as a resolved one
         # does, so `removed` carries it into the cancel pass below and the

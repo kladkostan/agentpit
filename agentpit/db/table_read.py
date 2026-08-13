@@ -1194,6 +1194,15 @@ class TableRead:
         reach. Sports alone was 68.6% of the standing catalogue when this was
         added, so the exclusion is also the largest single reduction in the
         engine's on-chain footprint.
+
+        Returned busiest first, and that order is load-bearing rather than
+        cosmetic: the mirror deepens books in this sequence, and on a chain
+        where a reconcile pass costs most of a second the sequence decides
+        which markets look finished first. Volume lives on the event, so it is
+        read through a correlated subquery rather than a join — `_MARKET_COLS`
+        is unqualified and a join would make every column name ambiguous.
+        Markets whose event has no captured volume sort last, then by id, so
+        the order is total and stable across restarts.
         """
         sql, extra = _market_excluded_clause(
             _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
@@ -1203,7 +1212,10 @@ class TableRead:
         rows = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
             "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL"
-            f"{clause} ORDER BY MARKET_ID",
+            f"{clause} "
+            "ORDER BY (SELECT e.VOLUME_24HR FROM events e "
+            "          WHERE e.EVENT_ID = markets.EVENT_ID) DESC NULLS LAST, "
+            "         MARKET_ID",
             params,
         ).fetchall()
         return [_row_to_market(row) for row in rows]
