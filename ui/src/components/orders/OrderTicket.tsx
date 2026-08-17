@@ -286,14 +286,23 @@ export function OrderTicket({
     selectedOutcomeIndex === 0
       ? "text-emerald-600 dark:text-emerald-400"
       : "text-rose-600 dark:text-rose-400";
+  // Buying and selling must not look identical. The restyle left this as a
+  // ternary with two identical branches, which reads as intent while doing
+  // nothing — on the one control where the colour carries the meaning.
   const ctaTone = isBuy
-    ? "bg-primary hover:bg-primary/90 text-primary-foreground"
-    : "bg-primary hover:bg-primary/90 text-primary-foreground";
+    ? "bg-emerald-700 hover:bg-emerald-700/90 text-white"
+    : "bg-rose-700 hover:bg-rose-700/90 text-white";
 
   const ctaLabel = (() => {
     if (isTradingDisabled) return disabledReason ?? "Trading disabled";
     if (limitMutation.isPending || marketMutation.isPending) return "Placing…";
-    return "Trade";
+    // The button is the last thing seen before money moves, so it says what
+    // will happen rather than that something will. The restyle reduced this
+    // to a constant "Trade", which is the one word that carries no
+    // confirmation at all.
+    if (!preview) return `${isBuy ? "Buy" : "Sell"} ${outcome}`;
+    const cents = Math.round(preview.price * 100);
+    return `${isBuy ? "Buy" : "Sell"} ${preview.shares} ${outcome.toUpperCase()} at ${cents}¢`;
   })();
 
   const toWin = (() => {
@@ -514,10 +523,10 @@ export function OrderTicket({
             <span className="text-foreground">{isBuy ? "To win" : "You'll receive"}</span>
             <span
               className={cn(
-                "font-medium tabular-nums",
-                isBuy
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-emerald-600 dark:text-emerald-400",
+                // Green either way: this row is what the position returns if
+                // it comes good, and that is a gain on both sides. Was a
+                // ternary with two identical branches.
+                "font-medium tabular-nums text-emerald-600 dark:text-emerald-400",
               )}
             >
               {formatDollars(toWin)}
