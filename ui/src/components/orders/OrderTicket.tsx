@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getBook, placeMarketOrder, placeOrder, useBook } from "@/api/orders";
@@ -23,6 +24,8 @@ import {
 import type { Erc1155Token } from "@/types/market";
 import type { OrderBookSummary, OrderSide } from "@/types/order";
 import { ApiError } from "@/api/client";
+import { EXPIRY_OPTIONS, expiryForLabel, isExpiryDisabled } from "@/lib/orderExpiry";
+import type { ExpiryLabel } from "@/lib/orderExpiry";
 
 type Mode = "Limit" | "Market";
 
@@ -31,6 +34,7 @@ interface OrderTicketProps {
   tokens: Erc1155Token[];
   outcome: string;
   question: string;
+  iconUrl?: string | null;
   endDate: number | null;
   isTradingDisabled: boolean;
   disabledReason?: string;
@@ -72,6 +76,7 @@ export function OrderTicket({
   tokens,
   outcome,
   question,
+  iconUrl,
   endDate,
   isTradingDisabled,
   disabledReason,
@@ -88,6 +93,8 @@ export function OrderTicket({
   const limitPriceUsd = centsToPrice(limitCents);
   const [limitShares, setLimitShares] = useState<string>("");
   const [marketAmount, setMarketAmount] = useState<string>("");
+  const [expiresOpen, setExpiresOpen] = useState(false);
+  const [expiresLabel, setExpiresLabel] = useState<ExpiryLabel>("Never");
 
   const requireAuth = useRequireAuth();
   const queryClient = useQueryClient();
@@ -138,12 +145,14 @@ export function OrderTicket({
     mutationFn: async () => {
       const price = limitPriceUsd;
       const shares = parseDecimal(limitShares);
+      const { order_type, expiration } = expiryForLabel(expiresLabel, Date.now());
       return placeOrder({
         token_id: tokenId,
         side,
         price,
         size: shares,
-        order_type: "GTC",
+        order_type,
+        expiration,
       });
     },
     onSuccess: (res) => {
@@ -272,101 +281,145 @@ export function OrderTicket({
 
   const isBuy = side === "BUY";
   const endsLabel = endsInLabel(endDate);
+  const selectedOutcomeIndex = tokens.findIndex(([, label]) => label === outcome);
+  const selectedOutcomeTone =
+    selectedOutcomeIndex === 0
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-rose-600 dark:text-rose-400";
+  // Buying and selling must not look identical. The restyle left this as a
+  // ternary with two identical branches, which reads as intent while doing
+  // nothing — on the one control where the colour carries the meaning.
   const ctaTone = isBuy
-    ? "bg-[#0F6E56] hover:bg-[#0F6E56]/90"
-    : "bg-rose-700 hover:bg-rose-700/90";
+    ? "bg-emerald-700 hover:bg-emerald-700/90 text-white"
+    : "bg-rose-700 hover:bg-rose-700/90 text-white";
 
   const ctaLabel = (() => {
     if (isTradingDisabled) return disabledReason ?? "Trading disabled";
     if (limitMutation.isPending || marketMutation.isPending) return "Placing…";
+    // The button is the last thing seen before money moves, so it says what
+    // will happen rather than that something will. The restyle reduced this
+    // to a constant "Trade", which is the one word that carries no
+    // confirmation at all.
     if (!preview) return `${isBuy ? "Buy" : "Sell"} ${outcome}`;
     const cents = Math.round(preview.price * 100);
-    const sharesStr = formatNumber(preview.shares);
-    return `${isBuy ? "Buy" : "Sell"} ${sharesStr} ${outcome.toUpperCase()} at ${cents}¢`;
+    return `${isBuy ? "Buy" : "Sell"} ${preview.shares} ${outcome.toUpperCase()} at ${cents}¢`;
   })();
 
-  // Live cost hint shown next to the Shares label as user types.
-  const sharesValue = parseDecimal(limitShares);
-  const priceForCost = (() => {
-    if (mode === "Limit") return limitPriceUsd;
-    if (side === "BUY") return bestAskPrice ?? NaN;
-    return bestBidPrice ?? NaN;
+  const toWin = (() => {
+    if (!preview) return 0;
+    if (!isBuy) return preview.cost;
+    return Math.max(0, preview.shares - preview.cost);
   })();
-  const liveCost =
-    Number.isFinite(sharesValue) &&
-    sharesValue > 0 &&
-    Number.isFinite(priceForCost) &&
-    priceForCost > 0
-      ? sharesValue * priceForCost
-      : null;
+
+  const total = preview?.cost ?? 0;
+
+  const adjustLimitCents = (delta: number) => {
+    const raw = parseDecimal(limitCents);
+    const next = Number.isFinite(raw) ? raw + delta : 50 + delta;
+    const clamped = Math.max(1, Math.min(99, Math.round(next)));
+    setLimitCents(String(clamped));
+  };
+
+  const adjustShares = (delta: number) => {
+    const source = mode === "Limit" || !isBuy ? limitShares : marketAmount;
+    const raw = parseDecimal(source);
+    const next = Number.isFinite(raw) ? raw + delta : delta;
+    const clamped = Math.max(0, next);
+    const rendered = clamped === 0 ? "" : String(Number(clamped.toFixed(2)));
+    if (mode === "Limit" || !isBuy) {
+      setLimitShares(rendered);
+      return;
+    }
+    setMarketAmount(rendered);
+  };
 
   return (
-    <section className="sticky top-20 w-full max-w-[360px] self-start overflow-hidden rounded-2xl border border-border/80 bg-card shadow-[0_1px_0_0_hsl(var(--border)),0_24px_60px_-24px_rgba(0,0,0,0.18)]">
-      <header className="space-y-1.5 border-b border-border/60 px-5 py-4">
-        <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
-          Market
-        </p>
-        <h2 className="text-[15px] font-medium leading-[1.35] text-foreground">
-          {question}
-        </h2>
-        {endsLabel ? (
-          <p className="text-xs text-muted-foreground">{endsLabel}</p>
-        ) : null}
-      </header>
-
-      <div className="space-y-3.5 px-5 py-5">
-        <OutcomePicker
-          tokens={tokens}
-          selected={outcome}
-          side={side}
-          onSelect={(label) => onOutcomeChange?.(label)}
-        />
-
-        <SegmentedSide side={side} onSelect={selectSide} />
-
-        <SegmentedMode mode={mode} onSelect={setMode} />
-
-        {mode === "Limit" ? (
-          <div className="space-y-3">
-            <Field label="Limit price" hint="¢">
-              <ValueInput
-                id="limit-price"
-                value={limitCents}
-                onChange={setLimitCents}
-                disabled={isTradingDisabled}
-                suffix="per share"
-              />
-            </Field>
-            <Field
-              label="Shares"
-              hint={
-                liveCost !== null ? (
-                  <span>
-                    ≈ <span className="text-foreground/80">{formatDollars(liveCost)}</span>{" "}
-                    cost
-                  </span>
-                ) : null
-              }
-            >
-              <ValueInput
-                id="limit-shares"
-                value={limitShares}
-                onChange={setLimitShares}
-                disabled={isTradingDisabled}
-              />
-            </Field>
-            {!isBuy ? (
-              <Hint>
-                You hold{" "}
-                <span className="font-medium tabular-nums text-foreground/80">
-                  {heldOfCurrent.toFixed(2)}
-                </span>{" "}
-                {outcome} shares
-              </Hint>
+    <section className="sticky top-20 w-full max-w-[340px] self-start overflow-visible rounded-3xl border border-border bg-card shadow-[0_1px_0_0_hsl(var(--border)),0_24px_55px_-24px_hsl(var(--foreground)/0.18)]">
+      <header className="space-y-1.5 px-4 py-4">
+        <div className="flex items-start gap-2.5">
+          {iconUrl ? (
+            <img src={iconUrl} alt="" className="size-12 rounded-xl object-cover" />
+          ) : (
+            <div className="size-12 rounded-xl bg-muted" />
+          )}
+          <div className="min-w-0">
+            <h2 className="truncate text-[13px] font-medium leading-[1.2] text-muted-foreground">
+              {question}
+            </h2>
+            <p className={cn("mt-1 text-[14px] font-semibold leading-none", selectedOutcomeTone)}>
+              {outcome}
+            </p>
+            {/* How long there is left to trade. The restyle dropped this call
+                while keeping the function and the prop, so the ticket stopped
+                saying when its market closes — restored here rather than
+                deleting the two, because a trader deciding on a price needs to
+                know whether the thing settles tonight or in March. */}
+            {endsLabel ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">{endsLabel}</p>
             ) : null}
           </div>
+        </div>
+      </header>
+
+      <div className="flex items-center justify-between border-y border-border px-4 py-2.5">
+        <SegmentedSide side={side} onSelect={selectSide} />
+        <button
+          type="button"
+          onClick={() => {
+            // Leaving Limit hides the expiry row, so drop the open flag with
+            // it — otherwise the menu springs back the moment the user
+            // returns to Limit.
+            setExpiresOpen(false);
+            setMode((prev) => (prev === "Limit" ? "Market" : "Limit"));
+          }}
+          className="inline-flex items-center gap-1 text-[13px] font-medium text-foreground"
+        >
+          {mode}
+          <ChevronDown aria-hidden className="size-4 text-muted-foreground" />
+        </button>
+      </div>
+
+      <div className="space-y-0">
+        <div className="px-4 py-4">
+          <OutcomePicker
+            tokens={tokens}
+            selected={outcome}
+            side={side}
+            onSelect={(label) => onOutcomeChange?.(label)}
+          />
+        </div>
+
+        {mode === "Limit" ? (
+          <>
+            <div className="flex items-center justify-between border-t border-border px-4 py-4">
+              <span className="text-[14px] font-medium text-foreground">Limit price</span>
+              <CentsStepper
+                cents={limitCents}
+                onChange={setLimitCents}
+                onStep={adjustLimitCents}
+                disabled={isTradingDisabled}
+              />
+            </div>
+
+            <div className="space-y-3 border-t border-border px-4 py-4">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[14px] font-medium text-foreground">Shares</span>
+                <SharesInput
+                  id="limit-shares"
+                  value={limitShares}
+                  onChange={setLimitShares}
+                  disabled={isTradingDisabled}
+                />
+              </div>
+              <QuickShareChips onPick={adjustShares} />
+            </div>
+          </>
         ) : isBuy ? (
-          <div className="space-y-2">
+          <div className="space-y-3 border-t border-border px-4 py-4">
+            {/* apUSD, not USDC: this branch predates the rename, and taking
+                its side of the conflict would put the old ticker back in front
+                of users. The layout classes are this branch's, the currency
+                name is main's. */}
             <Field label="Amount" hint="apUSD">
               <ValueInput
                 id="market-amount"
@@ -386,25 +439,17 @@ export function OrderTicket({
             </Hint>
           </div>
         ) : (
-          <div className="space-y-2">
-            <Field
-              label="Shares to sell"
-              hint={
-                liveCost !== null ? (
-                  <span>
-                    ≈ <span className="text-foreground/80">{formatDollars(liveCost)}</span>{" "}
-                    received
-                  </span>
-                ) : null
-              }
-            >
-              <ValueInput
+          <div className="space-y-3 border-t border-border px-4 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[14px] font-medium text-foreground">Shares</span>
+              <SharesInput
                 id="market-shares"
                 value={limitShares}
                 onChange={setLimitShares}
                 disabled={isTradingDisabled}
               />
-            </Field>
+            </div>
+            <QuickShareChips onPick={adjustShares} />
             <Hint>
               You hold{" "}
               <span className="font-medium tabular-nums text-foreground/80">
@@ -417,32 +462,96 @@ export function OrderTicket({
           </div>
         )}
 
-        {preview && isBuy ? (
-          <PayoutSummary
-            pay={preview.cost}
-            shares={preview.shares}
-            outcome={outcome}
-          />
-        ) : null}
+        <div className="relative space-y-2 border-t border-border px-4 py-4">
+          {/* Limit only. A market order takes whatever the book offers the
+              instant it is sent, so it has no resting life for an expiry to
+              cut short; offering the choice there would promise a control
+              that cannot do anything. */}
+          {mode === "Limit" ? (
+            <>
+          <div className="flex items-center justify-between text-[13px] text-muted-foreground">
+            <span>Expires</span>
+            <button
+              type="button"
+              onClick={() => setExpiresOpen((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-muted"
+              aria-expanded={expiresOpen}
+              aria-haspopup="menu"
+            >
+              {expiresLabel}
+              <ChevronDown
+                aria-hidden
+                className={cn("size-4 transition-transform", expiresOpen ? "rotate-180" : "")}
+              />
+            </button>
+          </div>
+          {expiresOpen ? (
+            <div
+              role="menu"
+              className="absolute right-4 top-11 z-30 w-44 rounded-2xl border border-border bg-card p-2 shadow-lg"
+            >
+              {EXPIRY_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="menuitem"
+                  disabled={isExpiryDisabled(option, Date.now())}
+                  onClick={() => {
+                    setExpiresLabel(option);
+                    setExpiresOpen(false);
+                  }}
+                  className={cn(
+                    "w-full rounded-xl px-3 py-2 text-left text-[14px] hover:bg-muted",
+                    "disabled:opacity-40 disabled:cursor-not-allowed",
+                    option === expiresLabel ? "font-semibold text-foreground" : "text-foreground",
+                  )}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          ) : null}
+            </>
+          ) : null}
+          {isBuy ? (
+            <div className="flex items-center justify-between text-[14px]">
+              <span className="text-foreground">Total</span>
+              <span className="font-medium tabular-nums text-primary">{formatDollars(total)}</span>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between text-[14px]">
+            <span className="text-foreground">{isBuy ? "To win" : "You'll receive"}</span>
+            <span
+              className={cn(
+                // Green either way: this row is what the position returns if
+                // it comes good, and that is a gain on both sides. Was a
+                // ternary with two identical branches.
+                "font-medium tabular-nums text-emerald-600 dark:text-emerald-400",
+              )}
+            >
+              {formatDollars(toWin)}
+            </span>
+          </div>
 
-        {preview?.capWarning ? (
-          <p className="text-[11px] text-amber-700 dark:text-amber-400">
-            {preview.capWarning}
-          </p>
-        ) : null}
+          {preview?.capWarning ? (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              {preview.capWarning}
+            </p>
+          ) : null}
 
-        <Button
-          type="button"
-          disabled={!canSubmit}
-          className={cn(
-            "h-11 w-full rounded-lg text-sm font-medium text-white transition-all",
-            !isTradingDisabled && ctaTone,
-            !canSubmit && "opacity-60",
-          )}
-          onClick={onSubmit}
-        >
-          {ctaLabel}
-        </Button>
+          <Button
+            type="button"
+            disabled={!canSubmit}
+            className={cn(
+              "mt-2 h-10 w-full rounded-xl text-[15px] font-semibold transition-all",
+              !isTradingDisabled && ctaTone,
+              !canSubmit && "opacity-60",
+            )}
+            onClick={onSubmit}
+          >
+            {ctaLabel}
+          </Button>
+        </div>
       </div>
     </section>
   );
@@ -474,7 +583,7 @@ function OutcomePicker({
     <div
       role="tablist"
       aria-label="Outcomes"
-      className="grid gap-2"
+      className="grid gap-2.5"
       style={{
         gridTemplateColumns: `repeat(${tokens.length}, minmax(0, 1fr))`,
       }}
@@ -500,25 +609,17 @@ function OutcomePicker({
             aria-selected={isActive}
             onClick={() => onSelect(label)}
             className={cn(
-              "flex flex-col items-start gap-1 rounded-lg border px-3 py-2.5 text-left transition-all",
+              "flex items-center justify-center rounded-xl border px-2.5 py-2.5 text-center transition-all",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               isActive
                 ? tone === "emerald"
-                  ? "border-[1.5px] border-emerald-600 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
-                  : "border-[1.5px] border-rose-600 bg-rose-500/10 text-rose-800 dark:text-rose-200"
-                : "border-border/80 text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+                  ? "border-emerald-500/70 bg-emerald-500/25 text-emerald-700 dark:text-emerald-200"
+                  : "border-rose-500/70 bg-rose-500/25 text-rose-700 dark:text-rose-200"
+                : "border-border bg-muted text-muted-foreground hover:border-foreground/30 hover:text-foreground",
             )}
           >
-            <span className="text-[11px] font-medium uppercase tracking-[0.08em]">
-              {label.toUpperCase()}
-            </span>
-            <span className="flex items-baseline">
-              <span className="text-[22px] font-medium leading-none tabular-nums">
-                {cents !== null ? cents.toFixed(1) : "—"}
-              </span>
-              <span className="ml-0.5 text-[14px] leading-none opacity-70">
-                ¢
-              </span>
+            <span className="text-[15px] font-semibold leading-none">
+              {label} {cents !== null ? Math.round(cents) : "—"}¢
             </span>
           </button>
         );
@@ -537,7 +638,7 @@ function SegmentedSide({
   onSelect: (next: OrderSide) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-0.5 rounded-lg bg-muted/60 p-[3px]">
+    <div className="flex items-end gap-4">
       {(["BUY", "SELL"] as const).map((s) => {
         const active = side === s;
         return (
@@ -546,50 +647,17 @@ function SegmentedSide({
             type="button"
             onClick={() => onSelect(s)}
             className={cn(
-              "rounded-md py-1.5 text-[13px] font-medium transition-all",
+              "relative pb-1.5 text-[16px] font-semibold leading-none transition-all",
               active
-                ? "bg-background text-foreground shadow-[0_0_0_0.5px_hsl(var(--border)),0_1px_2px_rgba(0,0,0,0.04)]"
+                ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
             {s === "BUY" ? "Buy" : "Sell"}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ---------- Limit / Market (fixed underline) ---------- */
-
-function SegmentedMode({
-  mode,
-  onSelect,
-}: {
-  mode: "Limit" | "Market";
-  onSelect: (next: "Limit" | "Market") => void;
-}) {
-  return (
-    <div className="flex items-center gap-4 border-b border-border/60">
-      {(["Market", "Limit"] as const).map((m) => {
-        const active = mode === m;
-        return (
-          <button
-            key={m}
-            type="button"
-            onClick={() => onSelect(m)}
-            className={cn(
-              "relative inline-block pb-2 pt-1 text-[13px] transition-colors",
-              active
-                ? "font-medium text-foreground"
-                : "font-normal text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {m}
             <span
               aria-hidden
               className={cn(
-                "absolute -bottom-[0.5px] left-0 right-0 h-[1.5px] transition-colors",
+                "absolute -bottom-0.5 left-0 right-0 h-[2px] rounded-full",
                 active ? "bg-foreground" : "bg-transparent",
               )}
             />
@@ -612,7 +680,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border/80 bg-background px-3 py-2.5 transition-colors focus-within:border-foreground/45">
+    <div className="rounded-xl border border-border bg-background px-3 py-2.5 transition-colors focus-within:border-foreground/45">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[12px] text-muted-foreground">{label}</span>
         {hint ? (
@@ -620,6 +688,97 @@ function Field({
         ) : null}
       </div>
       {children}
+    </div>
+  );
+}
+
+function CentsStepper({
+  cents,
+  onChange,
+  onStep,
+  disabled,
+}: {
+  cents: string;
+  onChange: (next: string) => void;
+  onStep: (delta: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border px-3 py-2">
+      <button
+        type="button"
+        onClick={() => onStep(-1)}
+        disabled={disabled}
+        className="text-[16px] text-foreground disabled:opacity-50"
+      >
+        -
+      </button>
+      <span className="inline-flex items-center gap-0.5">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={cents}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          size={Math.max(1, cents.length || 1)}
+          className={`bg-transparent text-center text-[14px] font-semibold tabular-nums outline-none ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}
+        />
+        <span className={`text-[14px] font-semibold ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}>¢</span>
+      </span>
+      <button
+        type="button"
+        onClick={() => onStep(1)}
+        disabled={disabled}
+        className="text-[16px] text-foreground disabled:opacity-50"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function SharesInput({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <input
+      id={id}
+      type="text"
+      inputMode="decimal"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      placeholder="0"
+      className={`h-10 w-[148px] rounded-xl border border-border bg-background px-4 text-right text-[14px] font-semibold tabular-nums outline-none placeholder:text-muted-foreground/50 disabled:opacity-60 ${value && value !== "0" ? "text-foreground" : "text-muted-foreground"}`}
+    />
+  );
+}
+
+function QuickShareChips({ onPick }: { onPick: (delta: number) => void }) {
+  const chips = [-100, -10, 10, 20, 100];
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {chips.map((chip) => (
+        <button
+          key={chip}
+          type="button"
+          onClick={() => onPick(chip)}
+          className={cn(
+            "rounded-xl border border-border px-2.5 py-1 text-[12px] font-semibold text-muted-foreground transition-colors hover:bg-muted",
+            chip > 0 && "text-primary",
+          )}
+        >
+          {chip > 0 ? `+${chip}` : chip}
+        </button>
+      ))}
     </div>
   );
 }
@@ -640,7 +799,7 @@ function ValueInput({
   suffix?: string;
 }) {
   return (
-    <div className="flex items-baseline gap-1.5">
+    <div className="flex items-baseline gap-1">
       <input
         id={id}
         type="text"
@@ -649,56 +808,12 @@ function ValueInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="min-w-0 flex-1 bg-transparent text-[22px] font-medium tabular-nums text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
+        className="min-w-0 flex-1 bg-transparent text-[28px] font-semibold tabular-nums text-foreground outline-none placeholder:text-muted-foreground/60 disabled:opacity-60"
         placeholder="0"
       />
       {suffix ? (
-        <span className="text-[13px] text-muted-foreground">{suffix}</span>
+        <span className="text-[12px] text-muted-foreground">{suffix}</span>
       ) : null}
-    </div>
-  );
-}
-
-/* ---------- Payout summary ---------- */
-
-function PayoutSummary({
-  pay,
-  shares,
-  outcome,
-}: {
-  pay: number;
-  shares: number;
-  outcome: string;
-}) {
-  // Each winning share pays $1.00; profit is the difference.
-  const payout = shares * 1;
-  const profit = payout - pay;
-  const profitPct = pay > 0 ? (profit / pay) * 100 : 0;
-
-  return (
-    <div className="space-y-2 rounded-lg bg-emerald-500/8 px-3.5 py-3 text-[12px] dark:bg-emerald-500/10">
-      <div className="flex items-baseline justify-between text-emerald-900 dark:text-emerald-200">
-        <span>You pay</span>
-        <span className="tabular-nums">{formatDollars(pay)}</span>
-      </div>
-      <div className="flex items-baseline justify-between text-emerald-900 dark:text-emerald-200">
-        <span>
-          If {outcome.toUpperCase()} wins, you get
-        </span>
-        <span className="tabular-nums">{formatDollars(payout)}</span>
-      </div>
-      <div className="-mx-3.5 border-t border-emerald-700/15 dark:border-emerald-300/15" />
-      <div className="flex items-baseline justify-between font-medium text-emerald-900 dark:text-emerald-100">
-        <span>Potential profit</span>
-        <span className="tabular-nums">
-          {profit >= 0 ? "+" : "−"}
-          {formatDollars(Math.abs(profit))}{" "}
-          <span className="font-normal text-emerald-700 dark:text-emerald-300">
-            ({profit >= 0 ? "+" : "−"}
-            {Math.abs(profitPct).toFixed(0)}%)
-          </span>
-        </span>
-      </div>
     </div>
   );
 }
@@ -709,9 +824,3 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="px-1 text-[11px] text-muted-foreground">{children}</p>;
 }
 
-/* ---------- Helpers ---------- */
-
-function formatNumber(n: number): string {
-  if (Number.isInteger(n)) return String(n);
-  return n.toFixed(2);
-}

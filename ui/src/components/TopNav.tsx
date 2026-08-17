@@ -10,9 +10,17 @@ import { TrendingUp, LogOut, Moon, Settings, Sun, User, Bot } from "lucide-react
 
 export function TopNav() {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const showSearch = pathname === "/markets" || pathname.startsWith("/events/");
+  // The search moved into the markets page, so the header no longer carries
+  // one. `SearchBar` below is kept rather than deleted, but be clear about
+  // what that means: with this flag false it never renders, so it is dormant
+  // code, not a live fallback. It is retained because turning the header
+  // search back on is one word, and because the markets page's own search
+  // reuses the same query context it reads.
+  //
+  // One page lost its search outright: the event detail page had the header
+  // one and has no in-page replacement. That is a real gap, not a decision.
+  const showSearch = false;
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)
     : undefined;

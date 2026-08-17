@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -136,6 +137,35 @@ def _row_to_market(row) -> Market:
 
 
 class TableRead:
+    #: Polymarket's grace: a GTD order dies one minute BEFORE its stated
+    #: expiration. Their clients compensate by sending `now + 60 + N` for a
+    #: lifetime of N, so subtracting it here is what makes "1 hour" an hour.
+    #:
+    #: Documented, not folklore: Polymarket docs, page `trading/place-orders.mdx`,
+    #: "GTD orders expire one minute before their stated expiration as a
+    #: security threshold. To set an effective lifetime of N seconds, use
+    #: `now + 60 + N`. In addition, the expiration must be at least 3 minutes
+    #: in the future — orders expiring sooner are rejected."
+    EXPIRY_GRACE_SECONDS = 60
+
+    #: What every read means by a live order. Takes ONE parameter, `now` in
+    #: unix seconds, and must be appended at the END of a WHERE clause: these
+    #: queries pass positional tuples, so a placeholder inserted mid-clause
+    #: silently shifts every parameter after it.
+    #:
+    #: An expiration of 0 means never — Polymarket's own convention, and the
+    #: default on `PlaceOrderRequest`. A NULL expiration reads the same way:
+    #: EXPIRATION is a nullable BIGINT with no DEFAULT, so any direct write
+    #: that omits it (a test fixture, a future migration) leaves it NULL
+    #: rather than 0, and `NULL = 0` / `NULL > x` both evaluate to NULL, which
+    #: WHERE treats as false. Without the explicit IS NULL arm such a row
+    #: would silently fail every liveness check AND every cancel — an
+    #: unkillable ghost order, worse than one that simply never expires.
+    LIVE_ORDER = (
+        "STATUS = 'live' AND (EXPIRATION IS NULL OR EXPIRATION = 0 "
+        f"OR EXPIRATION > %s + {EXPIRY_GRACE_SECONDS})"
+    )
+
     #: One price print per (match, token): "this token traded at this price".
     #:
     #: The taker branch covers every non-failed row; the maker branch fires
@@ -1237,9 +1267,9 @@ class TableRead:
             "SELECT TOKEN_ID, "
             "MAX(PRICE) FILTER (WHERE SIDE = 'BUY')  AS BEST_BID, "
             "MIN(PRICE) FILTER (WHERE SIDE = 'SELL') AS BEST_ASK "
-            "FROM orders WHERE STATUS = 'live' AND TOKEN_ID = ANY(%s) "
+            f"FROM orders WHERE TOKEN_ID = ANY(%s) AND {TableRead.LIVE_ORDER} "
             "GROUP BY TOKEN_ID",
-            (list(token_ids),),
+            (list(token_ids), int(time.time())),
         ).fetchall()
         out: "dict[str, tuple[int | None, int | None]]" = {}
         for r in rows:
@@ -1370,8 +1400,8 @@ class TableRead:
         placeholders = ",".join("%s" for _ in token_ids)
         return db.execute(
             "SELECT ORDER_ID, TOKEN_ID, SIDE, PRICE, REMAINING_AMOUNT FROM orders "
-            f"WHERE API_KEY = %s AND STATUS = 'live' AND TOKEN_ID IN ({placeholders})",
-            [api_key, *token_ids],
+            f"WHERE API_KEY = %s AND TOKEN_ID IN ({placeholders}) AND {TableRead.LIVE_ORDER}",
+            [api_key, *token_ids, int(time.time())],
         ).fetchall()
 
     @staticmethod
@@ -1383,9 +1413,9 @@ class TableRead:
         user's order (an intentional fill — spec §7)."""
         rows = db.execute(
             "SELECT SIDE, MAX(PRICE) AS MX, MIN(PRICE) AS MN FROM orders "
-            "WHERE TOKEN_ID = %s AND STATUS = 'live' AND API_KEY != %s "
+            f"WHERE TOKEN_ID = %s AND API_KEY != %s AND {TableRead.LIVE_ORDER} "
             "GROUP BY SIDE",
-            (token_id, own_api_key),
+            (token_id, own_api_key, int(time.time())),
         ).fetchall()
         bid = ask = None
         for r in rows:

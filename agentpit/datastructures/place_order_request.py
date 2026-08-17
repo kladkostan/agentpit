@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Minimum price increment: 0.1¢ = $0.001. Prices snap to this grid so the book
 # can't accumulate sub-tick precision — the minimum meaningful step is 0.1¢.
@@ -20,7 +20,11 @@ class PlaceOrderRequest(BaseModel):
     price: Decimal = Field(gt=0, lt=1)  # probability, 0 < p < 1
     size: Decimal = Field(gt=0)  # whole shares (× 10⁶ base units internally)
     order_type: Literal["GTC", "FOK", "FAK", "GTD"] = "GTC"
-    expiration: int = 0  # unix seconds, required if GTD
+    # unix seconds, required if GTD. `ge=0` catches a negative expiration at
+    # the boundary: place_order's `_EXPIRY_MIN_LEAD_SECONDS` floor also
+    # rejects it, but the batch path (place_resting_orders /
+    # replace_resting_orders) has no floor, so this is the only guard there.
+    expiration: int = Field(default=0, ge=0)
     client_order_id: str | None = None  # optional per-user idempotency key
 
     @field_validator("price")
@@ -41,3 +45,19 @@ class PlaceOrderRequest(BaseModel):
         if v < Decimal("0.000001"):
             raise ValueError("size must be at least 0.000001 shares (one base unit)")
         return v
+
+    @model_validator(mode="after")
+    def _expiration_agrees_with_type(self) -> "PlaceOrderRequest":
+        """`expiration` is only meaningful for GTD, and GTD requires one.
+
+        Both directions are rejections rather than corrections. A GTD with no
+        expiration is a caller who forgot a field, and reading it as "never"
+        gives them the opposite of what they asked for; an expiration on a
+        GTC is a caller who thinks they set a lifetime, and dropping it
+        quietly means they find out when the order outlives them.
+        """
+        if self.order_type == "GTD" and self.expiration == 0:
+            raise ValueError("a GTD order requires a non-zero expiration")
+        if self.order_type != "GTD" and self.expiration != 0:
+            raise ValueError("expiration is only valid on a GTD order")
+        return self

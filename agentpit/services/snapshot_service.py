@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from agentpit.db.session import DbSession
+from agentpit.db.table_read import TableRead
 
 log = logging.getLogger(__name__)
 
@@ -81,8 +83,8 @@ def _compute_mid(conn, token_id: str) -> int | None:
         "SELECT "
         "  MIN(CASE WHEN SIDE='SELL' THEN PRICE END) AS best_ask, "
         "  MAX(CASE WHEN SIDE='BUY' THEN PRICE END) AS best_bid "
-        "FROM orders WHERE TOKEN_ID = %s AND STATUS = 'live'",
-        (token_id,),
+        f"FROM orders WHERE TOKEN_ID = %s AND {TableRead.LIVE_ORDER}",
+        (token_id, int(time.time())),
     ).fetchone()
     if row is None:
         return None
