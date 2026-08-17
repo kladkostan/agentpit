@@ -24,6 +24,7 @@ import {
 import type { Erc1155Token } from "@/types/market";
 import type { OrderBookSummary, OrderSide } from "@/types/order";
 import { ApiError } from "@/api/client";
+import { EXPIRY_OPTIONS, expiryForLabel, isExpiryDisabled } from "@/lib/orderExpiry";
 
 type Mode = "Limit" | "Market";
 
@@ -93,7 +94,6 @@ export function OrderTicket({
   const [marketAmount, setMarketAmount] = useState<string>("");
   const [expiresOpen, setExpiresOpen] = useState(false);
   const [expiresLabel, setExpiresLabel] = useState("Never");
-  const expiresOptions = ["Never", "5m", "1h", "12h", "24h", "End of day", "Custom"];
 
   const requireAuth = useRequireAuth();
   const queryClient = useQueryClient();
@@ -144,12 +144,14 @@ export function OrderTicket({
     mutationFn: async () => {
       const price = limitPriceUsd;
       const shares = parseDecimal(limitShares);
+      const { order_type, expiration } = expiryForLabel(expiresLabel, Date.now());
       return placeOrder({
         token_id: tokenId,
         side,
         price,
         size: shares,
-        order_type: "GTC",
+        order_type,
+        expiration,
       });
     },
     onSuccess: (res) => {
@@ -478,17 +480,19 @@ export function OrderTicket({
               role="menu"
               className="absolute right-4 top-11 z-30 w-44 rounded-2xl border border-border bg-card p-2 shadow-lg"
             >
-              {expiresOptions.map((option) => (
+              {EXPIRY_OPTIONS.map((option) => (
                 <button
                   key={option}
                   type="button"
                   role="menuitem"
+                  disabled={isExpiryDisabled(option, Date.now())}
                   onClick={() => {
                     setExpiresLabel(option);
                     setExpiresOpen(false);
                   }}
                   className={cn(
                     "w-full rounded-xl px-3 py-2 text-left text-[14px] hover:bg-muted",
+                    "disabled:opacity-40 disabled:cursor-not-allowed",
                     option === expiresLabel ? "font-semibold text-foreground" : "text-foreground",
                   )}
                 >
