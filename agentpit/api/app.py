@@ -309,6 +309,7 @@ async def _pin_resolve_loop(
 def _run_order_cleanup(db: DbSession, settings: Settings) -> int:
     now = int(time.time())
     with db.write() as conn:
+        TableWrite.expire_due_orders(conn, now)
         purged = TableWrite.purge_cancelled_orders(
             conn, now - settings.order_cancelled_retention_seconds
         )

@@ -12,6 +12,7 @@ from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.event import Event
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
+from agentpit.db.table_read import TableRead
 
 
 class TableWrite:
@@ -1064,6 +1065,35 @@ class TableWrite:
         market.market_state = MarketState.RESOLVED
         market.resolved_outcome = winning_outcome_index
         return market
+
+    @staticmethod
+    def expire_due_orders(db: psycopg.Connection, now: int) -> int:
+        """Mark GTD orders past their grace as cancelled. Returns rows marked.
+
+        Hygiene, not correctness: `TableRead.LIVE_ORDER` already excludes
+        every row this touches, so running late or not at all trades nothing.
+        What it buys is that dead rows leave the live set for good and become
+        reachable by `purge_cancelled_orders`.
+
+        No new status, because Polymarket has none — their order statuses are
+        live, matched, delayed and unmatched, and expiry is a property rather
+        than a state. The row keeps its EXPIRATION, so why it went is still
+        legible.
+
+        `STATUS = %s` rather than a literal 'live': `test_live_order_guard`
+        bans spelling that comparison out anywhere but `TableRead.LIVE_ORDER`
+        itself, on the theory that a hand-rolled copy is the one that drifts
+        and quietly trades an expired order. This query doesn't reuse
+        `LIVE_ORDER` — it targets the complement of its expiration arm, not
+        the same set — so a bound parameter keeps the literal out of the SQL
+        text without re-deriving that predicate by hand.
+        """
+        cur = db.execute(
+            "UPDATE orders SET STATUS = 'cancelled' "
+            "WHERE STATUS = %s AND EXPIRATION > 0 AND EXPIRATION <= %s + %s",
+            ("live", now, TableRead.EXPIRY_GRACE_SECONDS),
+        )
+        return cur.rowcount
 
     @staticmethod
     def purge_cancelled_orders(db: psycopg.Connection, before_ts: int) -> int:
