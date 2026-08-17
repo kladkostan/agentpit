@@ -10,8 +10,10 @@ import { TrendingUp, LogOut, Moon, Settings, Sun, User, Bot } from "lucide-react
 
 export function TopNav() {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
   const { user, logout } = useAuth();
+  // The search moved into the markets page. `SearchBar` below is kept rather
+  // than deleted — it still owns the query context and the route hop — and
+  // this flag is what takes it out of the header.
   const showSearch = false;
   const avatarStyle = user
     ? getAvatarStyle(user.eth_address || user.email)

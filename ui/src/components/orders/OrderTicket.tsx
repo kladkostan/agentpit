@@ -277,6 +277,7 @@ export function OrderTicket({
   });
 
   const isBuy = side === "BUY";
+  const endsLabel = endsInLabel(endDate);
   const selectedOutcomeIndex = tokens.findIndex(([, label]) => label === outcome);
   const selectedOutcomeTone =
     selectedOutcomeIndex === 0
@@ -336,6 +337,14 @@ export function OrderTicket({
             <p className={cn("mt-1 text-[14px] font-semibold leading-none", selectedOutcomeTone)}>
               {outcome}
             </p>
+            {/* How long there is left to trade. The restyle dropped this call
+                while keeping the function and the prop, so the ticket stopped
+                saying when its market closes — restored here rather than
+                deleting the two, because a trader deciding on a price needs to
+                know whether the thing settles tonight or in March. */}
+            {endsLabel ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">{endsLabel}</p>
+            ) : null}
           </div>
         </div>
       </header>
@@ -344,7 +353,13 @@ export function OrderTicket({
         <SegmentedSide side={side} onSelect={selectSide} />
         <button
           type="button"
-          onClick={() => setMode((prev) => (prev === "Limit" ? "Market" : "Limit"))}
+          onClick={() => {
+            // Leaving Limit hides the expiry row, so drop the open flag with
+            // it — otherwise the menu springs back the moment the user
+            // returns to Limit.
+            setExpiresOpen(false);
+            setMode((prev) => (prev === "Limit" ? "Market" : "Limit"));
+          }}
           className="inline-flex items-center gap-1 text-[13px] font-medium text-foreground"
         >
           {mode}
@@ -436,6 +451,12 @@ export function OrderTicket({
         )}
 
         <div className="relative space-y-2 border-t border-border px-4 py-4">
+          {/* Limit only. A market order takes whatever the book offers the
+              instant it is sent, so it has no resting life for an expiry to
+              cut short; offering the choice there would promise a control
+              that cannot do anything. */}
+          {mode === "Limit" ? (
+            <>
           <div className="flex items-center justify-between text-[13px] text-muted-foreground">
             <span>Expires</span>
             <button
@@ -475,6 +496,8 @@ export function OrderTicket({
                 </button>
               ))}
             </div>
+          ) : null}
+            </>
           ) : null}
           {isBuy ? (
             <div className="flex items-center justify-between text-[14px]">
