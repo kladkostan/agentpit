@@ -163,3 +163,20 @@ ui/public/leaderboard.json
 # Bot credential dumps. A creds.json with 31 bot accounts was committed once
 # (PR #3) and had to be kept out of main by squash-merging; never again.
 agentpit_bots/
+
+# Operational and planning documents. This repository is PUBLIC
+# (skalenetwork/agentpit), and these carry the things a public repo should not:
+# a running inventory of unclosed weaknesses, the deploy runbook, the rollback
+# procedure, the production host, and every design tradeoff argued out in full.
+# Written for whoever picks the work up next — which is not a stranger.
+# They stay on disk and belong in a PRIVATE repository; local-only means one
+# dead laptop from losing the lot.
+docs/HANDOFF.md
+docs/ROLLBACK.md
+docs/superpowers/
+
+# Chain deployment addresses are per-environment and written by
+# scripts/deploy_exchange.sh — never committed. A symlink to another
+# machine's copy got committed once and took the prod API down: docker
+# could not bind-mount it.
+deployments/

@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -31,6 +34,58 @@ class Settings(BaseSettings):
     )
     sync_liquidity_min: float = Field(
         default=0.0, validation_alias="SYNC_LIQUIDITY_MIN"
+    )
+    # When a market qualifies, its sibling outcomes come with it, capped at
+    # this many per event (busiest first by 24h volume). The median upstream
+    # event has 11 open outcomes, so 12 lets most through whole; the largest
+    # carry 128 and nobody trades their tail. Measured cost at 12: 2302
+    # markets per pass against 1000 without it. 0 disables the expansion.
+    sync_event_max_outcomes: int = Field(
+        default=12, validation_alias="SYNC_EVENT_MAX_OUTCOMES"
+    )
+    # Drop the two upstream series that regenerate faster than anyone reads
+    # them: the daily temperature markets (49 cities x ~3.4 thresholds = ~166
+    # born every day, median life 55.9h -- 11% of the standing catalogue but 23%
+    # of every market ever created and resolved) and the sports prop tail
+    # (spreads, totals, team totals, per-half, per-map, nrfi -- all hung off a
+    # game we already carry). Together they are 89% of new market creations, and
+    # each creation costs prepareCondition + registerToken + a first
+    # splitPosition on chain with a reportPayouts at the end: ~870M gas/day,
+    # real money once the chain moves to SKALE on Base. Decided by upstream
+    # fields only (feeType / sportsMarketType), never by parsing slugs --
+    # see `_is_churn_series`. True is the decision already made; the flag exists
+    # so it can be reversed without a code change.
+    sync_exclude_churn_series: bool = Field(
+        default=True, validation_alias="AGENTPIT_SYNC_EXCLUDE_CHURN_SERIES"
+    )
+    # Categories the product does not carry at all. Unlike the churn filter
+    # above -- which drops the prop tail and keeps the headline game -- this
+    # drops the whole category: no sync, no listing, no mirrored liquidity.
+    #
+    # Sports is here because the UI has no rendering for it: a match resolves
+    # in hours and its book empties the moment it does, so the grid fills with
+    # rows that read as broken (see the "<1% chance" beside a 71% chart that
+    # started this). Esports needs no entry of its own -- `resolve_category`
+    # files it under Sports, which is 68.6% of the standing catalogue (1097 of
+    # 1600 events measured on production 2026-08-12), so this is the single
+    # biggest lever on gas and anvil growth as well.
+    #
+    # Matched case-insensitively against the labels in CATEGORY_PRIORITY.
+    # Empty list = carry everything, which is the pre-2026-08-12 behaviour.
+    excluded_categories: list[str] = Field(
+        default=["Sports"], validation_alias="AGENTPIT_EXCLUDED_CATEGORIES"
+    )
+    # The same decision, reached through the tag graph instead of the CATEGORY
+    # column. Upstream does not file everything sporting under Sports: three
+    # esports events (two season-winner futures and a game-release question)
+    # sat in the catalogue carrying the `esports` tag with a Technology or
+    # Culture category, so a category-only rule left an Esports sidebar entry
+    # that still listed them.
+    #
+    # Matched against `market_tags.SLUG`, which is Polymarket's own slug — an
+    # event is excluded when ANY of its markets carries one of these.
+    excluded_tags: list[str] = Field(
+        default=["sports", "esports"], validation_alias="AGENTPIT_EXCLUDED_TAGS"
     )
     resolution_mirror_enabled: bool | None = Field(
         default=None, validation_alias="RESOLUTION_MIRROR_ENABLED"
@@ -124,6 +179,84 @@ class Settings(BaseSettings):
     leaderboard_enabled: bool = Field(
         default=False, validation_alias="AGENTPIT_LEADERBOARD_ENABLED"
     )
+    # Google sign-in's audience check. Empty means the feature is off: no
+    # verifier is built and POST /auth/google answers 503. A client id is public
+    # by design — it appears in the page of every site that uses Google sign-in
+    # — and this flow has no client secret at all.
+    google_client_id: str = Field(default="", validation_alias="GOOGLE_CLIENT_ID")
+
+    @field_validator("google_client_id", mode="after")
+    @classmethod
+    def _strip_google_client_id(cls, value: str) -> str:
+        # Docker Compose's env_file parser does not reliably strip trailing
+        # whitespace. A value that is blank-but-present would otherwise build a
+        # verifier whose audience matches nothing -- 401ing every sign-in while
+        # looking configured -- instead of the intended "off".
+        return value.strip()
+
+    # WorkOS AuthKit. An absent api key means the feature is simply not
+    # present, the same shape as GOOGLE_CLIENT_ID above -- nothing raises at
+    # startup and every AuthKit path answers as unconfigured.
+    #
+    # `workos_client_id` is load-bearing beyond identifying the application:
+    # both the token issuer and the JWKS URL are DERIVED from it (see
+    # auth/authkit_tokens.py), so it is the one value that must be right.
+    #
+    # `workos_authkit_domain` is the hosted sign-in surface. It is NOT the
+    # issuer -- a real token says it was issued by
+    # api.workos.com/user_management/<client_id>, verified against staging on
+    # 2026-08-11. It serves a JWKS carrying the same key, but nothing here
+    # verifies through it.
+    workos_api_key: str = Field(default="", validation_alias="WORKOS_API_KEY")
+    workos_client_id: str = Field(default="", validation_alias="WORKOS_CLIENT_ID")
+    workos_authkit_domain: str = Field(
+        default="", validation_alias="WORKOS_AUTHKIT_DOMAIN"
+    )
+
+    @field_validator(
+        "workos_api_key", "workos_client_id", "workos_authkit_domain", mode="after"
+    )
+    @classmethod
+    def _strip_workos(cls, value: str) -> str:
+        # Same measured reason as `_strip_google_client_id` above: Compose's
+        # env_file parser leaves trailing whitespace. Here it is worse than a
+        # bad audience -- a padded domain builds a JWKS URL containing "%20",
+        # so the fetch 404s and EVERY sign-in is rejected as "invalid session"
+        # with no configuration error anywhere to point at the cause.
+        return value.strip()
+
+    @field_validator("workos_authkit_domain", mode="after")
+    @classmethod
+    def _normalize_authkit_domain(cls, value: str) -> str:
+        """Trailing slash off, and a missing scheme complained about loudly.
+
+        Both shapes are what an operator actually pastes. A trailing slash was
+        silently tolerated in one place and not the other -- the JWKS fetch
+        stripped it, so the key resolved and the config looked right, while the
+        `iss` comparison kept the slash and rejected every token.
+
+        This used to raise on a missing scheme. It must not: `Settings()` is
+        constructed by `create_app` before anything serves, so a ValueError
+        here crash-loops the whole api container -- taking `/order` down for
+        every trading bot over a value that authentication does not even read.
+        Nothing outside this module reads `workos_authkit_domain`; the issuer
+        and the JWKS URL are both derived from `workos_client_id` instead (see
+        `authkit_issuer` / `authkit_jwks_url` in auth/authkit_tokens.py). The
+        setting is kept because a future hosted-UI flow would want it, and the
+        trap is kept documented because that flow would hit it.
+        """
+        value = value.rstrip("/")
+        if value and not value.startswith(("http://", "https://")):
+            log.error(
+                "WORKOS_AUTHKIT_DOMAIN=%r has no scheme; it should look like "
+                "https://%s. Nothing reads it today, so sign-in is unaffected, "
+                "but any future use of it would build an untyped URL that "
+                "fails before a socket opens.",
+                value,
+                value,
+            )
+        return value
+
     leaderboard_interval_seconds: int = Field(
         default=300, validation_alias="AGENTPIT_LEADERBOARD_INTERVAL_SECONDS"
     )
@@ -132,6 +265,26 @@ class Settings(BaseSettings):
     )
 
     # Auth
+    # `POST /auth/code` is unauthenticated and, since the cutover, the only
+    # door into the product -- and every request past the limit costs a WorkOS
+    # email. Both are per hour, in a fixed window.
+    #
+    # Per address is the honest-user number: somebody whose mail is slow closes
+    # the dialog and tries again, and the UI does NOT stop them (its cooldown
+    # guards only the resend button, not a fresh submit), so this has to be
+    # generous enough to forgive that.
+    #
+    # Per IP is deliberately higher than per address rather than equal: an
+    # office behind one NAT is several people, while one address is one person.
+    # It exists to catch address ROTATION, which the per-address rule cannot
+    # see at all.
+    auth_code_per_email_hourly: int = Field(
+        default=20, validation_alias="AGENTPIT_AUTH_CODE_PER_EMAIL_HOURLY"
+    )
+    auth_code_per_ip_hourly: int = Field(
+        default=60, validation_alias="AGENTPIT_AUTH_CODE_PER_IP_HOURLY"
+    )
+
     jwt_secret: str = Field(
         default="dev-only-insecure-secret-change-me",
         validation_alias="JWT_SECRET",
@@ -148,8 +301,15 @@ class Settings(BaseSettings):
     )
     operator_private_key: str | None = Field(default=None, validation_alias="PK")
     rpc_url_override: str | None = Field(default=None, validation_alias="RPC_URL")
+    # Gas for the three transactions a new account must send before it can
+    # trade: approve(exchange), approve(ctf), setApprovalForAll(exchange).
+    # Measured at 138,946 gas across all 16 accounts on the production chain.
+    # At SKALE Base's 47.6 gwei that is 0.0066 native; this is 3x that, which
+    # also covers a few later claims at 91,743 gas each. The previous default
+    # was 10**18 — 21,000,000 gas, 150x the need — which cost $0.25 a signup
+    # on a chain where the native coin is bought with USDC.
     signup_gas_grant_wei: int = Field(
-        default=10**18, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
+        default=2 * 10**16, validation_alias="AGENTPIT_SIGNUP_GAS_GRANT_WEI"
     )
     # True while the chain can be wiped out from under the database (a local
     # anvil): a zero native balance then means "the chain forgot this account"

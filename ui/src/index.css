@@ -72,4 +72,16 @@
   .hairline {
     border-color: hsl(var(--border) / 0.7);
   }
+  /* Scrolls, but shows no track. For a panel that is only slightly taller
+     than its box — the categories sidebar — a permanent bar is more visual
+     noise than the overflow it announces. All three declarations are needed:
+     browsers disagree on how to opt out, and the WebKit pseudo-element is the
+     only lever in Chrome and Safari. */
+  .no-scrollbar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* legacy Edge */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari */
+  }
 }

@@ -10,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentpit.api.deps import (
     get_current_user,
     get_db_session,
+    get_google_verifier,
     get_jwt_coder,
     get_onchain_admin,
     get_settings,
+    get_workos_client,
 )
 from agentpit.api.exception_handlers import register_exception_handlers
 from agentpit.api.routes import (
@@ -28,11 +30,15 @@ from agentpit.api.routes import (
     personalities,
     positions,
     system,
+    tags,
     usdc,
     users,
 )
+from agentpit.auth.authkit_tokens import AuthKitVerifier, remote_jwks_resolver
 from agentpit.auth.dependencies import make_current_user_dep
+from agentpit.auth.google import GoogleTokenVerifier
 from agentpit.auth.jwt import JwtCoder
+from agentpit.auth.workos_client import build_workos_client
 from agentpit.config import Settings
 from agentpit.db.session import DbSession
 from agentpit.db.table_write import TableWrite
@@ -87,6 +93,9 @@ def _run_polymarket_sync(db: DbSession, admin: OnchainAdmin, settings: Settings)
             admin,
             max_markets=settings.sync_max_markets,
             liquidity_min=settings.sync_liquidity_min,
+            event_max_outcomes=settings.sync_event_max_outcomes,
+            exclude_churn_series=settings.sync_exclude_churn_series,
+            excluded_categories=settings.excluded_categories,
         )
     return len(created)
 
@@ -274,7 +283,7 @@ def _run_pin_resolve(
     if settings.auto_redeem_enabled:
         with _redeem_lock:
             redeemed = auto_redeem_resolved_markets(db, admin)
-    return resolved, redeemed, scan_after
+    return resolved, redeemed
 
 
 async def _pin_resolve_loop(
@@ -411,7 +420,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     coder = JwtCoder(settings)
     onchain_admin = _build_onchain_admin(settings)
-    current_user_fn = make_current_user_dep(coder)
+    # One verifier per app, for the same reason as the Google one below: the
+    # resolver wraps a PyJWKClient that caches the JWKS, and a per-request
+    # instance would re-fetch it from api.workos.com on every request. Building
+    # it opens no connection -- the fetch is lazy, on the first token seen.
+    authkit_verifier = (
+        AuthKitVerifier(
+            client_id=settings.workos_client_id,
+            key_resolver=remote_jwks_resolver(settings.workos_client_id),
+        )
+        if settings.workos_client_id
+        else None
+    )
+    current_user_fn = make_current_user_dep(authkit_verifier)
+    # One verifier per app: it caches Google's signing keys, and a per-request
+    # instance would re-fetch them on every sign-in.
+    google_verifier = (
+        GoogleTokenVerifier(settings.google_client_id)
+        if settings.google_client_id
+        else None
+    )
+    if google_verifier is None:
+        # Said out loud because the failure is otherwise invisible: with no
+        # client id the button is absent and the endpoint 503s, which looks
+        # exactly like a deploy that forgot the variable. It is one.
+        log.info("Google sign-in disabled (set GOOGLE_CLIENT_ID to enable)")
+    # One client per app, like the verifier above: it owns an httpx.Client with
+    # its own connection pool, and a per-request instance would open a new TLS
+    # connection to api.workos.com for every code mailed.
+    workos_client = build_workos_client(settings)
+    if workos_client is None or authkit_verifier is None:
+        # log.error, not a raise. Since the cutover WorkOS is the ONLY way to
+        # sign in, so this is not the minor gap the Google line above is -- but
+        # raising here would stop the app serving `X-API-Key` traffic too, and
+        # the trading bots authenticate with an api_key that has nothing to do
+        # with WorkOS. Taking their `/order` down to protest a sign-in
+        # misconfiguration would turn a bad deploy into a worse one.
+        #
+        # Compose cannot catch this for us: on the api side these arrive
+        # through `env_file`, which has no `:?` form. The UI half IS gated, in
+        # deploy/docker-compose.prod.yml.
+        log.error(
+            "WorkOS is not configured (WORKOS_API_KEY / WORKOS_CLIENT_ID): "
+            "NOBODY CAN SIGN IN -- /auth/code and /auth/session 503, AuthKit "
+            "sessions are rejected, and private-key export is disabled. "
+            "X-API-Key traffic is unaffected."
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -607,6 +661,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_jwt_coder] = lambda: coder
     app.dependency_overrides[get_onchain_admin] = lambda: onchain_admin
+    app.dependency_overrides[get_google_verifier] = lambda: google_verifier
+    app.dependency_overrides[get_workos_client] = lambda: workos_client
     app.dependency_overrides[get_current_user] = current_user_fn
 
     app.add_middleware(
@@ -624,6 +680,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(users.router)
     app.include_router(markets.router)
     app.include_router(events.router)
+    app.include_router(tags.router)
     app.include_router(leaderboard.router)
     app.include_router(orders.router)
     app.include_router(market_data.router)

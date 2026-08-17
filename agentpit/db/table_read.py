@@ -1,5 +1,6 @@
 import json
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 import psycopg
 from eth_account import Account
@@ -8,9 +9,11 @@ from web3 import Web3
 
 from agentpit.utils.parse import parse_32b_hex_private_key
 from agentpit.datastructures.event import Event
+from agentpit.datastructures.event_sort import EventSort
 from agentpit.datastructures.market import Market
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.user import User
+from agentpit.liquidity.tape import MIRROR_API_KEY
 from ..datastructures.condition_id import ConditionId
 
 
@@ -19,6 +22,80 @@ class TradedAccount:
     user_id: str
     eth_address: str
     handle: str | None
+
+
+def _excluded_lower(excluded: "Iterable[str] | None") -> "list[str]":
+    """Normalise an excluded-category list for SQL: lowercased, blanks dropped.
+
+    Empty result means "exclude nothing", which every caller below turns into
+    no predicate at all rather than an always-true one — so the default path
+    produces byte-identical SQL to before this existed.
+    """
+    if not excluded:
+        return []
+    return sorted({c.strip().lower() for c in excluded if c and c.strip()})
+
+
+def _tag_excluded_subquery(event_id_expr: str) -> str:
+    """EXISTS test: does any market of this event carry an excluded tag?
+
+    The tag graph is the second half of the exclusion. Upstream does not file
+    everything sporting under the Sports CATEGORY — two season-winner futures
+    and a game-release question sat under Technology/Culture carrying
+    `esports` — so a category-only rule left them listed under an Esports
+    sidebar entry.
+    """
+    return (
+        "EXISTS (SELECT 1 FROM markets mx JOIN market_tags mtx "
+        f"ON mtx.MARKET_ID = mx.MARKET_ID WHERE mx.EVENT_ID = {event_id_expr} "
+        "AND mtx.SLUG = ANY(%s))"
+    )
+
+
+def _event_excluded_clause(
+    categories: "list[str]", tags: "list[str]"
+) -> "tuple[str, list[object]]":
+    """`(sql, params)` keeping only events that are in neither list.
+
+    For a query over `events` itself. A NULL CATEGORY must PASS: `LOWER(NULL)
+    <> ALL (...)` evaluates to NULL, which WHERE treats as false, so without
+    the explicit IS NULL arm every uncategorised event would vanish along with
+    the excluded ones.
+    """
+    parts: list[str] = []
+    params: list[object] = []
+    if categories:
+        parts.append("(CATEGORY IS NULL OR LOWER(CATEGORY) <> ALL(%s))")
+        params.append(categories)
+    if tags:
+        parts.append(f"NOT {_tag_excluded_subquery('events.EVENT_ID')}")
+        params.append(tags)
+    return " AND ".join(parts), params
+
+
+def _market_excluded_clause(
+    categories: "list[str]", tags: "list[str]", alias: str = "markets"
+) -> "tuple[str, list[object]]":
+    """`(sql, params)` for a query over `markets`, reaching both signals through
+    the event that groups them.
+
+    NOT EXISTS rather than a join: a market with no event, or an event with no
+    category and no tags, matches no row in either subquery and is therefore
+    KEPT — the same "exclude only on positive evidence" rule the sync filter
+    follows.
+    """
+    parts: list[str] = []
+    params: list[object] = []
+    if categories:
+        parts.append(
+            f"NOT EXISTS (SELECT 1 FROM events ev WHERE ev.EVENT_ID = {alias}.EVENT_ID "
+            "AND LOWER(ev.CATEGORY) = ANY(%s))"
+        )
+        params.append(categories)
+    if tags:
+        parts.append(f"NOT {_tag_excluded_subquery(f'{alias}.EVENT_ID')}")
+        params.append(tags)
+    return " AND ".join(parts), params
 
 
 _MARKET_COLS = (
@@ -59,6 +136,41 @@ def _row_to_market(row) -> Market:
 
 
 class TableRead:
+    #: One price print per (match, token): "this token traded at this price".
+    #:
+    #: The taker branch covers every non-failed row; the maker branch fires
+    #: ONLY for MINT/MERGE, because a NORMAL maker trades the same token at
+    #: the same price and its leg is not a second print. Emitting it would
+    #: double every chart point and every tape-derived volume, silently.
+    #:
+    #: For a MINT/MERGE the stored PRICE is the maker's, so the taker's token
+    #: printed at MICRO - PRICE and the maker's at PRICE — summing to the $1
+    #: the pair costs or returns.
+    #:
+    #: Takes TWO parameters, both the SAME list of token ids: the predicate is
+    #: pushed into each branch so both use an index. One filter over the union
+    #: would seq-scan the whole table.
+    #:
+    #: Append your own `SELECT ... FROM prints`.
+    TOKEN_PRINTS_CTE = """
+        WITH prints AS (
+            SELECT ASSET_ID AS TOKEN_ID, MATCH_TIME, TRADE_SIZE,
+                   CASE WHEN COALESCE(MATCH_KIND, 'NORMAL') IN ('MINT', 'MERGE')
+                        THEN 1000000 - PRICE ELSE PRICE END AS PRICE,
+                   CASE WHEN COALESCE(MATCH_KIND, 'NORMAL') = 'MINT' THEN 'BUY'
+                        WHEN COALESCE(MATCH_KIND, 'NORMAL') = 'MERGE' THEN 'SELL'
+                        ELSE SIDE END AS SIDE
+            FROM trades
+            WHERE STATUS != 'FAILED' AND ASSET_ID = ANY(%s)
+            UNION ALL
+            SELECT MAKER_ASSET_ID, MATCH_TIME, TRADE_SIZE, PRICE,
+                   CASE WHEN MATCH_KIND = 'MINT' THEN 'BUY' ELSE 'SELL' END
+            FROM trades
+            WHERE STATUS != 'FAILED' AND MATCH_KIND IN ('MINT', 'MERGE')
+              AND MAKER_ASSET_ID IS NOT NULL AND MAKER_ASSET_ID = ANY(%s)
+        )
+    """
+
     @staticmethod
     def read_condition_id_by_polymarket_id(
         db: psycopg.Connection, polymarket_id: int
@@ -179,7 +291,9 @@ class TableRead:
 
     _USER_COLS = (
         "USER_ID, EMAIL, HANDLE, ETH_ADDRESS, ETH_PRIVATE_KEY, "
-        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT"
+        "API_KEY, ONBOARDED_AT, CREATED_AT, IS_BOT, WORKOS_USER_ID, "
+        "(PASSWORD_HASH IS NOT NULL) AS HAS_PASSWORD, "
+        "(AUTO_REDEEM_ENABLED) AS AUTO_REDEEM"
     )
 
     @staticmethod
@@ -196,6 +310,9 @@ class TableRead:
             onboarded_at=row["ONBOARDED_AT"],
             created_at=row["CREATED_AT"] if row["CREATED_AT"] is not None else 0,
             is_bot=bool(row["IS_BOT"]),
+            has_password=bool(row["HAS_PASSWORD"]),
+            auto_redeem=bool(row["AUTO_REDEEM"]),
+            workos_user_id=row["WORKOS_USER_ID"],
         )
 
     @staticmethod
@@ -234,6 +351,49 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
+    def get_user_by_google_sub(
+        db: psycopg.Connection, google_sub: str
+    ) -> "User | None":
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE GOOGLE_SUB = %s LIMIT 1",
+            (google_sub,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
+    def get_user_by_workos_id(
+        db: psycopg.Connection, workos_user_id: str
+    ) -> "User | None":
+        """The account this WorkOS identity belongs to, matched exactly.
+
+        Deliberately not case-insensitive, unlike `get_user_by_email_ci`: an
+        address is something a person types and gets wrong, while this is an
+        opaque id we stored ourselves.
+        """
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users WHERE WORKOS_USER_ID = %s",
+            (workos_user_id,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
+    def get_user_by_email_ci(db: psycopg.Connection, email: str) -> "User | None":
+        """Case-insensitive email lookup, used only for linking a Google identity.
+
+        Registration stores the address as typed, so `Alice@Example.com` and the
+        `alice@example.com` Google reports are the same person to everyone
+        except `=`. Linking is the one place that difference would mint a second
+        wallet, so it is the one place that compares case-insensitively. Login
+        keeps the exact-match reader above.
+        """
+        row = db.execute(
+            f"SELECT {TableRead._USER_COLS} FROM users "
+            "WHERE LOWER(EMAIL) = LOWER(%s) ORDER BY CREATED_AT LIMIT 1",
+            (email,),
+        ).fetchone()
+        return TableRead._row_to_user(row) if row else None
+
+    @staticmethod
     def handle_taken(db: psycopg.Connection, handle: str) -> bool:
         """Whether a handle is already claimed.
 
@@ -255,21 +415,31 @@ class TableRead:
         return TableRead._row_to_user(row) if row else None
 
     @staticmethod
-    def get_password_hash_by_email(db: psycopg.Connection, email: str) -> str | None:
-        """Used by login — returns the bcrypt hash so the service can verify."""
-        row = db.execute(
-            "SELECT PASSWORD_HASH FROM users WHERE EMAIL = %s LIMIT 1",
-            (email,),
-        ).fetchone()
-        return row["PASSWORD_HASH"] if row else None
-
-    @staticmethod
     def get_password_hash_by_userid(db: psycopg.Connection, user_id: str) -> str | None:
         row = db.execute(
             "SELECT PASSWORD_HASH FROM users WHERE USER_ID = %s LIMIT 1",
             (user_id,),
         ).fetchone()
         return row["PASSWORD_HASH"] if row else None
+
+    @staticmethod
+    def get_key_export_state(
+        db: psycopg.Connection, user_id: str
+    ) -> "tuple[int | None, int | None]":
+        """`(exported_at, last_attempt_at)` for one user, epoch seconds."""
+        row = db.execute(
+            "SELECT KEY_EXPORTED_AT, KEY_EXPORT_ATTEMPT_AT FROM users "
+            "WHERE USER_ID = %s",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return (None, None)
+        exported = row["KEY_EXPORTED_AT"]
+        attempted = row["KEY_EXPORT_ATTEMPT_AT"]
+        return (
+            int(exported) if exported is not None else None,
+            int(attempted) if attempted is not None else None,
+        )
 
     @staticmethod
     def get_last_topup_at(db: psycopg.Connection, user_id: str) -> int | None:
@@ -308,6 +478,40 @@ class TableRead:
         ).fetchone()
         return row["DEPLOYMENT_ID"] if row else None
 
+    #: Exposed as a constant so `tests/db/test_traded_accounts_plan.py` can
+    #: EXPLAIN the query that actually runs, rather than a copy of it that
+    #: would drift.
+    #:
+    #: `<> %s` on the api key is the mirror tape, and it is the difference
+    #: between 3.2 seconds and 1.4 milliseconds. Semantically it is nothing:
+    #: `MIRROR_API_KEY` is "opaque, never a real user's api key"
+    #: (`agentpit/liquidity/tape.py`), so no row it excludes could have
+    #: matched `u.API_KEY` anyway. To the planner it is everything: that one
+    #: value is 99.76% of `trades`, and without excluding it the estimate for
+    #: "rows matching this api key" is ~87,000 instead of 0, which makes an
+    #: `EXISTS` look like it will stop on the first row and a sequential scan
+    #: look nearly free. It does not stop -- the accounts being probed have no
+    #: trades at all -- so each probe reads all 523,000 rows, thirty times per
+    #: request. See the test for the full measurement.
+    TRADED_ACCOUNTS_SQL = """
+            SELECT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
+            FROM users u
+            WHERE u.IS_BOT = 0
+              AND (
+                EXISTS (
+                    SELECT 1 FROM trades t
+                    WHERE t.TAKER_API_KEY = u.API_KEY AND t.STATUS != %s
+                      AND t.TAKER_API_KEY <> %s
+                )
+                OR EXISTS (
+                    SELECT 1 FROM trades t
+                    WHERE t.MAKER_API_KEY = u.API_KEY AND t.STATUS != %s
+                      AND t.MAKER_API_KEY <> %s
+                )
+              )
+            ORDER BY u.USER_ID
+            """
+
     @staticmethod
     def list_traded_accounts(db: psycopg.Connection) -> "list[TradedAccount]":
         """Every non-house account with at least one non-failed trade, taker
@@ -344,22 +548,8 @@ class TableRead:
         first on every row in this sample).
         """
         rows = db.execute(
-            """
-            SELECT u.USER_ID, u.ETH_ADDRESS, u.HANDLE
-            FROM users u
-            WHERE u.IS_BOT = 0
-              AND (
-                EXISTS (
-                    SELECT 1 FROM trades t
-                    WHERE t.TAKER_API_KEY = u.API_KEY AND t.STATUS != 'FAILED'
-                )
-                OR EXISTS (
-                    SELECT 1 FROM trades t
-                    WHERE t.MAKER_API_KEY = u.API_KEY AND t.STATUS != 'FAILED'
-                )
-              )
-            ORDER BY u.USER_ID
-            """
+            TableRead.TRADED_ACCOUNTS_SQL,
+            ("FAILED", MIRROR_API_KEY, "FAILED", MIRROR_API_KEY),
         ).fetchall()
         return [
             TradedAccount(
@@ -413,17 +603,30 @@ class TableRead:
     @staticmethod
     def latest_account_snapshots(
         db: psycopg.Connection,
-    ) -> "dict[str, tuple[int, int]]":
-        """user_id -> (capital_raw, deposited_raw) from each account's newest row."""
+    ) -> "dict[str, tuple[int, int, int, int]]":
+        """user_id -> (capital, deposited, invested, unrealized), newest row.
+
+        INVESTED_RAW and UNREALIZED_RAW are NULL on rows written before those
+        columns existed; both read as 0 rather than being backfilled, because
+        the positions they valued have moved since and any backfill would be a
+        guess.
+        """
         rows = db.execute(
             """
-            SELECT DISTINCT ON (USER_ID) USER_ID, CAPITAL_RAW, DEPOSITED_RAW
+            SELECT DISTINCT ON (USER_ID)
+                   USER_ID, CAPITAL_RAW, DEPOSITED_RAW, INVESTED_RAW,
+                   UNREALIZED_RAW
             FROM account_snapshots
             ORDER BY USER_ID, T DESC, SNAPSHOT_ID DESC
             """
         ).fetchall()
         return {
-            r["USER_ID"]: (int(r["CAPITAL_RAW"]), int(r["DEPOSITED_RAW"]))
+            r["USER_ID"]: (
+                int(r["CAPITAL_RAW"]),
+                int(r["DEPOSITED_RAW"]),
+                int(r["INVESTED_RAW"] or 0),
+                int(r["UNREALIZED_RAW"] or 0),
+            )
             for r in rows
         }
 
@@ -478,7 +681,11 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def count_active_markets(db: psycopg.Connection) -> int:
+    def count_active_markets(
+        db: psycopg.Connection,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
+    ) -> int:
         """How many markets are ACTIVE, platform-wide.
 
         This is the same predicate the UI calls "live", reduced. `to_gamma_market`
@@ -487,10 +694,19 @@ class TableRead:
         closed, and since ACTIVE is in neither closed set that collapses to the
         single comparison below. If either mapping changes, this must follow, or
         the headline number stops agreeing with the grid it labels.
+
+        `excluded_categories` must be the SAME list the grid's query gets, for
+        exactly that reason: a headline counting markets the grid refuses to
+        show is the bug this docstring already warns about, in a new place.
         """
+        sql, extra = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        clause = f" AND {sql}" if sql else ""
+        params: list[object] = [MarketState.ACTIVE.value, *extra]
         row = db.execute(
-            "SELECT COUNT(*) as CNT FROM markets WHERE MARKET_STATE = %s",
-            (MarketState.ACTIVE.value,),
+            f"SELECT COUNT(*) as CNT FROM markets WHERE MARKET_STATE = %s{clause}",
+            tuple(params),
         ).fetchone()
         return int(row["CNT"]) if row else 0
 
@@ -527,7 +743,8 @@ class TableRead:
 
     _EVENT_COLS = (
         "EVENT_ID, SLUG, TITLE, DESCRIPTION, ICON_URL, CATEGORY, "
-        "START_DATE, END_DATE, POLYMARKET_EVENT_ID, VOLUME_24HR, VOLUME"
+        "START_DATE, END_DATE, POLYMARKET_EVENT_ID, VOLUME_24HR, VOLUME, "
+        "LIQUIDITY, COMPETITIVE"
     )
 
     @staticmethod
@@ -544,6 +761,8 @@ class TableRead:
             polymarket_event_id=row["POLYMARKET_EVENT_ID"],
             volume_24hr=row["VOLUME_24HR"],
             volume=row["VOLUME"],
+            liquidity=row["LIQUIDITY"],
+            competitive=row["COMPETITIVE"],
         )
 
     @staticmethod
@@ -553,6 +772,24 @@ class TableRead:
             (event_id,),
         ).fetchone()
         return TableRead._row_to_event(row) if row else None
+
+    @staticmethod
+    def event_slugs_by_id(
+        db: psycopg.Connection, event_ids: "list[int]"
+    ) -> "dict[int, str]":
+        """``{event_id: slug}`` for the ids that exist, in one query.
+
+        The account reads need an event slug per market so the profile can link
+        a position at the event that groups it rather than at the bare market.
+        Fetching each one through ``get_event_by_id`` would be a query per row.
+        """
+        wanted = sorted({int(e) for e in event_ids if e is not None})
+        if not wanted:
+            return {}
+        cur = db.execute(
+            "SELECT EVENT_ID, SLUG FROM events WHERE EVENT_ID = ANY(%s)", (wanted,)
+        )
+        return {int(r["EVENT_ID"]): str(r["SLUG"]) for r in cur.fetchall()}
 
     @staticmethod
     def get_event_by_slug(db: psycopg.Connection, slug: str) -> "Event | None":
@@ -588,6 +825,11 @@ class TableRead:
         limit: int = 100,
         offset: int = 0,
         category: str | None = None,
+        tag: str | None = None,
+        subtags: "list[str] | None" = None,
+        sort: "EventSort | None" = None,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "tuple[list[tuple[Event, list[Market]]], int]":
         """Return events ranked by upstream 24h volume, each paired with its
         child markets.
@@ -604,13 +846,81 @@ class TableRead:
         is restricted to that category case-insensitively, so a case drift
         between the label the UI sends and the label stored can't silently
         return an empty page. ``total`` reflects the same filter.
+
+        ``tag`` and ``subtags`` filter on the tag graph rather than the
+        CATEGORY column: an event matches when any of its markets carries the
+        slug. They compose with each other and with ``category`` as AND, while
+        ``subtags`` ORs within itself. Blank and whitespace-only values count
+        as absent, exactly as ``category`` does.
+
+        ``sort`` chooses the ordering; ``None`` means
+        ``EventSort.DEFAULT`` — 24h volume, the ranking the home page has used
+        since before sorting was a choice. Every clause ends in ``EVENT_ID
+        DESC`` so equal values cannot swap between pages, and puts missing
+        values last so a never-captured event never leads the list.
+
+        ``EventSort.ENDING_SOON`` additionally restricts the page to events
+        that have not already ended (see the predicate below): ascending
+        order over the whole catalogue would otherwise lead with events that
+        ended months ago, since a never-ending stream of past events sorts
+        before every future one. No other sort is restricted — a stale event
+        still belongs in "Newest" or "Total Volume".
         """
-        where = ""
+        # Predicates accumulate and are joined with AND; the tag filters are
+        # EXISTS subqueries because an event's tag set lives on its markets.
+        # `subtags` ORs within itself via ANY() while still ANDing against
+        # `tag` — a facet like `trump` also occurs outside `politics`, and
+        # dropping the parent would let a Politics > Trump selection surface a
+        # non-Politics event.
+        resolved_sort = sort or EventSort.DEFAULT
+        clauses: list[str] = []
         params: list[object] = []
+        # Applied before the caller's own `category` filter, and independent of
+        # it: a request for an excluded category returns an empty page rather
+        # than resurrecting it, so a stale UI tab cannot reach the rows.
+        excl_sql, excl_params = _event_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        if excl_sql:
+            clauses.append(excl_sql)
+            params.extend(excl_params)
         normalized_category = category.strip() if category else None
         if normalized_category:
-            where = " WHERE LOWER(CATEGORY) = LOWER(%s)"
+            clauses.append("LOWER(CATEGORY) = LOWER(%s)")
             params.append(normalized_category)
+        normalized_tag = tag.strip().lower() if tag else None
+        if normalized_tag:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM markets m "
+                "JOIN market_tags mt ON mt.MARKET_ID = m.MARKET_ID "
+                "WHERE m.EVENT_ID = events.EVENT_ID AND mt.SLUG = %s)"
+            )
+            params.append(normalized_tag)
+        normalized_subtags = [
+            s.strip().lower() for s in (subtags or []) if s and s.strip()
+        ]
+        if normalized_subtags:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM markets m "
+                "JOIN market_tags mt ON mt.MARKET_ID = m.MARKET_ID "
+                "WHERE m.EVENT_ID = events.EVENT_ID AND mt.SLUG = ANY(%s))"
+            )
+            params.append(normalized_subtags)
+        if resolved_sort is EventSort.ENDING_SOON:
+            # Scoped to this one sort: "Ending Soon" is the only ordering an
+            # already-ended event would otherwise lead, because ASC over the
+            # whole catalogue puts every past END_DATE ahead of every future
+            # one. `EXTRACT(EPOCH FROM NOW())` runs in Postgres rather than
+            # being passed in as a parameter, so the cutoff is the database's
+            # clock and the query needs no extra binding.
+            #
+            # NULL END_DATE passes the filter (treated as "not ended", not
+            # excluded): a missing end date is not evidence the event is
+            # over, and ORDER BY's NULLS LAST already keeps it at the bottom
+            # of the page rather than the top, exactly as it did before this
+            # predicate existed.
+            clauses.append("(END_DATE IS NULL OR END_DATE >= EXTRACT(EPOCH FROM NOW()))")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
 
         total = db.execute(
             f"SELECT COUNT(*) as CNT FROM events{where}",
@@ -618,7 +928,8 @@ class TableRead:
         ).fetchone()["CNT"]
         events_cur = db.execute(
             f"SELECT {TableRead._EVENT_COLS} FROM events{where} "
-            "ORDER BY VOLUME_24HR DESC NULLS LAST, EVENT_ID DESC LIMIT %s OFFSET %s",
+            f"ORDER BY {resolved_sort.order_by()} "
+            "LIMIT %s OFFSET %s",
             tuple(params + [limit, offset]),
         )
         events = [TableRead._row_to_event(r) for r in events_cur.fetchall()]
@@ -650,9 +961,24 @@ class TableRead:
         condition_ids: list[str] | None = None,
         clob_token_ids: list[str] | None = None,
         polymarket_condition_id: str | None = None,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
     ) -> "list[Market]":
+        """Paged/filtered market list.
+
+        `excluded_categories` hides whole categories from BROWSING. It is a
+        parameter rather than a fixed rule because the direct lookups that also
+        come through here — `pinned.py` resolving one slug — are addressing a
+        known market, not browsing, and must keep resolving it.
+        """
         clauses: list[str] = []
         params: list = []
+        excl_sql, excl_params = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        if excl_sql:
+            clauses.append(excl_sql)
+            params.extend(excl_params)
         if market_id is not None:
             clauses.append("MARKET_ID = %s")
             params.append(market_id)
@@ -688,25 +1014,151 @@ class TableRead:
         return [_row_to_market(row) for row in cur.fetchall()]
 
     @staticmethod
-    def list_event_categories(db: psycopg.Connection) -> "list[str]":
+    def list_event_categories(
+        db: psycopg.Connection,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
+    ) -> "list[str]":
         """Every distinct, non-blank event category, case-insensitively sorted.
 
         Postgres rejects ``SELECT DISTINCT ... ORDER BY <expr>`` when the
         expression is not in the select list, so the DISTINCT happens in a
         subquery. ``COLLATE "C"`` is the explicit tiebreak that keeps the order
         total (and "Sports" before "sports") whatever the server's lc_collate.
+
+        This is what the UI builds its category tabs from, so it MUST honour the
+        same exclusions the event grid does. Leaving an excluded category in the
+        list renders a tab whose every click returns an empty page.
         """
+        excl_sql, excl_params = _event_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        clause = f" AND {excl_sql}" if excl_sql else ""
+        params: tuple = tuple(excl_params)
         cur = db.execute(
-            """
+            f"""
             SELECT c FROM (
                 SELECT DISTINCT CATEGORY AS c
                 FROM events
-                WHERE CATEGORY IS NOT NULL AND TRIM(CATEGORY) <> ''
+                WHERE CATEGORY IS NOT NULL AND TRIM(CATEGORY) <> ''{clause}
             ) s
             ORDER BY LOWER(c) ASC, c COLLATE "C" ASC
-            """
+            """,
+            params,
         )
         return [str(row["c"]) for row in cur.fetchall()]
+
+    @staticmethod
+    def list_tag_nav(
+        db: psycopg.Connection,
+        *,
+        slugs: list[str],
+        min_events: int,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
+    ) -> "list[tuple[str, str, int]]":
+        """``(slug, label, event_count)`` for each requested slug that carries
+        at least ``min_events`` events. Unordered — the caller restores the
+        curated order.
+
+        Counts DISTINCT events, not tag rows: one event whose two markets both
+        carry `politics` is one Politics event, not two. Markets with no event
+        are excluded — an unbound market is not reachable from any listing.
+
+        ``MIN(LABEL)`` rather than an arbitrary pick: after an upstream rename
+        the same slug can briefly carry two labels across markets, and the
+        answer must not flicker between calls.
+
+        The count must honour `excluded_categories` for the same reason the
+        category list does, and this is the surface that actually renders the
+        sidebar: excluded events left in the count kept a "Sports 2035" entry
+        whose every click returned an empty grid. Counting them out drops the
+        slug below `min_events` on its own, so no separate deny-list is needed
+        and a tag that survives on non-excluded events keeps its place.
+        """
+        if not slugs:
+            return []
+        excl_sql, excl_params = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags), "m"
+        )
+        clause = f" AND {excl_sql}" if excl_sql else ""
+        params: list[object] = [list(slugs), *excl_params, min_events]
+        cur = db.execute(
+            f"""
+            SELECT mt.SLUG AS SLUG, MIN(mt.LABEL) AS LABEL,
+                   COUNT(DISTINCT m.EVENT_ID) AS CNT
+            FROM market_tags mt
+            JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+            WHERE m.EVENT_ID IS NOT NULL AND mt.SLUG = ANY(%s){clause}
+            GROUP BY mt.SLUG
+            HAVING COUNT(DISTINCT m.EVENT_ID) >= %s
+            """,
+            tuple(params),
+        )
+        return [(str(r["SLUG"]), str(r["LABEL"]), int(r["CNT"])) for r in cur.fetchall()]
+
+    @staticmethod
+    def list_tag_facets(
+        db: psycopg.Connection,
+        *,
+        parent_slug: str,
+        blocked: "frozenset[str]",
+        deprecated_prefix: str,
+        limit: int,
+        max_coverage: float,
+    ) -> "list[tuple[str, str, int]]":
+        """Tags co-occurring with ``parent_slug``, most common first.
+
+        "Co-occurring" is at EVENT level: a facet counts an event whose tag
+        union contains both slugs, even when they arrived on different markets
+        of that event.
+
+        Two filters run in Python rather than SQL because both need the
+        parent's own total, which the same pass computes: the coverage ceiling
+        (a facet matching nearly every event of its parent is the parent under
+        another name) and the length cap.
+        """
+        parent_total = db.execute(
+            """
+            SELECT COUNT(DISTINCT m.EVENT_ID) AS CNT
+            FROM market_tags mt
+            JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+            WHERE mt.SLUG = %s AND m.EVENT_ID IS NOT NULL
+            """,
+            (parent_slug,),
+        ).fetchone()["CNT"]
+        if not parent_total:
+            return []
+        cur = db.execute(
+            """
+            WITH parent_events AS (
+                SELECT DISTINCT m.EVENT_ID AS EVENT_ID
+                FROM market_tags mt
+                JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+                WHERE mt.SLUG = %s AND m.EVENT_ID IS NOT NULL
+            )
+            SELECT mt.SLUG AS SLUG, MIN(mt.LABEL) AS LABEL,
+                   COUNT(DISTINCT m.EVENT_ID) AS CNT
+            FROM market_tags mt
+            JOIN markets m ON m.MARKET_ID = mt.MARKET_ID
+            JOIN parent_events pe ON pe.EVENT_ID = m.EVENT_ID
+            WHERE mt.SLUG <> %s
+              AND NOT (mt.SLUG = ANY(%s))
+              AND mt.SLUG NOT LIKE %s
+            GROUP BY mt.SLUG
+            ORDER BY CNT DESC, mt.SLUG ASC
+            """,
+            (parent_slug, parent_slug, list(blocked), f"{deprecated_prefix}%"),
+        )
+        out: list[tuple[str, str, int]] = []
+        for row in cur.fetchall():
+            count = int(row["CNT"])
+            if count / parent_total > max_coverage:
+                continue
+            out.append((str(row["SLUG"]), str(row["LABEL"]), count))
+            if len(out) >= limit:
+                break
+        return out
 
     @staticmethod
     def list_orphan_markets(db: psycopg.Connection) -> "list[Market]":
@@ -727,15 +1179,44 @@ class TableRead:
         return [TableRead._row_to_user(r) for r in rows]
 
     @staticmethod
-    def list_active_synced_markets(db: psycopg.Connection) -> "list[Market]":
+    def list_active_synced_markets(
+        db: psycopg.Connection,
+        excluded_categories: "Iterable[str] | None" = None,
+        excluded_tags: "Iterable[str] | None" = None,
+    ) -> "list[Market]":
         """Markets the liquidity engine should make liquidity for.
 
-        Criteria: MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL.
+        Criteria: MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL,
+        minus any market in an excluded category.
+
+        Quoting a market the catalogue refuses to list is pure cost: the mirror
+        splits collateral, signs orders and burns gas on a book nobody can
+        reach. Sports alone was 68.6% of the standing catalogue when this was
+        added, so the exclusion is also the largest single reduction in the
+        engine's on-chain footprint.
+
+        Returned busiest first, and that order is load-bearing rather than
+        cosmetic: the mirror deepens books in this sequence, and on a chain
+        where a reconcile pass costs most of a second the sequence decides
+        which markets look finished first. Volume lives on the event, so it is
+        read through a correlated subquery rather than a join — `_MARKET_COLS`
+        is unqualified and a join would make every column name ambiguous.
+        Markets whose event has no captured volume sort last, then by id, so
+        the order is total and stable across restarts.
         """
+        sql, extra = _market_excluded_clause(
+            _excluded_lower(excluded_categories), _excluded_lower(excluded_tags)
+        )
+        clause = f" AND {sql}" if sql else ""
+        params: tuple = tuple(extra)
         rows = db.execute(
             f"SELECT {_MARKET_COLS} FROM markets "
-            "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL "
-            "ORDER BY MARKET_ID"
+            "WHERE MARKET_STATE = 'ACTIVE' AND POLYMARKET_CONDITION_ID IS NOT NULL"
+            f"{clause} "
+            "ORDER BY (SELECT e.VOLUME_24HR FROM events e "
+            "          WHERE e.EVENT_ID = markets.EVENT_ID) DESC NULLS LAST, "
+            "         MARKET_ID",
+            params,
         ).fetchall()
         return [_row_to_market(row) for row in rows]
 
@@ -773,16 +1254,21 @@ class TableRead:
     def last_trade_prices_for_tokens(
         db: psycopg.Connection, token_ids: "list[str]"
     ) -> "dict[str, int]":
-        """Most-recent non-failed trade price (scaled int) per token, batched."""
+        """Most-recent price print per token, batched.
+
+        Reads prints rather than raw rows: a MINT prints on BOTH tokens, and
+        the complement's price is the one the maker actually paid.
+        """
         if not token_ids:
             return {}
+        ids = list(token_ids)
         rows = db.execute(
-            "SELECT DISTINCT ON (ASSET_ID) ASSET_ID, PRICE FROM trades "
-            "WHERE STATUS != 'FAILED' AND ASSET_ID = ANY(%s) "
-            "ORDER BY ASSET_ID, MATCH_TIME DESC",
-            (list(token_ids),),
+            TableRead.TOKEN_PRINTS_CTE
+            + "SELECT DISTINCT ON (TOKEN_ID) TOKEN_ID, PRICE FROM prints "
+              "ORDER BY TOKEN_ID, MATCH_TIME DESC",
+            (ids, ids),
         ).fetchall()
-        return {r["ASSET_ID"]: int(r["PRICE"]) for r in rows}
+        return {r["TOKEN_ID"]: int(r["PRICE"]) for r in rows}
 
     @staticmethod
     def list_unresolved_ended_markets(
@@ -919,27 +1405,47 @@ class TableRead:
         trade_id: str | None = None,
         before: int | None = None,
         after: int | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
-        """Trades where the user is taker OR maker, newest first."""
+        """Trades where the user is taker OR maker, newest first.
+
+        `limit`, when given, is applied in SQL (ORDER BY MATCH_TIME DESC
+        already makes the ordering deterministic, so this returns the same
+        page a Python-side `[:limit]` slice would) instead of building every
+        matching row only to throw most of them away.
+        """
         clauses = ["(TAKER_API_KEY = %s OR MAKER_API_KEY = %s)"]
         params: list = [api_key, api_key]
         if market is not None:
             clauses.append("MARKET = %s"); params.append(market)
         if asset_id is not None:
-            clauses.append("ASSET_ID = %s"); params.append(asset_id)
+            # A MINT/MERGE maker's own token is MAKER_ASSET_ID, not ASSET_ID
+            # (that's the taker's), and filtering on ASSET_ID alone dropped
+            # their fill entirely. But the match must stay per-leg: a flat
+            # OR of both asset columns would also match api_key's row via
+            # the COUNTERPARTY's leg, not just their own.
+            clauses.append(
+                "((TAKER_API_KEY = %s AND ASSET_ID = %s) OR "
+                "(MAKER_API_KEY = %s AND COALESCE(MAKER_ASSET_ID, ASSET_ID) = %s))"
+            )
+            params.extend([api_key, asset_id, api_key, asset_id])
         if trade_id is not None:
             clauses.append("TRADE_ID = %s"); params.append(trade_id)
         if before is not None:
             clauses.append("MATCH_TIME < %s"); params.append(before)
         if after is not None:
             clauses.append("MATCH_TIME > %s"); params.append(after)
-        cur = db.execute(
+        query = (
             "SELECT TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID, "
+            "MAKER_ASSET_ID, MATCH_KIND, "
             "PRICE, TRADE_SIZE, SIDE, STATUS, MATCH_TIME, TRANSACTION_HASH, "
             "BUCKET_INDEX, FEE_RATE_BPS, TAKER_API_KEY, MAKER_API_KEY "
-            f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC",
-            params,
+            f"FROM trades WHERE {' AND '.join(clauses)} ORDER BY MATCH_TIME DESC"
         )
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(limit)
+        cur = db.execute(query, params)
         # Keep the case-insensitive dict rows — a plain dict(r) would lower-case
         # the keys and break the upper-case access in TradeService.
         return list(cur.fetchall())

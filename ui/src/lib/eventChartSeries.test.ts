@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Market } from "@/types/market";
-import { pickChartSeries } from "./eventChartSeries";
+import { carryPriceForward, pickChartSeries } from "./eventChartSeries";
 
 function fakeMarket(id: number, label: string): Market {
   // Minimal cast — only the fields pickChartSeries reads matter.
@@ -97,5 +97,90 @@ describe("pickChartSeries", () => {
       4,
     );
     expect(series[0]!.label).toBe("Will GTA VI release before June 2026?");
+  });
+});
+
+describe("carryPriceForward", () => {
+  const NOW = 1_800_000_000;
+
+  it("closes a one-trade series so it has a line to draw", () => {
+    // The bug this exists for: one coordinate makes smoothPath emit a bare
+    // `M x y`, which paints nothing, so the outcome vanished from the chart
+    // while the legend still listed it.
+    expect(carryPriceForward([{ t: NOW - 3600, p: 0.14 }], NOW)).toEqual([
+      { t: NOW - 3600, p: 0.14 },
+      { t: NOW, p: 0.14 },
+    ]);
+  });
+
+  it("carries the LAST price, not the first", () => {
+    const out = carryPriceForward(
+      [
+        { t: NOW - 7200, p: 0.4 },
+        { t: NOW - 3600, p: 0.62 },
+      ],
+      NOW,
+    );
+    expect(out[out.length - 1]).toEqual({ t: NOW, p: 0.62 });
+    expect(out).toHaveLength(3);
+  });
+
+  it("leaves a market that never traded empty", () => {
+    // There is no price to carry. A flat line at today's mid would draw a
+    // month of history that never happened.
+    expect(carryPriceForward([], NOW)).toEqual([]);
+    expect(carryPriceForward([], NOW, 0.42)).toEqual([]);
+  });
+
+  it("adds nothing when the last trade is already current", () => {
+    const points = [{ t: NOW, p: 0.5 }];
+    expect(carryPriceForward(points, NOW)).toBe(points);
+  });
+
+  it("does not rewrite the samples it was given", () => {
+    const points = [{ t: NOW - 60, p: 0.3 }];
+    carryPriceForward(points, NOW);
+    expect(points).toHaveLength(1);
+  });
+
+  // The bug this exists for: the headline reads the BOOK while the chart
+  // reads the TAPE. A market whose book collapsed after its last print drew a
+  // flat line at the stale trade price all the way to now — a Counter-Strike
+  // market showed "<1% chance" beside a chart ending at 71%.
+  it("closes at the live price, not the stale last trade", () => {
+    const out = carryPriceForward(
+      [
+        { t: NOW - 7200, p: 0.47 },
+        { t: NOW - 3600, p: 0.71 },
+      ],
+      NOW,
+      0.001,
+    );
+    expect(out[out.length - 1]).toEqual({ t: NOW, p: 0.001 });
+    expect(out).toHaveLength(3);
+  });
+
+  it("keeps the traded history intact — only the closing point is the live one", () => {
+    const history = [
+      { t: NOW - 7200, p: 0.47 },
+      { t: NOW - 3600, p: 0.71 },
+    ];
+    const out = carryPriceForward(history, NOW, 0.001);
+    expect(out.slice(0, 2)).toEqual(history);
+  });
+
+  it("falls back to the last trade when no live price is known", () => {
+    const out = carryPriceForward([{ t: NOW - 3600, p: 0.62 }], NOW, undefined);
+    expect(out[out.length - 1]).toEqual({ t: NOW, p: 0.62 });
+  });
+
+  it("ignores a non-finite live price rather than drawing a gap", () => {
+    const out = carryPriceForward([{ t: NOW - 3600, p: 0.62 }], NOW, NaN);
+    expect(out[out.length - 1]).toEqual({ t: NOW, p: 0.62 });
+  });
+
+  it("accepts a live price of zero — a market can genuinely be worthless", () => {
+    const out = carryPriceForward([{ t: NOW - 3600, p: 0.62 }], NOW, 0);
+    expect(out[out.length - 1]).toEqual({ t: NOW, p: 0 });
   });
 });

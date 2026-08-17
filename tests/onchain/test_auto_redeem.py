@@ -8,10 +8,13 @@ is flagged FULLY_REDEEMED.
 
 import secrets
 
+import pytest
+
 from agentpit.datastructures.market_state import MarketState
 from agentpit.datastructures.split_position_request import SplitPositionRequest
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
+from agentpit.domain.exceptions import InsufficientGasError
 from agentpit.polymarket.polymarket_sync import (
     auto_redeem_resolved_markets,
     create_polymarket_markets_if_needed,
@@ -35,12 +38,20 @@ def _build_admin_and_db():
     return OnchainAdmin(w, c), fresh_test_db()
 
 
-def _onboard_user(db, admin):
+def _onboard_user(db, admin, *, auto_redeem: bool = True):
+    """Onboard a fresh user, opted into auto-redeem by default.
+
+    Every account starts opted out (AUTO_REDEEM_ENABLED defaults FALSE), so a
+    test exercising the auto-redeem loop's happy path has to opt one in
+    explicitly -- this is that. `auto_redeem=False` is for the opposite case:
+    proving a holder who never opted in keeps their tokens.
+    """
     email = f"redeem-{secrets.token_hex(4)}@example.com"
     with db.write() as conn:
         user_id, acct, _api_key = TableWrite.create_user(
             conn, email=email, password_hash="x", handle=None
         )
+        TableWrite.set_auto_redeem(conn, user_id, auto_redeem)
     admin.fund_gas(acct.address, 10**18)
     admin.faucet_drip(acct.address)
     admin.grant_user_approvals(acct)
@@ -73,6 +84,19 @@ def _resolved(pm: dict, winner_index: int) -> dict:
         dict(t, winner=(i == winner_index)) for i, t in enumerate(pm["tokens"])
     ]
     return out
+
+
+def _drain_native_balance(client, user_account) -> None:
+    """Zero out `user_account`'s native balance -- the state I4's
+    `InsufficientGasError` path exercises.
+
+    A real send-to-zero is fussy to get exact (EIP-1559's effective gas
+    price is only known after the block mines, so a transfer sized off
+    `maxFeePerGas` overpays and leaves dust behind). This is a local anvil
+    chain, so use its `anvil_setBalance` cheat method instead -- exact, and
+    it's the balance-manipulation tool the chain itself provides for tests.
+    """
+    client.web3.provider.make_request("anvil_setBalance", [user_account.address, "0x0"])
 
 
 def test_auto_redeem_pays_winner_and_flags_market():
@@ -117,3 +141,92 @@ def test_auto_redeem_pays_winner_and_flags_market():
 
     # Idempotent: a second pass redeems nobody.
     assert auto_redeem_resolved_markets(db, admin) == 0
+
+
+def test_a_holder_who_has_not_opted_in_keeps_their_tokens():
+    """The other half of the guarantee, proven against the real chain rather
+    than a stub: a holder who never turned auto-redeem on is skipped
+    outright. Their tokens are not moved, their balance is not touched, and
+    the market is not flagged FULLY_REDEEMED -- the winnings just wait."""
+    admin, db = _build_admin_and_db()
+    pm = _pm(secrets.token_hex(4))
+
+    with db.write() as conn:
+        created = create_polymarket_markets_if_needed(conn, [pm], admin)
+    market = created[0]
+    mid = market.market_id
+    yes_token = int(market.erc1155_tokens[0][0])
+    no_token = int(market.erc1155_tokens[1][0])
+
+    user = _onboard_user(db, admin, auto_redeem=False)
+    assert user is not None
+    split_amount = 100_000_000  # 100 apUSD raw
+    PositionService(db, admin).split(user, mid, SplitPositionRequest(amount=split_amount))
+
+    bal_before = admin.usd_balance(user.eth_address)
+    assert admin.ctf_balance(user.eth_address, yes_token) == split_amount
+    assert admin.ctf_balance(user.eth_address, no_token) == split_amount
+
+    fake = _resolved(pm, winner_index=0)  # YES wins
+    with db.write() as conn:
+        mirror_polymarket_resolutions(
+            conn, admin, fetcher=lambda _cid: fake, now=9_999_999_999
+        )
+
+    assert auto_redeem_resolved_markets(db, admin) == 0
+
+    # Nothing moved.
+    assert admin.usd_balance(user.eth_address) == bal_before
+    assert admin.ctf_balance(user.eth_address, yes_token) == split_amount
+    assert admin.ctf_balance(user.eth_address, no_token) == split_amount
+
+    with db.read() as conn:
+        row = TableRead.read_market(conn, mid)
+    assert row is not None
+    assert row.market_state == MarketState.RESOLVED
+    assert row.fully_redeemed is False
+
+
+def test_claiming_with_no_gas_raises_a_domain_error_not_a_crash():
+    """I4: `send_user_tx`'s broadcast fails against the *real* node with
+    web3's `Web3RPCError` ("Insufficient funds for gas * price + value",
+    code -32003) when the sender can't cover gas. `PositionService.redeem`
+    must turn that into `InsufficientGasError` naming what's missing and
+    where to send it -- not let the raw RPC exception escape toward a 500."""
+    admin, db = _build_admin_and_db()
+    pm = _pm(secrets.token_hex(4))
+
+    with db.write() as conn:
+        created = create_polymarket_markets_if_needed(conn, [pm], admin)
+    market = created[0]
+    mid = market.market_id
+
+    user = _onboard_user(db, admin)
+    assert user is not None
+    split_amount = 100_000_000  # 100 apUSD raw
+    PositionService(db, admin).split(
+        user, mid, SplitPositionRequest(amount=split_amount)
+    )
+
+    fake = _resolved(pm, winner_index=0)  # YES wins
+    with db.write() as conn:
+        mirror_polymarket_resolutions(
+            conn, admin, fetcher=lambda _cid: fake, now=9_999_999_999
+        )
+
+    _drain_native_balance(admin._client, user.eth_key)  # noqa: SLF001
+    assert admin.native_balance(user.eth_address) == 0
+
+    with pytest.raises(InsufficientGasError) as exc_info:
+        PositionService(db, admin).redeem(user, mid)
+
+    # Names what's missing (gas) and where to send it (the user's own
+    # address) -- not just "it failed".
+    message = str(exc_info.value)
+    assert "gas" in message
+    assert user.eth_address in message
+
+    # Nothing moved: the failed send never got far enough to burn tokens or
+    # pay out collateral.
+    yes_token = int(market.erc1155_tokens[0][0])
+    assert admin.ctf_balance(user.eth_address, yes_token) == split_amount

@@ -5,6 +5,7 @@ using TableWrite.create_market.
 
 import logging
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,7 @@ from agentpit.datastructures.create_market_request import CreateMarketRequest
 from agentpit.datastructures.market_state import MarketState
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.polymarket.category_resolver import category_rank, resolve_category
+from agentpit.polymarket.tag_taxonomy import normalize_slug
 from agentpit.datastructures.event import Event
 from agentpit.polymarket.conditional_token_framework import ConditionalTokenFramework
 from agentpit.services.market_service import prepare_market_on_chain
@@ -105,6 +107,22 @@ def _as_float(value: object) -> float:
     return 0.0
 
 
+def _as_optional_float(value: object) -> float | None:
+    """A number, or None when upstream sent nothing usable.
+
+    Distinct from `_as_float`, which answers 0.0: for a volume that is honest,
+    but a liquidity of 0.0 asserts an empty order book and a competitive of
+    0.0 asserts a settled market. None is the signal `update_event_metrics`
+    skips on, so an unparseable payload leaves whatever was already stored.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _to_bool(value: object) -> bool | None:
     """Coerce common bool-like values; return None if unknown."""
     if isinstance(value, bool):
@@ -137,9 +155,16 @@ def _normalize_market_fields(market: dict) -> dict:
     _coalesce_key(market, "closed", ["isClosed"])
     _coalesce_key(market, "archived", ["isArchived"])
     _coalesce_key(market, "liquidity", ["liquidityNum", "liquidityClob"])
+    _coalesce_key(market, "accepting_orders", ["acceptingOrders"])
+    # The two fields `_is_churn_series` reads. `_passes_market_filters` runs on
+    # already-normalized markets and looks up snake_case keys only, so without
+    # these the camelCase originals would be invisible to it and every churn
+    # market would sail through.
+    _coalesce_key(market, "fee_type", ["feeType"])
+    _coalesce_key(market, "sports_market_type", ["sportsMarketType"])
 
     # Normalize bool-ish fields that may arrive as strings.
-    for key in ("active", "closed", "archived"):
+    for key in ("active", "closed", "archived", "accepting_orders"):
         coerced = _to_bool(market.get(key))
         if coerced is not None:
             market[key] = coerced
@@ -156,25 +181,220 @@ def _normalize_market_fields(market: dict) -> dict:
     return market
 
 
-def _is_market_expired(market: dict) -> bool:
-    """Check if a market is expired based on end_date_iso."""
+def _is_market_over(market: dict) -> bool:
+    """Is this market finished — as UPSTREAM sees it, not as its date claims?
+
+    A stated end date is a deadline, not a verdict. Polymarket routinely lets a
+    market trade past its own date while the question stays open: "Next Prime
+    Minister of Ethiopia?" carried endDate 2026-06-01 and took $678k of volume
+    in the 24 hours before this was written, ranking #5 of every active market.
+    Trusting the date alone dropped 28 such markets out of the top-1000 window
+    — $1.8M of daily volume, every one of them still accepting orders.
+
+    So a lapsed date only counts when upstream has also stopped taking orders.
+    When the payload carries no `accepting_orders` at all — older Gamma shapes,
+    fixtures — the date decides, as it always did.
+    """
     end_date_iso = market.get("end_date_iso")
     if not end_date_iso:
         return False
     try:
-        # Handle 'Z' suffix for UTC if present (Python 3.10 fromisoformat doesn't always handle it)
+        # 'Z' is valid ISO 8601 but datetime.fromisoformat rejects it before 3.11.
         if end_date_iso.endswith("Z"):
             end_date_iso = end_date_iso[:-1] + "+00:00"
-
         end_date = datetime.fromisoformat(end_date_iso)
-
-        # Ensure timezone awareness for comparison
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=timezone.utc)
-
-        return end_date < datetime.now(timezone.utc)
     except (ValueError, TypeError):
         return False
+    if end_date >= datetime.now(timezone.utc):
+        return False
+    accepting = market.get("accepting_orders")
+    if accepting is None:
+        return True
+    return not accepting
+
+
+#: Upstream's fee schedule for the WHOLE weather/science/natural-disaster
+#: bucket -- NOT a name for the daily-temperature series. Of 158 rows carrying
+#: it in a live 2000-row sample, 155 are the churn series and 5 are not:
+#: "Hantavirus pandemic in 2026?" ($412k book, $17.7M lifetime volume, runs to
+#: 2026-12-31), "Will any month of 2026 be the hottest on record?", two more
+#: science/global-temp questions and "Will it rain during the Dutch Grand
+#: Prix?". So this is a necessary condition, never a sufficient one.
+WEATHER_FEE_TYPE = "weather_fees"
+#: The tag that actually names the series. All 155 daily-temperature rows carry
+#: it ([weather, recurring, hide-from-new, daily-temperature, munich, ...]);
+#: none of the 5 long-lived weather_fees markets does.
+WEATHER_TAG = "daily-temperature"
+#: The ONLY sportsMarketType worth a condition on chain: the game itself.
+HEADLINE_SPORTS_MARKET_TYPE = "moneyline"
+
+
+def _tag_slugs(m: dict) -> set[str] | None:
+    """The market's tag slugs, or None when the payload carries no usable tags.
+
+    `tags` is whatever upstream sent: absent on markets nested under `/events`,
+    None when `include_tag=true` was omitted, occasionally a JSON string, and
+    its entries are not guaranteed to be dicts. A discovery filter must never
+    raise on a malformed payload, so every shape that isn't a dict-with-a-slug
+    is simply skipped -- and a payload that yields no slug at all is reported
+    as None (unknown) rather than as an empty set (known to have no tags).
+    """
+    tags = m.get("tags")
+    if not isinstance(tags, list):
+        return None
+    slugs = {
+        tag["slug"]
+        for tag in tags
+        if isinstance(tag, dict) and isinstance(tag.get("slug"), str)
+    }
+    return slugs or None
+
+
+def _is_churn_series(m: dict) -> bool:
+    """Is this market part of a series that regenerates faster than it is read?
+
+    Upstream fields decide it, and no slug is parsed: the `daily-temperature`
+    tag names the temperature series, and `sportsMarketType` separates a game
+    from the props hung off it. Both are absent from older Gamma shapes and from
+    fixtures, and absence means KEEP -- this excludes only on positive evidence.
+
+    `feeType == weather_fees` is NOT that evidence on its own. Upstream bills
+    the entire weather/science/natural-disaster bucket on that schedule, so it
+    also covers markets nothing like the churn series -- a $17.7M-volume
+    hantavirus-pandemic question, "hottest month on record", VEI-4 eruption
+    counts, rain at the Dutch Grand Prix, three of them running into 2027.
+    Dropping on the fee type alone thinned that whole category silently. It is
+    consulted only where the tag cannot be: markets nested under `/events`
+    carry `feeType` but no `tags` key at all, and there the fee type is the one
+    signal available, so weather + unknown tags still counts as the series.
+
+    Measured on production: 49 cities x ~3.4 thresholds = ~166 daily temperature
+    markets born every day with a median life of 55.9h -- 11% of the standing
+    catalogue but 23% of every market ever created and resolved. Add the sports
+    prop tail (spreads, totals, per-half, per-map, nrfi -- all hung off a game we
+    already carry) and the two series are 89% of new creations, ~870M gas/day in
+    prepareCondition + registerToken + splitPosition + reportPayouts.
+
+    The gas is the measurable reason, not the first one. The product does not
+    support these markets: a set handicap or a first-inning run has no reading
+    on the site, so `atp-halys-kwon-2026-08-11-set-handicap-home-1pt5` arrives
+    on the grid as a row nobody can act on. Excluding the tail leaves Sports a
+    list of matches rather than a list of handicaps.
+
+    A third consequence is repaired in passing. CONDITION_ID is derived from
+    `keccak(question)`, and upstream reuses a prop's question text across games
+    -- "Spread: Baltimore Orioles (-1.5)" is a new market every time the Orioles
+    play, and the same condition forever to us. Production ran 251 UniqueViolation
+    skips against 278 successful creations in three hours, and the stale row that
+    squats on each reused string is a market from a game weeks past. Props ARE
+    the reused strings; dropping them drops the collision with them.
+
+    `moneyline` is an allow-list of one, deliberately: `sportsMarketType` is an
+    open vocabulary upstream keeps extending (round_handicap_game_3 and
+    both_teams_to_score_second_half are recent arrivals), so a deny-list would
+    admit whatever prop type Polymarket invents next month and only exclude it
+    once somebody noticed the gas bill. Allow-listing the game means a new prop
+    type is excluded on arrival, and the cost of being wrong is one keeper
+    missing until this constant grows -- not an unbounded new series on chain.
+    """
+    slugs = _tag_slugs(m)
+    if slugs is not None and WEATHER_TAG in slugs:
+        return True
+    # No usable tags: fall back to the fee type, which on the sibling path is
+    # all there is. Where tags DID arrive and did not say `daily-temperature`,
+    # the market has answered the question already and the fee type is mute.
+    if slugs is None and m.get("fee_type") == WEATHER_FEE_TYPE:
+        return True
+    sports_market_type = m.get("sports_market_type")
+    if sports_market_type and sports_market_type != HEADLINE_SPORTS_MARKET_TYPE:
+        return True
+    return False
+
+
+def _is_excluded_category(m: dict, excluded: "Iterable[str]") -> bool:
+    """Is this market in a category the product does not carry at all?
+
+    Different question from `_is_churn_series`, which drops the prop tail and
+    keeps the headline game. This drops the category outright, so a market it
+    rejects never reaches the chain, the catalogue, or the book mirror.
+
+    Upstream fields decide it, as everywhere else in this module. `tags` is the
+    general signal, reduced by the same `resolve_category` the sync stores on
+    the event -- so what is excluded here is exactly what the UI would have
+    labelled. `sportsMarketType` is consulted in addition, and it is not a
+    nicety: an esports match arrives from Gamma with `tags: []`, so the tag
+    path resolves nothing and the field is the ONLY evidence the market is
+    sport (`cs2-mgc-mglz-2026-08-12`, the market this was built for). It is
+    sound as a category test because upstream sets it on sports markets and on
+    nothing else -- unlike `feeType`, whose weather bucket spans half a
+    catalogue (see `_is_churn_series`).
+
+    Absence of both signals means KEEP: this excludes only on positive
+    evidence.
+    """
+    wanted = {c.strip().lower() for c in excluded if c and c.strip()}
+    if not wanted:
+        return False
+    if "sports" in wanted and m.get("sports_market_type"):
+        return True
+    slugs = _tag_slugs(m)
+    if slugs is None:
+        return False
+    category = resolve_category(slugs)
+    return category is not None and category.lower() in wanted
+
+
+def _passes_market_filters(
+    m: dict,
+    *,
+    liquidity_threshold: float,
+    closed: bool,
+    archived: bool,
+    exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
+) -> bool:
+    """Does this ALREADY-NORMALIZED market belong in the catalogue?
+
+    The single copy of that question. The primary window and the sibling pass
+    both call it, so a market cannot be admitted through one path and rejected
+    through the other.
+
+    `exclude_churn_series` defaults to True precisely because both call sites go
+    through here: a keyword with a default cannot be silently skipped by a call
+    site that forgot it, which is the whole reason the check lives here and not
+    in either caller.
+    """
+    if not m.get("condition_id"):
+        return False
+    if exclude_churn_series and _is_churn_series(m):
+        return False
+    # Deliberately NOT gated on `exclude_churn_series`: turning the churn
+    # filter off to get the prop tail back must not re-admit a whole category
+    # the UI cannot draw.
+    if _is_excluded_category(m, excluded_categories):
+        return False
+    # Use the stronger of orderbook depth ("liquidity") and cumulative trade
+    # volume ("volumeNum"). Multi-outcome favourites have shallow books on the
+    # cheap side even though they're heavily traded — filtering on liquidity
+    # alone silently drops exactly the markets users care about.
+    liquidity = _as_float(m.get("liquidity"))
+    volume = _as_float(m.get("volumeNum"))
+    if volume == 0.0:
+        volume = _as_float(m.get("volume"))
+    if max(liquidity, volume) < liquidity_threshold:
+        return False
+    if not archived and m.get("archived", False):
+        raise ValueError(
+            f"API returned archived market {m.get('condition_id')} despite "
+            "request for non-archived"
+        )
+    if not closed and m.get("closed", False):
+        return False
+    if not closed and _is_market_over(m):
+        return False
+    return True
 
 
 def fetch_all_polymarket_markets(
@@ -185,6 +405,8 @@ def fetch_all_polymarket_markets(
     liquidity_threshold: float = 1000000,
     order: str | None = None,
     max_markets: int | None = None,
+    exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
 ) -> list[dict]:
     """
     Fetch all markets from Polymarket's Gamma API, paginating through all pages.
@@ -194,6 +416,14 @@ def fetch_all_polymarket_markets(
         closed: If True, include closed/resolved markets.
         active: If False, include inactive markets.
         archived: If True, include archived markets.
+        exclude_churn_series: drop the daily-temperature and sports-prop series
+            (see `_is_churn_series`). This module is called from library code
+            and from tests, neither of which can reach Settings, so the value
+            arrives as an argument — `AGENTPIT_SYNC_EXCLUDE_CHURN_SERIES` is
+            read once in the API layer and threaded down.
+        excluded_categories: drop these categories outright (see
+            `_is_excluded_category`), threaded down the same way from
+            `AGENTPIT_EXCLUDED_CATEGORIES`.
 
     Returns:
         A list of raw market dicts from the Polymarket API.
@@ -250,38 +480,15 @@ def fetch_all_polymarket_markets(
         filtered_data = []
         for m in data:
             m = _normalize_market_fields(m)
-
-            if not m.get("condition_id"):
-                continue
-
-            # Use the stronger of orderbook depth ("liquidity") and cumulative
-            # trade volume ("volumeNum"). Multi-outcome favorites (e.g. France
-            # in a World Cup event) have shallow books on the cheap side even
-            # though they're heavily traded — filtering on liquidity alone
-            # silently drops exactly the markets users care about.
-            liquidity = _as_float(m.get("liquidity"))
-            volume = _as_float(m.get("volumeNum"))
-            if volume == 0.0:
-                volume = _as_float(m.get("volume"))
-
-            if max(liquidity, volume) < liquidity_threshold:
-                continue
-
-            # Filter archived if not requested (API might leak them or mock data includes them)
-            if not archived and m.get("archived", False):
-                raise ValueError(
-                    f"API returned archived market {m.get('condition_id')} despite request for non-archived"
-                )
-
-            # Gamma can still leak closed markets when closed=false.
-            if not closed and m.get("closed", False):
-                continue
-
-            # Filter expired markets unless we asked for closed ones
-            # (Test expectations require client-side filtering of expired markets)
-            if not closed and _is_market_expired(m):
-                continue
-            filtered_data.append(m)
+            if _passes_market_filters(
+                m,
+                liquidity_threshold=liquidity_threshold,
+                closed=closed,
+                archived=archived,
+                exclude_churn_series=exclude_churn_series,
+                excluded_categories=excluded_categories,
+            ):
+                filtered_data.append(m)
 
         all_markets.extend(filtered_data)
         logger.debug(
@@ -298,6 +505,165 @@ def fetch_all_polymarket_markets(
 
     logger.info("Finished fetching %d markets from Polymarket", len(all_markets))
     return all_markets
+
+
+#: Gamma caps a response at 100 rows; 40 ids per call leaves headroom.
+_EVENT_BATCH = 40
+
+
+def _fetch_events_by_id(ids: list[str], host: str) -> list[dict]:
+    # Event ids are numeric strings from the payload we just fetched, and the
+    # rest of this module builds Gamma URLs the same way (see
+    # `fetch_polymarket_market`), so no escaping layer is introduced here.
+    query = "&".join(f"id={i}" for i in ids)
+    response = get(f"{host}/events?limit=100&{query}")
+    return response if isinstance(response, list) else []
+
+
+def _event_entry(src: dict) -> dict | None:
+    """Build an ``events[]``-array entry (the shape `_extract_event_metadata`
+    consumes) from an event-or-series dict. ``None`` if slug/title are missing.
+
+    Lives here (not in `pinned.py`, which defined this first) because
+    `pinned.py` already imports FROM this module — the reverse import would be
+    circular. `pinned.py` imports this symbol from here instead.
+    """
+    slug = src.get("slug")
+    title = src.get("title") or src.get("name")
+    if not slug or not title:
+        return None
+    return {
+        "id": src.get("id"),
+        "slug": str(slug),
+        "title": str(title),
+        "description": src.get("description") or "",
+        "image": src.get("image") or src.get("icon") or None,
+        "icon": src.get("icon") or src.get("image") or None,
+        "category": src.get("category"),
+        "startDate": src.get("startDate") or src.get("startDateIso"),
+        "endDate": src.get("endDate") or src.get("endDateIso"),
+        "volume24hr": src.get("volume24hr"),
+    }
+
+
+def fetch_event_siblings(
+    pm_markets: list[dict],
+    *,
+    cap: int,
+    liquidity_threshold: float,
+    host: str = POLYMARKET_GAMMA_URL,
+    fetcher=None,
+    exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
+) -> list[dict]:
+    """The other outcomes of the events `pm_markets` belong to.
+
+    An event is one question, and half an answer to it is worse than none: the
+    top-1000-by-24h-volume window admitted exactly 1 of the 33 outcomes of
+    "Next Prime Minister of Ethiopia?", so the site showed a $273M event as one
+    candidate at under 1%.
+
+    Keeps each event's `cap` busiest open outcomes by 24h volume (falling back
+    to lifetime volume when 24h volume is absent, which upstream frequently
+    leaves unset on markets nested under `/events`). The median event has 11,
+    so 12 lets most through whole and truncates only the long-tail monsters —
+    the largest upstream events carry 128 outcomes and nobody trades their
+    tail.
+
+    Markets nested under `/events` carry no `events[]` key of their own (only
+    markets fetched through `/markets` do), so each returned sibling has one
+    attached here from the event payload just fetched — otherwise it would
+    land as an orphan and get wrapped in its own singleton event downstream,
+    which is worse than not expanding at all. When the event itself carries no
+    usable slug/title, the sibling is still returned (tradeable beats grouped;
+    the orphan-wrap gives it a singleton, same reasoning as `pinned.py`).
+
+    Returns only markets NOT already in `pm_markets`, so a market that
+    qualified on its own merit can never be displaced by the cap. The sibling
+    outcomes of a game event are exactly where the sports prop tail hangs, so
+    `exclude_churn_series` is threaded through here too — the whole point of
+    putting the check in `_passes_market_filters` is that this pass and the
+    primary window answer the question identically.
+    """
+    fetch = fetcher or _fetch_events_by_id
+    have = {m.get("condition_id") or m.get("conditionId") for m in pm_markets}
+    event_ids: list[str] = []
+    for m in pm_markets:
+        for e in (m.get("events") or []):
+            if e.get("id") is not None and str(e["id"]) not in event_ids:
+                event_ids.append(str(e["id"]))
+    if not event_ids:
+        return []
+
+    extra: list[dict] = []
+    for i in range(0, len(event_ids), _EVENT_BATCH):
+        try:
+            events = fetch(event_ids[i : i + _EVENT_BATCH], host)
+        except Exception as exc:  # one bad batch must not lose the rest
+            logger.warning(
+                "event sibling fetch failed for batch %d (%s)",
+                i // _EVENT_BATCH,
+                exc.__class__.__name__,
+            )
+            continue
+        for event in events:
+            group = _event_entry(event)
+            if group is None:
+                logger.warning(
+                    "event sibling: event %s has no bindable metadata",
+                    event.get("id"),
+                )
+            # Normalize a COPY — these dicts are nested inside the event
+            # payload, and mutating them in place would corrupt it for any
+            # other consumer of the same fetch.
+            outcomes = [
+                _normalize_market_fields(dict(raw))
+                for raw in (event.get("markets") or [])
+            ]
+            # Normalizing before this check (rather than reading the raw
+            # `closed` field) coerces string-ish values like "false" through
+            # `_to_bool`, and matches the check `_passes_market_filters` makes
+            # later — the raw field alone left a latent truthy-string trap.
+            outcomes = [m for m in outcomes if not m.get("closed")]
+            # Churn BEFORE the cap, not after. A prop-heavy game event carries
+            # a dozen spreads/totals legs that each out-trade the second real
+            # leg, so filtering after `outcomes[:cap]` let the props eat every
+            # slot and then get dropped -- the event contributed nothing and
+            # the genuine keeper was lost, which is worse than not excluding
+            # at all. `_passes_market_filters` below still asks the same
+            # question; asking it twice is free and keeps the chokepoint.
+            if exclude_churn_series:
+                outcomes = [m for m in outcomes if not _is_churn_series(m)]
+            # Same reasoning, same place: an excluded category must not eat the
+            # `outcomes[:cap]` slots and then be dropped, costing the event the
+            # keepers it did have.
+            outcomes = [
+                m for m in outcomes
+                if not _is_excluded_category(m, excluded_categories)
+            ]
+            outcomes.sort(
+                key=lambda m: (
+                    -_as_float(m.get("volume24hr")),
+                    -_as_float(m.get("volumeNum")),
+                )
+            )
+            for m in outcomes[:cap]:
+                if m.get("condition_id") in have:
+                    continue
+                if not _passes_market_filters(
+                    m,
+                    liquidity_threshold=liquidity_threshold,
+                    closed=False,
+                    archived=False,
+                    exclude_churn_series=exclude_churn_series,
+                    excluded_categories=excluded_categories,
+                ):
+                    continue
+                if group is not None:
+                    m["events"] = [group]
+                have.add(m["condition_id"])
+                extra.append(m)
+    return extra
 
 
 def fetch_is_polymarket_market_closed(condition_id: ConditionId) -> bool:
@@ -405,6 +771,8 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
     end_iso = raw.get("endDate") or raw.get("endDateIso")
     volume24hr = raw.get("volume24hr")
     volume = raw.get("volume")
+    liquidity = raw.get("liquidity")
+    competitive = raw.get("competitive")
     return {
         "polymarket_event_id": str(pm_event_id) if pm_event_id is not None else None,
         "slug": str(slug),
@@ -426,6 +794,8 @@ def _extract_event_metadata(pm_market: dict) -> dict | None:
         "end_date": _iso_to_unix(end_iso) if end_iso else None,
         "volume_24hr": _as_float(volume24hr) if volume24hr is not None else None,
         "volume": _as_float(volume) if volume is not None else None,
+        "liquidity": _as_optional_float(liquidity),
+        "competitive": _as_optional_float(competitive),
     }
 
 
@@ -477,6 +847,37 @@ def bind_existing_market_to_upstream_event(
     return True
 
 
+def extract_tags(pm_market: dict) -> list[tuple[str, str]] | None:
+    """Pull ``(slug, label)`` pairs off an upstream market.
+
+    Returns ``None`` — meaning "upstream said nothing, keep what is stored" —
+    when ``tags`` is absent, null, or not a list. That distinction is the whole
+    point: a Gamma request without ``include_tag=true`` returns ``tags: null``
+    for every market, and treating that as an empty set would wipe good rows on
+    every pass through such a code path. An empty LIST is different: upstream
+    positively says this market has no tags, and the stored set should clear.
+
+    Malformed entries are skipped individually rather than raised on. Raising
+    here would abort this market's binding on every future pass, permanently.
+
+    The label is only ever a display string, so a missing or non-string one
+    falls back to the slug rather than dropping an otherwise good tag.
+    """
+    raw = pm_market.get("tags")
+    if not isinstance(raw, list):
+        return None
+    out: list[tuple[str, str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        slug = normalize_slug(entry.get("slug"))
+        if slug is None:
+            continue
+        label = entry.get("label")
+        out.append((slug, label if isinstance(label, str) and label.strip() else slug))
+    return out
+
+
 def bind_market_to_upstream_event(
     db, market: "Market", pm_market: dict
 ) -> None:
@@ -516,6 +917,9 @@ def bind_market_to_upstream_event(
     TableWrite.update_event_volume(
         db, event.event_id, meta["volume_24hr"], meta.get("volume")
     )
+    TableWrite.update_event_metrics(
+        db, event.event_id, meta["liquidity"], meta["competitive"]
+    )
     outcome_label, icon_url = _extract_outcome_metadata(pm_market)
     TableWrite.attach_market_to_event(
         db,
@@ -524,6 +928,13 @@ def bind_market_to_upstream_event(
         outcome_label=outcome_label,
         icon_url=icon_url,
     )
+    # Mirror the upstream tag list. This is the same payload `resolve_category`
+    # above collapses into one CATEGORY; storing it whole is what lets the
+    # sidebar offer real subcategories. Skipped entirely when upstream carried
+    # no tags list, so a caller without include_tag=true cannot clear good rows.
+    tags = extract_tags(pm_market)
+    if tags is not None:
+        TableWrite.replace_market_tags(db, market_id=market.market_id, tags=tags)
 
 
 def _polymarket_to_erc1155_tokens(pm_market: dict) -> list[tuple[str, str]]:
@@ -552,6 +963,9 @@ def fetch_and_sync_polymarket_markets(
     *,
     max_markets: int = 300,
     liquidity_min: float = 0.0,
+    event_max_outcomes: int = 0,
+    exclude_churn_series: bool = True,
+    excluded_categories: "Iterable[str]" = (),
 ) -> list[Market]:
     """Discover + locally create the trending Polymarket markets.
 
@@ -562,6 +976,16 @@ def fetch_and_sync_polymarket_markets(
     Args:
         max_markets: cap on how many top-by-volume markets to consider per pass.
         liquidity_min: minimum max(liquidity, volume) floor; 0 = no floor.
+        event_max_outcomes: cap on sibling outcomes pulled in per event for any
+            market that qualified in the primary window; 0 disables the pass
+            (the default, so existing callers keep making no extra network
+            calls).
+        exclude_churn_series: forwarded to BOTH passes below, so the
+            daily-temperature and sports-prop series are dropped whichever way
+            a market would have entered. Comes from
+            `Settings.sync_exclude_churn_series` at the API layer.
+        excluded_categories: forwarded to both passes for the same reason.
+            Comes from `Settings.excluded_categories`.
     """
     pm_markets = fetch_all_polymarket_markets(
         host,
@@ -570,7 +994,23 @@ def fetch_and_sync_polymarket_markets(
         # rejected with HTTP 422 "order fields are not valid".
         order="volume24hr",
         max_markets=max_markets,
+        exclude_churn_series=exclude_churn_series,
+        excluded_categories=excluded_categories,
     )
+    if event_max_outcomes > 0:
+        siblings = fetch_event_siblings(
+            pm_markets,
+            cap=event_max_outcomes,
+            liquidity_threshold=liquidity_min,
+            host=host,
+            exclude_churn_series=exclude_churn_series,
+            excluded_categories=excluded_categories,
+        )
+        logger.info(
+            "event expansion added %d sibling markets to %d primary",
+            len(siblings), len(pm_markets),
+        )
+        pm_markets = pm_markets + siblings
     created_markets = create_polymarket_markets_if_needed(db, pm_markets, admin)
     return created_markets
 
@@ -787,16 +1227,31 @@ def mirror_polymarket_resolutions(
     return resolved_count
 
 
-def auto_redeem_resolved_markets(
-    db, admin: OnchainAdmin, *, gas_topup_wei: int = 10**18
-) -> int:
+def auto_redeem_resolved_markets(db, admin: OnchainAdmin) -> int:
     """Redeem every holder of each RESOLVED, not-yet-fully-redeemed market.
 
     `db` is a DbSession (not a raw connection) because PositionService manages
     its own read/write connections. For each candidate market, scans the
     participant accounts (trades + split/merge, including the house bot),
-    redeems any with a nonzero on-chain token balance using their custodial
-    key, and flags the market FULLY_REDEEMED once no holder remains.
+    redeems any that opted in and hold a nonzero on-chain token balance using
+    their custodial key, and flags the market FULLY_REDEEMED once no holder
+    remains.
+
+    A holder who has not set AUTO_REDEEM_ENABLED is skipped outright, and a
+    market with such a holder still sitting on tokens never gets marked
+    FULLY_REDEEMED -- the winnings do not move or expire, they just wait for
+    that account to claim them itself. Bot accounts (`User.is_bot`) are the
+    exception: they are always redeemed regardless of the flag, since a bot
+    has no one to ask for consent and no interface to ask from -- the house's
+    own accounts (e.g. the liquidity mirror) would otherwise sit on winning
+    tokens and locked collateral in every resolved market forever, and
+    `still_held` below would never let FULLY_REDEEMED get set.
+
+    The holder pays their own gas for the redeem — the house no longer tops
+    anyone up here. A holder without enough native balance simply fails this
+    pass and is retried on the next one; that's correct, because the
+    winnings stay theirs on-chain either way, held by the resolved market
+    until they have gas to claim them.
 
     Returns the number of holder redemptions performed.
     """
@@ -821,19 +1276,17 @@ def auto_redeem_resolved_markets(
                 user = TableRead.get_user_by_api_key(conn, api_key)
             if user is None:
                 continue
+            if not (user.is_bot or user.auto_redeem):
+                # Settlement is still theirs to trigger. The winnings do not
+                # move or expire; they wait behind a button. A bot has no one
+                # to ask for consent and no interface to ask from, so the
+                # opt-in does not reach the house's own accounts.
+                continue
             if not any(
                 admin.ctf_balance(user.eth_address, tid) > 0 for tid in token_ints
             ):
                 continue
             try:
-                try:
-                    admin.fund_gas(user.eth_address, gas_topup_wei)
-                except Exception:
-                    logger.warning(
-                        "gas top-up failed for %s on market %s (continuing)",
-                        user.eth_address,
-                        market.market_id,
-                    )
                 svc.redeem(user, market.market_id)
                 redeemed += 1
             except Exception:
@@ -960,18 +1413,3 @@ def build_create_market_request_from_json(pm_market: dict) -> CreateMarketReques
     return request
 
 
-@staticmethod
-def update_market_outcomes(db) -> None:
-    markets = TableRead.list_markets()
-    for market in markets:
-        if market.market_id == market_id:
-            market.market_state = state
-            db.execute(
-                """
-                UPDATE markets
-                SET MARKET_STATE = %s
-                WHERE MARKET_ID = %s
-                """,
-                (state.value, market_id),
-            )
-            return

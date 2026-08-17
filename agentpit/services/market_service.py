@@ -32,14 +32,29 @@ _ZERO_BYTES32 = b"\x00" * 32
 
 
 class MarketService:
-    def __init__(self, db: DbSession, onchain: OnchainAdmin):
+    def __init__(
+        self,
+        db: DbSession,
+        onchain: OnchainAdmin,
+        excluded_categories: "list[str] | None" = None,
+        excluded_tags: "list[str] | None" = None,
+    ):
         self._db = db
         self._onchain = onchain
+        # Browse-surface filter only — the by-id and by-condition reads below
+        # keep resolving an excluded market, so an existing link or a held
+        # position never turns into a 404.
+        self._excluded_categories = excluded_categories or []
+        self._excluded_tags = excluded_tags or []
 
     def market_stats(self) -> MarketStatsResponse:
         with self._db.read() as conn:
             return MarketStatsResponse(
-                active=TableRead.count_active_markets(conn)
+                active=TableRead.count_active_markets(
+                    conn,
+                    excluded_categories=self._excluded_categories,
+                    excluded_tags=self._excluded_tags,
+                )
             )
 
     def list_markets(self, limit: int, offset: int) -> ListMarketsResponse:
@@ -85,6 +100,8 @@ class MarketService:
                 condition_ids=condition_ids,
                 clob_token_ids=clob_token_ids,
                 polymarket_condition_id=polymarket_condition_id,
+                excluded_categories=self._excluded_categories,
+                excluded_tags=self._excluded_tags,
             )
             prices = prices_for_markets(conn, markets)
         return [to_gamma_market(m, prices.get(m.market_id)) for m in markets]

@@ -4,7 +4,6 @@ import type { GammaEvent } from "@/types/gamma";
 import type {
   Event,
   EventWithMarkets,
-  ListEventCategoriesResponse,
   ListEventsResponse,
 } from "@/types/event";
 import { gammaToMarket } from "@/api/markets";
@@ -19,6 +18,12 @@ export interface ListEventsParams {
   /** Case-insensitive event category filter; omitted/blank means "all".
    *  Explicit `| undefined` because tsconfig sets exactOptionalPropertyTypes. */
   category?: string | undefined;
+  /** Top-level tag slug; omitted/blank means "all". */
+  tag?: string | undefined;
+  /** Facet slugs, OR-ed among themselves and AND-ed with `tag`. */
+  subtags?: string[] | undefined;
+  /** Server-side ordering; omitted/blank lets the server pick its default. */
+  sort?: string | undefined;
 }
 
 function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
@@ -34,6 +39,8 @@ function gammaToEventWithMarkets(g: GammaEvent): EventWithMarkets {
     polymarket_event_id: null,
     volume_24hr: parseVolume(g.volume24hr),
     volume: parseVolume(g.volume),
+    liquidity: parseVolume(g.liquidity),
+    competitive: parseVolume(g.competitive),
   };
   return { event, markets: g.markets.map(gammaToMarket) };
 }
@@ -47,6 +54,16 @@ export async function listEvents(
   });
   if (params.category) {
     search.set("category", params.category);
+  }
+  if (params.tag && params.tag.trim()) {
+    search.set("tag", params.tag.trim());
+  }
+  for (const subtag of params.subtags ?? []) {
+    // Repeated key, not a comma-joined value — FastAPI reads `subtag` as a list.
+    if (subtag.trim()) search.append("subtag", subtag.trim());
+  }
+  if (params.sort && params.sort.trim()) {
+    search.set("sort", params.sort.trim());
   }
   const wire = await apiFetch<GammaEvent[]>(`/events?${search.toString()}`);
   // A fully-resolved event has nothing tradeable left — hide it from listings
@@ -65,27 +82,41 @@ export async function listEvents(
   };
 }
 
-export async function listEventCategories(): Promise<ListEventCategoriesResponse> {
-  return apiFetch<ListEventCategoriesResponse>("/events/categories");
-}
-
 export async function getEvent(slug: string): Promise<EventWithMarkets> {
   const g = await apiFetch<GammaEvent>(`/events/${encodeURIComponent(slug)}`);
   return gammaToEventWithMarkets(g);
 }
 
-export function useEventsInfinite(category: string | null = null) {
-  const normalizedCategory = category?.trim() || null;
+export function useEventsInfinite(
+  tag: string | null = null,
+  subtags: string[] = [],
+  sort: string | null = null,
+) {
+  const normalizedTag = tag?.trim() || null;
+  // Sorted so the same OR set in a different click order reuses one page chain
+  // instead of refetching from scratch.
+  const normalizedSubtags = [...subtags].map((s) => s.trim()).filter(Boolean).sort();
+  const normalizedSort = sort?.trim() || null;
   return useInfiniteQuery({
-    // The category is part of the key so switching categories starts a fresh
-    // page chain instead of appending onto the previous category's pages.
-    queryKey: ["events", "infinite", EVENTS_PAGE_SIZE, normalizedCategory],
+    // The sort is part of the key for the same reason the filters are:
+    // changing it must start a fresh page chain. Appending a differently
+    // ordered page onto the old one is exactly the bug this replaces.
+    queryKey: [
+      "events",
+      "infinite",
+      EVENTS_PAGE_SIZE,
+      normalizedTag,
+      normalizedSubtags.join(","),
+      normalizedSort,
+    ],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       listEvents({
         limit: EVENTS_PAGE_SIZE,
         offset: pageParam,
-        category: normalizedCategory ?? undefined,
+        tag: normalizedTag ?? undefined,
+        subtags: normalizedSubtags,
+        sort: normalizedSort ?? undefined,
       }),
     getNextPageParam: (lastPage) =>
       lastPage.hasMore ? lastPage.nextOffset : undefined,
@@ -93,13 +124,6 @@ export function useEventsInfinite(category: string | null = null) {
     // refresh (a sync streams markets in over a few seconds). Only refetches
     // while the tab is visible (refetchIntervalInBackground defaults to false).
     refetchInterval: 5000,
-  });
-}
-
-export function useEventCategories() {
-  return useQuery({
-    queryKey: ["events", "categories"],
-    queryFn: listEventCategories,
   });
 }
 

@@ -17,6 +17,7 @@ from agentpit.datastructures.market import Market
 from agentpit.db.table_read import TableRead
 from agentpit.polymarket.polymarket_sync import (
     POLYMARKET_GAMMA_URL,
+    _event_entry,
     _normalize_market_fields,
     create_polymarket_markets_if_needed,
 )
@@ -72,30 +73,6 @@ def fetch_event_by_slug(slug: str) -> dict | None:
     if isinstance(result, list) and result and isinstance(result[0], dict):
         return result[0]
     return None
-
-
-def _event_entry(src: dict) -> dict | None:
-    """Build an ``events[]``-array entry (the shape `_extract_event_metadata`
-    consumes) from an event-or-series dict. ``None`` if slug/title are missing.
-    """
-    slug = src.get("slug")
-    title = src.get("title") or src.get("name")
-    if not slug or not title:
-        return None
-    return {
-        "id": src.get("id"),
-        "slug": str(slug),
-        "title": str(title),
-        "description": src.get("description") or "",
-        "image": src.get("image") or src.get("icon") or None,
-        "icon": src.get("icon") or src.get("image") or None,
-        "category": src.get("category"),
-        "startDate": src.get("startDate") or src.get("startDateIso"),
-        "endDate": src.get("endDate") or src.get("endDateIso"),
-        # For a recurring series the window event's own 24h volume is null; the
-        # series aggregate (large) is what should rank the homepage card.
-        "volume24hr": src.get("volume24hr"),
-    }
 
 
 def series_event_metadata(event: dict) -> dict | None:

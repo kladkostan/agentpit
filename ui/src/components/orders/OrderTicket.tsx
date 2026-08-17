@@ -389,7 +389,11 @@ export function OrderTicket({
           </>
         ) : isBuy ? (
           <div className="space-y-3 border-t border-border px-4 py-4">
-            <Field label="Amount" hint="USDC">
+            {/* apUSD, not USDC: this branch predates the rename, and taking
+                its side of the conflict would put the old ticker back in front
+                of users. The layout classes are this branch's, the currency
+                name is main's. */}
+            <Field label="Amount" hint="apUSD">
               <ValueInput
                 id="market-amount"
                 value={marketAmount}

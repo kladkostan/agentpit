@@ -94,7 +94,13 @@ services:
       - ../.env
     environment:
       AGENTPIT_DATABASE_URL: postgresql://agentpit:${POSTGRES_PASSWORD}@postgres:5432/agentpit
-      RPC_URL: http://anvil:8545
+      # The local anvil is the DEFAULT, not the law. This line used to be a
+      # bare `http://anvil:8545`, and an `environment:` entry beats `env_file`,
+      # so a deployment that had moved to a real chain in .env silently kept
+      # talking to the sidecar. On the SKALE cutover that surfaced as
+      # `Connected chain_id 31337 != deployment chain_id 324705682` -- caught
+      # only because `verify_chain()` refuses to start on a mismatch.
+      RPC_URL: ${RPC_URL:-http://anvil:8545}
     volumes:
       - ../deployments:/app/deployments:ro
     depends_on:
@@ -108,7 +114,21 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.ui
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set in .env}
+        # All `:-`, none `:?`, and that is deliberate. Compose interpolates the
+        # WHOLE file on EVERY command, so a `${VAR:?}` here does not merely
+        # guard the build -- it makes `docker compose restart anvil` fail on a
+        # missing UI variable. That bit during this migration: an incident
+        # recreate was refused for a value the recreated service never reads.
+        #
+        # The requirement did not go away, it moved to where it belongs:
+        # `Dockerfile.ui` refuses to build without these three, with a message
+        # naming what breaks. A missing value now costs a failed build instead
+        # of a system that cannot be operated.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+        # Baked in, not read at runtime -- see Dockerfile.ui.
+        VITE_WORKOS_CLIENT_ID: ${VITE_WORKOS_CLIENT_ID:-}
+        VITE_WORKOS_REDIRECT_URI: ${VITE_WORKOS_REDIRECT_URI:-}
     restart: unless-stopped
     logging: *default-logging
     ports:
@@ -119,7 +139,6 @@ services:
       - "443:443/udp"   # HTTP/3
       - "8000:8000"
     volumes:
-      - ./arena-data:/arena:ro
       # Certificates and the ACME account key. Without these the container's
       # writable layer holds them, every `build` throws them away, and Caddy
       # re-requests certificates on each deploy -- Let's Encrypt allows five

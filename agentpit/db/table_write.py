@@ -19,14 +19,19 @@ class TableWrite:
     def create_user(
         db: psycopg.Connection,
         email: str,
-        password_hash: str,
+        password_hash: str | None,
         handle: str | None = None,
+        google_sub: str | None = None,
     ) -> tuple[str, LocalAccount, str]:
         """Create a new user with an auto-generated eth keypair.
 
         Returns (user_id, eth_account, api_key). The caller is responsible for
         running on-chain onboarding (faucet drip + approvals) and then calling
         :func:`mark_user_onboarded` once those txns confirm.
+
+        `password_hash` is None for an account that arrived through Google, and
+        `google_sub` is None for one that arrived with a password. Every account
+        has at least one of them.
         """
         acct: LocalAccount = Account.create()
         key_hex: str = Web3.to_hex(acct.key)
@@ -39,8 +44,8 @@ class TableWrite:
             INSERT INTO users (
                 USER_ID, EMAIL, PASSWORD_HASH, HANDLE,
                 ETH_ADDRESS, ETH_PRIVATE_KEY, API_KEY,
-                ONBOARDED_AT, CREATED_AT
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s)
+                ONBOARDED_AT, CREATED_AT, GOOGLE_SUB
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
             """,
             (
                 user_id,
@@ -51,6 +56,7 @@ class TableWrite:
                 key_hex,
                 api_key,
                 created_at,
+                google_sub,
             ),
         )
         return user_id, acct, api_key
@@ -61,6 +67,20 @@ class TableWrite:
             "UPDATE users SET ONBOARDED_AT = %s WHERE USER_ID = %s",
             (int(_time.time()), user_id),
         )
+
+    @staticmethod
+    def clear_user_onboarded(db: psycopg.Connection, user_id: str) -> bool:
+        """Test-only: put a row back into the never-onboarded state.
+
+        The condition it recreates is real -- `_create_account` commits the row
+        before onboarding it, so a chain outage leaves exactly this -- but
+        nothing in the product ever writes it, and the repair paths that read
+        `ONBOARDED_AT` cannot be tested without a way to produce it.
+        """
+        cur = db.execute(
+            "UPDATE users SET ONBOARDED_AT = NULL WHERE USER_ID = %s", (user_id,)
+        )
+        return cur.rowcount > 0
 
     @staticmethod
     def update_user_handle(db: psycopg.Connection, user_id: str, handle: str) -> bool:
@@ -77,6 +97,176 @@ class TableWrite:
         cur = db.execute(
             "UPDATE users SET PASSWORD_HASH = %s WHERE USER_ID = %s",
             (password_hash, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def set_auto_redeem(
+        db: psycopg.Connection, user_id: str, enabled: bool
+    ) -> bool:
+        cur = db.execute(
+            "UPDATE users SET AUTO_REDEEM_ENABLED = %s WHERE USER_ID = %s",
+            (enabled, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def claim_auth_code_attempt(
+        db: psycopg.Connection,
+        bucket: str,
+        at: int,
+        window_seconds: int,
+        limit: int,
+    ) -> bool:
+        """Spend one hit against a fixed window. False when the window is full.
+
+        The same idiom as `mark_key_export_attempt` below and for the same
+        reason: the predicate and the increment are ONE statement, so two
+        concurrent callers cannot both read the same stale count, both find it
+        under the limit, and both proceed. Postgres serialises them on the row
+        lock; the loser re-evaluates its `WHERE` against the count the winner
+        just committed.
+
+        Fixed window, not sliding: a caller who spends the whole allowance in
+        the last second of a window gets a fresh one immediately after, so the
+        true worst case is twice the limit across a window boundary. Accepted --
+        the rule exists to stop a flood and a bill, not to be a precise quota,
+        and a sliding window costs a row per request instead of a row per
+        subject.
+
+        A bucket nobody has hit yet takes the INSERT path and is always allowed.
+        """
+        expired_before = at - window_seconds
+        cur = db.execute(
+            """
+            INSERT INTO auth_code_attempts (BUCKET, WINDOW_START, HITS)
+            VALUES (%(bucket)s, %(at)s, 1)
+            ON CONFLICT (BUCKET) DO UPDATE SET
+                WINDOW_START = CASE
+                    WHEN auth_code_attempts.WINDOW_START <= %(expired)s
+                    THEN %(at)s ELSE auth_code_attempts.WINDOW_START END,
+                HITS = CASE
+                    WHEN auth_code_attempts.WINDOW_START <= %(expired)s
+                    THEN 1 ELSE auth_code_attempts.HITS + 1 END
+            WHERE auth_code_attempts.WINDOW_START <= %(expired)s
+               OR auth_code_attempts.HITS < %(limit)s
+            """,
+            {
+                "bucket": bucket,
+                "at": at,
+                "expired": expired_before,
+                "limit": limit,
+            },
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def mark_key_export_attempt(
+        db: psycopg.Connection, user_id: str, at: int, not_before: int
+    ) -> bool:
+        """Claim the export-attempt cooldown, atomically.
+
+        The predicate and the stamp are one statement -- the same idiom as
+        `claim_topup` -- so two concurrent callers cannot both read the same
+        stale `KEY_EXPORT_ATTEMPT_AT` and both pass the check before either
+        writes. Under READ COMMITTED, a second UPDATE that targets a row
+        another open transaction is about to write blocks on that row's
+        lock; once the first commits, the second re-evaluates its WHERE
+        clause against the value that commit just wrote, not the value it
+        started with. So the loser sees the winner's fresh stamp and its own
+        predicate fails, returning `rowcount == 0` here -- the cooldown is
+        active precisely because someone just claimed it, not because of a
+        stale read.
+
+        Returns False when the cooldown is still active.
+        """
+        cur = db.execute(
+            "UPDATE users SET KEY_EXPORT_ATTEMPT_AT = %s "
+            "WHERE USER_ID = %s "
+            "AND (KEY_EXPORT_ATTEMPT_AT IS NULL OR KEY_EXPORT_ATTEMPT_AT <= %s)",
+            (at, user_id, not_before),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def mark_key_exported(db: psycopg.Connection, user_id: str, at: int) -> bool:
+        """First export only — a later one must not move the stamp, or the
+        re-grant lock would appear to lapse."""
+        cur = db.execute(
+            "UPDATE users SET KEY_EXPORTED_AT = %s "
+            "WHERE USER_ID = %s AND KEY_EXPORTED_AT IS NULL",
+            (at, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def link_google_identity(
+        db: psycopg.Connection, user_id: str, google_sub: str
+    ) -> bool:
+        """Hand an existing account to a Google identity.
+
+        The password goes with the stamp, in one statement. We never verified
+        that whoever set that password owns the address -- registration has no
+        email confirmation -- so anybody could have claimed a stranger's
+        address before its owner ever arrived. The Google token is the only
+        proof of ownership in play, so it takes the account whole.
+        """
+        cur = db.execute(
+            "UPDATE users SET GOOGLE_SUB = %s, PASSWORD_HASH = NULL "
+            "WHERE USER_ID = %s",
+            (google_sub, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def set_workos_user_id(
+        db: psycopg.Connection, user_id: str, workos_user_id: str
+    ) -> bool:
+        """Link this account to its WorkOS identity. False when no row matched.
+
+        Leaves PASSWORD_HASH alone: this is the writer the migration script
+        uses to backfill ids for accounts nobody has signed into yet, and
+        those accounts must keep logging in with their password until plan 3
+        removes that door. `link_workos_identity` below is the one to use when
+        somebody has just proved they own the address.
+        """
+        cur = db.execute(
+            "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",
+            (workos_user_id, user_id),
+        )
+        return cur.rowcount > 0
+
+    @staticmethod
+    def link_workos_identity(
+        db: psycopg.Connection, user_id: str, workos_user_id: str
+    ) -> bool:
+        """Hand an existing account to a WorkOS identity. False when no row matched.
+
+        **The password is deliberately left alone**, and this is not the same
+        call as `link_google_identity` above, which clears it.
+
+        The argument for clearing is good and will be acted on: registration
+        takes any address on trust, so a password sitting on a row is no
+        evidence that whoever set it owns the address, while a mailed code is.
+        Key export is no longer what stands in the way -- `export_private_key`
+        stopped reading PASSWORD_HASH and now re-authenticates every account
+        the same way, with a mailed code pinned to WORKOS_USER_ID.
+
+        The rollback is. `/login` answers 410 since the cutover, but the
+        service behind it was left untouched for exactly this reason:
+        reverting that one commit restores a working legacy sign-in, and what
+        it signs people in with is these hashes. `change_password` reads the
+        column live either way. Nulling the hash here spends that credential
+        account by account, silently, on each holder's first code sign-in --
+        all 17 production accounts have one -- and it does not come back.
+
+        The door is shut and the password outlives it by one plan: plan 4
+        drops the column, and until then the row keeps its password, which is
+        exactly the situation before this feature existed.
+        """
+        cur = db.execute(
+            "UPDATE users SET WORKOS_USER_ID = %s WHERE USER_ID = %s",
+            (workos_user_id, user_id),
         )
         return cur.rowcount > 0
 
@@ -183,11 +373,21 @@ class TableWrite:
         t: int,
         capital_raw: int,
         deposited_raw: int,
+        invested_raw: int = 0,
+        unrealized_raw: int = 0,
     ) -> None:
+        """One valuation of an account.
+
+        `invested_raw` is the cost basis of the open positions -- what the
+        account put to work, not what it was handed. `unrealized_raw` is what
+        those positions have gained or lost on paper; the realized half is the
+        residual against (capital - deposited).
+        """
         db.execute(
             "INSERT INTO account_snapshots "
-            "(USER_ID, T, CAPITAL_RAW, DEPOSITED_RAW) VALUES (%s, %s, %s, %s)",
-            (user_id, t, capital_raw, deposited_raw),
+            "(USER_ID, T, CAPITAL_RAW, DEPOSITED_RAW, INVESTED_RAW, "
+            "UNREALIZED_RAW) VALUES (%s, %s, %s, %s, %s, %s)",
+            (user_id, t, capital_raw, deposited_raw, invested_raw, unrealized_raw),
         )
 
     @staticmethod
@@ -366,6 +566,36 @@ class TableWrite:
         )
 
     @staticmethod
+    def update_event_metrics(
+        db: psycopg.Connection,
+        event_id: int,
+        liquidity: float | None,
+        competitive: float | None,
+    ) -> None:
+        """Refresh an event's captured order-book depth and contest score.
+
+        Each figure is skipped independently when None, exactly as
+        `update_event_volume` treats the volumes: a payload carrying only one
+        of the two must not blank the other, and a pass where upstream sent
+        neither must not blank both. Called on every bind pass.
+        """
+        sets = []
+        params: list[object] = []
+        if liquidity is not None:
+            sets.append("LIQUIDITY = %s")
+            params.append(liquidity)
+        if competitive is not None:
+            sets.append("COMPETITIVE = %s")
+            params.append(competitive)
+        if not sets:
+            return
+        params.append(event_id)
+        db.execute(
+            f"UPDATE events SET {', '.join(sets)} WHERE EVENT_ID = %s",
+            tuple(params),
+        )
+
+    @staticmethod
     def update_market_polymarket_tokens(
         db: psycopg.Connection,
         *,
@@ -412,6 +642,34 @@ class TableWrite:
             """,
             (event_id, outcome_label, icon_url, market_id),
         )
+
+    @staticmethod
+    def replace_market_tags(
+        db: psycopg.Connection, *, market_id: int, tags: list[tuple[str, str]]
+    ) -> None:
+        """Set this market's tag rows to exactly ``tags``, a list of
+        ``(slug, label)`` pairs the caller has already normalised.
+
+        Replace rather than merge: a tag Polymarket removed must disappear
+        locally on the next sync pass, and only a full rewrite of one market's
+        set achieves that without needing to know the previous contents.
+
+        Duplicate slugs within one call are collapsed. Two upstream entries can
+        normalise to the same slug (Gamma has returned both "1H" and "1h"), and
+        a duplicate row would violate the primary key and abort the statement,
+        taking the caller's whole transaction with it.
+        """
+        db.execute("DELETE FROM market_tags WHERE MARKET_ID = %s", (market_id,))
+        deduped: dict[str, str] = {}
+        for slug, label in tags:
+            deduped.setdefault(slug, label)
+        if not deduped:
+            return
+        with db.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO market_tags (MARKET_ID, SLUG, LABEL) VALUES (%s, %s, %s)",
+                [(market_id, slug, label) for slug, label in deduped.items()],
+            )
 
     @staticmethod
     def update_event_category(

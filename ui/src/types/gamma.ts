@@ -38,5 +38,9 @@ export interface GammaEvent {
   volume24hr: string;
   /** Upstream all-time volume, stringified. "0" when unsynced. */
   volume: string;
+  /** Order-book depth, stringified (Gamma convention). "0" when unsynced. */
+  liquidity: string;
+  /** How contested the odds are, 0..1, stringified. "0" when unsynced. */
+  competitive: string;
   markets: GammaMarket[];
 }

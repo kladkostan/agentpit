@@ -2,9 +2,10 @@ import { Link } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { usePricesHistory } from "@/api/markets";
 import { CHART_PRIMARY_COLOR } from "@/lib/chartPalette";
+import { carryPriceForward } from "@/lib/eventChartSeries";
 import {
+  closeLabel,
   formatProbabilityPct,
-  formatShortDate,
   formatVolume,
   volumeStat,
 } from "@/lib/format";
@@ -17,30 +18,54 @@ interface MarketCardProps {
   /** When provided, the card links to /events/:slug instead of /markets/:id.
    * Used for singleton-market events so the URL surface stays event-centric. */
   eventSlug?: string;
-  /** Parent event's upstream volumes (USD). All-time is preferred; the 24h
-   *  figure is the fallback for events no longer in the synced set. */
+  /** Parent event's end date. When provided, this — not `market.end_date` —
+   *  decides the closes/Awaiting-resolution label, so a singleton-market
+   *  event's card agrees with what `MultiMarketEventCard` would show for the
+   *  same event: the two card shapes must not label the same thing
+   *  differently. Falls back to the market's own date when omitted. */
+  eventEndDate?: number | null;
+  /** Parent event's upstream volumes (USD). Either is the fallback for the
+   *  other: events no longer in the synced set carry only the 24h figure. */
   volume?: number | null;
   volume24hr?: number | null;
+  /** Which of the two to show — set from the list's sort so the number on the
+   *  card explains the order it is in. */
+  volumePrefer?: "total" | "24h";
 }
 
 export function MarketCard({
   market,
   eventSlug,
+  eventEndDate,
   volume,
   volume24hr,
+  volumePrefer = "total",
 }: MarketCardProps) {
   const yesTokenId = market.erc1155_tokens[0]?.[0];
   const yesPrice = market.outcome_prices[0];
   const { data: spark } = usePricesHistory(yesTokenId);
   const yesPctLabel = formatProbabilityPct(yesPrice ?? null);
   const tone = STATE_TONE[market.market_state];
-  const closes = formatShortDate(market.end_date);
-  const vol = volumeStat(volume ?? null, volume24hr ?? null);
+  const closes = closeLabel(
+    eventEndDate !== undefined ? eventEndDate : market.end_date,
+    market.market_state,
+    Date.now() / 1000,
+  );
+  const vol = volumeStat(volume ?? null, volume24hr ?? null, volumePrefer);
   const href = eventSlug
     ? `/events/${eventSlug}`
     : `/markets/${market.market_id}`;
 
-  const points = spark?.history ?? [];
+  // Close the sparkline on the CURRENT price rather than the last trade. The
+  // big number beside it is book-derived, so a stalled tape drew a line ending
+  // somewhere the card never claims — this card read "<1% chance" under a line
+  // rising to 71%. It also makes "today" mean now-vs-24h-ago instead of
+  // last-trade-vs-24h-ago, which is what the label promises.
+  const points = carryPriceForward(
+    spark?.history ?? [],
+    Math.floor(Date.now() / 1000),
+    yesPrice,
+  );
   // Change is expressed in percentage points of probability (Δcents).
   // Prices are probabilities in [0, 1] → multiply by 100 to get cents.
   const change =
@@ -75,7 +100,10 @@ export function MarketCard({
           <span className="shrink-0 whitespace-nowrap">
             {closes ? (
               <>
-                <span className="text-foreground/40">closes</span> {closes}
+                {closes.prefix ? (
+                  <span className="text-foreground/40">{closes.prefix} </span>
+                ) : null}
+                {closes.value}
               </>
             ) : (
               <span className="text-foreground/40">#{market.market_id}</span>

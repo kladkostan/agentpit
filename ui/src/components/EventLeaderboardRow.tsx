@@ -60,6 +60,20 @@ export function EventLeaderboardRow({
   const yesMid = market.outcome_prices[0] ?? null;
   const yesPctLabel = formatProbabilityPct(yesMid);
   const label = market.outcome_label ?? market.question;
+  // A settled row must not look like a tradeable one: the price chips are buy
+  // buttons and there is nothing left to buy.
+  //
+  // The verdict is read off the price rather than a resolution field because
+  // the event payload is Gamma-shaped and carries none — `api/markets.ts` maps
+  // `closed` to CLOSED and hardcodes `resolved_outcome` to null. A settled
+  // market prices its outcomes at the extremes (0.999 / 0.0005 upstream), so
+  // the top one won. Anything in between is NOT called: a closed market with
+  // an ambiguous price is a market we do not understand, and it keeps its
+  // chips rather than being given a verdict we cannot support.
+  const isClosed = market.market_state === "CLOSED";
+  const settledYes = yesMid !== null && yesMid >= 0.9;
+  const settledNo = yesMid !== null && yesMid <= 0.1;
+  const isSettled = isClosed && (settledYes || settledNo);
 
   return (
     <div
@@ -97,22 +111,52 @@ export function EventLeaderboardRow({
       </button>
 
       <div className="flex items-stretch gap-1.5 py-3 pr-4">
-        <PriceChip
-          tone="yes"
-          label="Yes"
-          price={formatCents(yesCents)}
-          isActive={isSelected && selectedOutcome === yesLabel}
-          onClick={() => onPickOutcome(market.market_id, yesLabel ?? "")}
-        />
-        <PriceChip
-          tone="no"
-          label="No"
-          price={formatCents(noCents)}
-          isActive={isSelected && selectedOutcome === noLabel}
-          onClick={() => onPickOutcome(market.market_id, noLabel ?? "")}
-        />
+        {isSettled ? (
+          <Verdict won={settledYes} />
+        ) : (
+          <>
+            <PriceChip
+              tone="yes"
+              label="Yes"
+              price={formatCents(yesCents)}
+              isActive={isSelected && selectedOutcome === yesLabel}
+              onClick={() => onPickOutcome(market.market_id, yesLabel ?? "")}
+            />
+            <PriceChip
+              tone="no"
+              label="No"
+              price={formatCents(noCents)}
+              isActive={isSelected && selectedOutcome === noLabel}
+              onClick={() => onPickOutcome(market.market_id, noLabel ?? "")}
+            />
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function Verdict({ won }: { won: boolean }) {
+  /* Deliberately not a button: it occupies the width of both price chips so a
+     part-settled event keeps one column, and it states the outcome in words as
+     well as colour — a red and a green pill are the same pill to a reader who
+     cannot tell them apart. */
+  return (
+    <span
+      className={cn(
+        "flex min-w-[162px] items-center justify-center gap-1.5 rounded-lg border",
+        "px-2.5 py-1.5 text-sm font-semibold leading-tight",
+        won
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+      )}
+    >
+      {won ? "Yes" : "No"}
+      <span aria-hidden="true" className="text-xs opacity-80">
+        {won ? "✓" : "✗"}
+      </span>
+      <span className="sr-only">— settled</span>
+    </span>
   );
 }
 

@@ -1,13 +1,39 @@
 import json
+from dataclasses import dataclass
 
 from agentpit.datastructures.activity_wire import ActivityWire
 from agentpit.datastructures.market_state import MarketState
+from agentpit.datastructures.match_leg import legs_for_user
 from agentpit.datastructures.position_wire import PositionWire
 from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.onchain.admin import OnchainAdmin
 from agentpit.polymarket.format import price_to_float, size_to_float
 from agentpit.polymarket.resolve import resolve_by_token_id
+
+
+@dataclass(frozen=True)
+class _TokenFlow:
+    """What a user's fills of one outcome token add up to.
+
+    Sizes are micro-shares and costs are price-micro x size-micro, so a ratio
+    of the two is a micro-price and needs no intermediate rounding.
+    """
+
+    bought_size: int
+    bought_cost: int
+    sold_size: int
+    sold_proceeds: int
+    last_sell_time: int
+
+    @property
+    def net_size(self) -> int:
+        return self.bought_size - self.sold_size
+
+    @property
+    def avg_buy_price_micro(self) -> int:
+        """Size-weighted micro-price paid per share; 0 when nothing was bought."""
+        return self.bought_cost // self.bought_size if self.bought_size else 0
 
 
 class AccountService:
@@ -28,6 +54,9 @@ class AccountService:
             # Scanning every market on-chain is O(market count) reads (~24s at
             # 1000 markets); scope to the handful the user actually touched.
             markets = TableRead.list_markets_with_user_activity(conn, user.api_key)
+            event_slugs = TableRead.event_slugs_by_id(
+                conn, [m.event_id for m in markets if m.event_id is not None]
+            )
         out: list[PositionWire] = []
         for mkt in markets:
             if market and mkt.condition_id.value not in market:
@@ -38,9 +67,23 @@ class AccountService:
                 if bal <= 0:
                     continue
                 size = bal / 1_000_000
+                redeemable = (
+                    mkt.market_state == MarketState.RESOLVED
+                    and mkt.resolved_outcome == idx
+                )
                 with self._db.read() as conn:
                     avg_price = self._avg_fill_price(conn, user.api_key, token_id)
-                    cur_price = self._cur_price(conn, token_id)
+                    # A won outcome pays exactly $1 a share, and a resolved
+                    # losing outcome pays exactly $0. Either way the market
+                    # has no live book any more, so `_cur_price` would fall
+                    # through to the last trade print and show settled money
+                    # at whatever it last changed hands for.
+                    if redeemable:
+                        cur_price = 1.0
+                    elif mkt.market_state == MarketState.RESOLVED:
+                        cur_price = 0.0
+                    else:
+                        cur_price = self._cur_price(conn, token_id)
                 initial_value = avg_price * size
                 current_value = cur_price * size
                 cash_pnl = current_value - initial_value
@@ -48,10 +91,6 @@ class AccountService:
                 opp_idx = 1 - idx if len(tokens) == 2 else idx
                 opp_token, opp_label = (
                     tokens[opp_idx] if len(tokens) == 2 else (token_id, label)
-                )
-                redeemable = (
-                    mkt.market_state == MarketState.RESOLVED
-                    and mkt.resolved_outcome == idx
                 )
                 out.append(
                     PositionWire(
@@ -74,6 +113,7 @@ class AccountService:
                         outcomeIndex=idx,
                         oppositeOutcome=opp_label,
                         oppositeAsset=opp_token,
+                        eventSlug=event_slugs.get(mkt.event_id or -1, ""),
                         endDate=str(mkt.end_date) if mkt.end_date else "",
                     )
                 )
@@ -110,8 +150,16 @@ class AccountService:
                 )
 
             out: list[PositionWire] = []
+            redeemed = {
+                mid: mkt
+                for mid in payout_micro
+                if (mkt := TableRead.read_market(conn, mid)) is not None
+            }
+            event_slugs = TableRead.event_slugs_by_id(
+                conn, [m.event_id for m in redeemed.values() if m.event_id is not None]
+            )
             for market_id, payout in payout_micro.items():
-                mkt = TableRead.read_market(conn, market_id)
+                mkt = redeemed.get(market_id)
                 if mkt is None or mkt.resolved_outcome is None:
                     continue
                 tokens = mkt.erc1155_tokens
@@ -159,7 +207,89 @@ class AccountService:
                         outcomeIndex=pos_idx,
                         oppositeOutcome=tokens[opp_idx][1],
                         oppositeAsset=tokens[opp_idx][0],
+                        eventSlug=event_slugs.get(mkt.event_id or -1, ""),
                         endDate=str(mkt.end_date) if mkt.end_date else "",
+                    )
+                )
+            out.extend(
+                self._sold_out_positions(
+                    conn, eth_address, user.api_key, skip_market_ids=set(payout_micro)
+                )
+            )
+        return out
+
+    def _sold_out_positions(
+        self, conn, eth_address: str, api_key: str, *, skip_market_ids: set[int]
+    ) -> list[PositionWire]:
+        """Positions the user closed by SELLING every share back.
+
+        Such an exit leaves no REDEEM to reconstruct from and no token balance
+        for the Active list to find, so without this the position — and its
+        realized profit — disappears from the Closed tab, the predictions
+        count, Biggest Win and the P/L chart at once.
+
+        Markets that produced a redeem are skipped: that reconstruction already
+        owns them. The two cannot both apply anyway — redeeming needs tokens,
+        and a market whose fills net to zero has none left.
+        """
+        out: list[PositionWire] = []
+        candidates = [
+            m
+            for m in TableRead.list_markets_with_user_activity(conn, api_key)
+            if m.market_id not in skip_market_ids
+        ]
+        event_slugs = TableRead.event_slugs_by_id(
+            conn, [m.event_id for m in candidates if m.event_id is not None]
+        )
+        for mkt in candidates:
+            tokens = mkt.erc1155_tokens
+            for idx, (token_id, label) in enumerate(tokens):
+                flow = self._token_flow(conn, api_key, token_id)
+                # Sold out exactly: bought something, sold it all back. A
+                # partial exit still holds tokens and belongs in Active, where
+                # its remaining size and live price are the interesting numbers.
+                if flow.sold_size <= 0 or flow.net_size != 0:
+                    continue
+                size = size_to_float(flow.sold_size)
+                avg = price_to_float(flow.avg_buy_price_micro)
+                cost = avg * size
+                proceeds = flow.sold_proceeds / 1_000_000 / 1_000_000
+                pnl = proceeds - cost
+                pct = (pnl / cost * 100) if cost else 0.0
+                avg_sell = flow.sold_proceeds // flow.sold_size
+                opp_idx = 1 - idx if len(tokens) == 2 else idx
+                opp_token, opp_label = (
+                    tokens[opp_idx] if len(tokens) == 2 else (token_id, label)
+                )
+                out.append(
+                    PositionWire(
+                        proxyWallet=eth_address,
+                        asset=token_id,
+                        conditionId=mkt.condition_id.value,
+                        size=size,
+                        avgPrice=avg,
+                        initialValue=cost,
+                        currentValue=proceeds,
+                        cashPnl=pnl,
+                        percentPnl=pct,
+                        totalBought=cost,
+                        realizedPnl=pnl,
+                        percentRealizedPnl=pct,
+                        curPrice=price_to_float(avg_sell),
+                        redeemable=False,
+                        title=mkt.question,
+                        slug=mkt.slug or "",
+                        icon=mkt.icon_url or "",
+                        outcome=label,
+                        outcomeIndex=idx,
+                        oppositeOutcome=opp_label,
+                        oppositeAsset=opp_token,
+                        eventSlug=event_slugs.get(mkt.event_id or -1, ""),
+                        # The sale, not the market's end. This field is what the
+                        # P/L chart plots a closed position at, and an unresolved
+                        # market's end date is still in the future — it would put
+                        # today's realized profit ahead of today.
+                        endDate=str(flow.last_sell_time),
                     )
                 )
         return out
@@ -168,24 +298,76 @@ class AccountService:
     def _net_bought(conn, api_key: str, token_id: str) -> int:
         """Net outcome tokens the user bought of `token_id` (effective buys minus
         sells; a maker fills the side opposite the stored taker SIDE)."""
+        return AccountService._token_flow(conn, api_key, token_id).net_size
+
+    @staticmethod
+    def _token_flow(conn, api_key: str, token_id: str) -> "_TokenFlow":
+        """Everything the user's fills of one token add up to, in one pass.
+
+        Reconstructing a position that was closed by SELLING needs the sale
+        proceeds and the sale time, not just the net quantity `_net_bought`
+        reports, and it must not double-count a maker fill as the taker's side.
+
+        A trade row's stored PRICE is always the MAKER's price; which token
+        moved and in which direction depends on `MATCH_KIND` — the truth
+        table lives in `agentpit.datastructures.match_leg`, not here.
+
+        For a MINT/MERGE, both parties transact in different tokens whose
+        prices sum to the $1 the mint costs (or the merge returns), so a
+        query scoped to `token_id` must match on ASSET_ID for the taker leg
+        and on MAKER_ASSET_ID for the maker leg.
+
+        The matcher has no same-account guard, so one row can have this user
+        as BOTH taker and maker (a resting order of theirs crossed by a later
+        order of theirs). Both legs are real and are booked independently —
+        `legs_for_user` returns one entry per leg the user holds — rather
+        than picking one via a single `is_taker`.
+        """
         rows = conn.execute(
-            "SELECT SIDE, TRADE_SIZE, TAKER_API_KEY, MAKER_API_KEY FROM trades "
-            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-            "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
-            (token_id, api_key, api_key),
+            "SELECT SIDE, PRICE, TRADE_SIZE, MATCH_TIME, MATCH_KIND, "
+            "ASSET_ID, MAKER_ASSET_ID, TAKER_API_KEY, MAKER_API_KEY "
+            "FROM trades WHERE STATUS != 'FAILED' "
+            "AND ((TAKER_API_KEY = %s AND ASSET_ID = %s) "
+            "  OR (MAKER_API_KEY = %s AND COALESCE(MAKER_ASSET_ID, ASSET_ID) = %s))",
+            (api_key, token_id, api_key, token_id),
         ).fetchall()
-        net = 0
+        bought_size = bought_cost = sold_size = sold_proceeds = 0
+        last_sell_time = 0
         for r in rows:
-            is_taker = r["TAKER_API_KEY"] == api_key
-            buying = (r["SIDE"] == "BUY") == is_taker
-            sz = int(r["TRADE_SIZE"])
-            net += sz if buying else -sz
-        return net
+            for leg in legs_for_user(r, api_key):
+                if leg.token_id != token_id:
+                    continue
+                if leg.side == "BUY":
+                    bought_size += leg.size_micro
+                    bought_cost += leg.price_micro * leg.size_micro
+                else:
+                    sold_size += leg.size_micro
+                    sold_proceeds += leg.price_micro * leg.size_micro
+                    last_sell_time = max(last_sell_time, int(r["MATCH_TIME"] or 0))
+        return _TokenFlow(
+            bought_size=bought_size,
+            bought_cost=bought_cost,
+            sold_size=sold_size,
+            sold_proceeds=sold_proceeds,
+            last_sell_time=last_sell_time,
+        )
+
+    def value_and_cost(self, eth_address: str) -> tuple[float, float]:
+        """`(market value, cost basis)` of the open positions, in dollars.
+
+        Both come from ONE walk. Valuing an account reads every touched market
+        on chain, so a caller that needs both -- the leaderboard does -- must
+        not ask twice.
+        """
+        positions = self.list_positions(eth_address)
+        return (
+            sum(p.currentValue for p in positions),
+            sum(p.initialValue for p in positions),
+        )
 
     def total_value(self, eth_address: str) -> list[dict]:
-        positions = self.list_positions(eth_address)
-        total = sum(p.currentValue for p in positions)
-        return [{"user": eth_address, "value": total}]
+        value, _cost = self.value_and_cost(eth_address)
+        return [{"user": eth_address, "value": value}]
 
     def list_activity(
         self,
@@ -200,12 +382,9 @@ class AccountService:
             user = TableRead.get_user_by_eth_address(conn, eth_address)
             if user is None:
                 return []
-            trade_rows = conn.execute(
-                "SELECT MARKET, ASSET_ID, SIDE, PRICE, TRADE_SIZE, MATCH_TIME, "
-                "TRANSACTION_HASH FROM trades "
-                "WHERE (TAKER_API_KEY = %s OR MAKER_API_KEY = %s) AND STATUS != 'FAILED'",
-                (user.api_key, user.api_key),
-            ).fetchall()
+            acts: list[ActivityWire] = AccountService._trade_activity(
+                conn, user.api_key, eth_address
+            )
             tx_rows = conn.execute(
                 "SELECT TRANSACTION_TYPE, MARKET_ID, DETAILS, "
                 "EXTRACT(EPOCH FROM TIMESTAMP)::bigint AS TS "
@@ -213,33 +392,18 @@ class AccountService:
                 (user.api_key,),
             ).fetchall()
 
-            acts: list[ActivityWire] = []
-            for r in trade_rows:
-                resolved = resolve_by_token_id(conn, r["ASSET_ID"])
-                mkt = resolved.market if resolved else None
-                price = price_to_float(int(r["PRICE"]))
-                size = size_to_float(int(r["TRADE_SIZE"]))
-                outcome = (
-                    mkt.erc1155_tokens[resolved.outcome_index][1]
-                    if resolved and mkt else ""
-                )
-                acts.append(ActivityWire(
-                    proxyWallet=eth_address,
-                    timestamp=int(r["MATCH_TIME"]),
-                    conditionId=r["MARKET"],
-                    type="TRADE",
-                    size=size,
-                    usdcSize=price * size,
-                    transactionHash=r["TRANSACTION_HASH"] or "",
-                    price=price,
-                    asset=r["ASSET_ID"],
-                    side=r["SIDE"],
-                    outcomeIndex=resolved.outcome_index if resolved else 0,
-                    title=mkt.question if mkt else "",
-                    slug=(mkt.slug or "") if mkt else "",
-                    icon=(mkt.icon_url or "") if mkt else "",
-                    outcome=outcome,
-                ))
+            # One account fills the same handful of markets repeatedly, so the
+            # slug of an event is looked up once and reused across its rows.
+            slug_cache: dict[int, str] = {}
+
+            def event_slug_of(mkt) -> str:
+                if mkt is None or mkt.event_id is None:
+                    return ""
+                if mkt.event_id not in slug_cache:
+                    found = TableRead.event_slugs_by_id(conn, [mkt.event_id])
+                    slug_cache[mkt.event_id] = found.get(mkt.event_id, "")
+                return slug_cache[mkt.event_id]
+
             for r in tx_rows:
                 mkt = (
                     TableRead.read_market(conn, r["MARKET_ID"])
@@ -258,6 +422,7 @@ class AccountService:
                     title=mkt.question if mkt else "",
                     slug=(mkt.slug or "") if mkt else "",
                     icon=(mkt.icon_url or "") if mkt else "",
+                    eventSlug=event_slug_of(mkt),
                 ))
 
         if type_filter:
@@ -267,36 +432,83 @@ class AccountService:
         acts.sort(key=lambda a: a.timestamp, reverse=True)
         return acts[offset:offset + limit]
 
+    @staticmethod
+    def _trade_activity(conn, api_key: str, eth_address: str) -> "list[ActivityWire]":
+        """One ActivityWire per leg this account holds.
+
+        A NORMAL self-match yields two rows, a buy and a sell — that is the
+        account genuinely standing on both sides. A MINT/MERGE maker's row
+        names the token it actually received, not the taker's.
+        """
+        rows = conn.execute(
+            "SELECT MARKET, ASSET_ID, MAKER_ASSET_ID, MATCH_KIND, SIDE, PRICE, "
+            "TRADE_SIZE, MATCH_TIME, TRANSACTION_HASH, TAKER_API_KEY, "
+            "MAKER_API_KEY FROM trades "
+            "WHERE (TAKER_API_KEY = %s OR MAKER_API_KEY = %s) AND STATUS != 'FAILED'",
+            (api_key, api_key),
+        ).fetchall()
+
+        acts: list[ActivityWire] = []
+        slug_cache: dict[int, str] = {}
+
+        def event_slug_of(mkt) -> str:
+            if mkt is None or mkt.event_id is None:
+                return ""
+            if mkt.event_id not in slug_cache:
+                found = TableRead.event_slugs_by_id(conn, [mkt.event_id])
+                slug_cache[mkt.event_id] = found.get(mkt.event_id, "")
+            return slug_cache[mkt.event_id]
+
+        for r in rows:
+            for leg in legs_for_user(r, api_key):
+                # Resolve the token THIS leg moved, not the row's ASSET_ID:
+                # they differ for a MINT/MERGE maker, and the outcome label
+                # and index have to follow the corrected token.
+                resolved = resolve_by_token_id(conn, leg.token_id)
+                mkt = resolved.market if resolved else None
+                price = price_to_float(leg.price_micro)
+                size = size_to_float(leg.size_micro)
+                outcome = (
+                    mkt.erc1155_tokens[resolved.outcome_index][1]
+                    if resolved and mkt else ""
+                )
+                acts.append(ActivityWire(
+                    proxyWallet=eth_address,
+                    timestamp=int(r["MATCH_TIME"] or 0),
+                    conditionId=r["MARKET"],
+                    type="TRADE",
+                    size=size,
+                    usdcSize=price * size,
+                    transactionHash=r["TRANSACTION_HASH"] or "",
+                    price=price,
+                    asset=leg.token_id,
+                    side=leg.side,
+                    outcomeIndex=resolved.outcome_index if resolved else 0,
+                    title=mkt.question if mkt else "",
+                    slug=(mkt.slug or "") if mkt else "",
+                    icon=(mkt.icon_url or "") if mkt else "",
+                    eventSlug=event_slug_of(mkt),
+                    outcome=outcome,
+                ))
+        return acts
+
     # --- helpers --------------------------------------------------------
 
     @staticmethod
     def _avg_fill_price(conn, api_key: str, token_id: str) -> float:
         """Size-weighted price the user PAID per share of this asset, in dollars;
-        0.0 if none. Cost basis counts only BUY fills — exit SELLs reduce the
-        quantity, not the per-share entry price, so including them corrupts it.
-        And a MINT match (taker BUY vs maker BUY) records the maker's complement
-        price (1-p) against the taker's asset_id, so the taker truly paid
-        ONE - price — flip those, else the basis drifts toward $0.50."""
-        rows = conn.execute(
-            "SELECT PRICE, TRADE_SIZE, MAKER_ORDERS FROM trades "
-            "WHERE ASSET_ID = %s AND STATUS != 'FAILED' AND SIDE = 'BUY' "
-            "AND (TAKER_API_KEY = %s OR MAKER_API_KEY = %s)",
-            (token_id, api_key, api_key),
-        ).fetchall()
-        num = den = 0
-        for r in rows:
-            price = int(r["PRICE"])
-            mo = r["MAKER_ORDERS"]
-            try:
-                mo = json.loads(mo) if isinstance(mo, str) else mo
-                maker_side = mo[0].get("side", "SELL") if mo else "SELL"
-            except (TypeError, ValueError, IndexError, KeyError, AttributeError):
-                maker_side = "SELL"
-            if maker_side == "BUY":          # MINT: recorded price is the complement
-                price = 1_000_000 - price
-            num += price * int(r["TRADE_SIZE"])
-            den += int(r["TRADE_SIZE"])
-        return price_to_float(num // den) if den else 0.0
+        0.0 if none.
+
+        Delegates to `_token_flow`, which is the only place that resolves the
+        user's effective side correctly. Filtering `SIDE = 'BUY'` here directly
+        would not do it: SIDE is the TAKER's side while the row is reachable
+        from either counterparty, so a resting ask of ours that got hit --
+        our SELL -- reads as a taker BUY and would be folded into the price we
+        supposedly paid.
+        """
+        return price_to_float(
+            AccountService._token_flow(conn, api_key, token_id).avg_buy_price_micro
+        )
 
     @staticmethod
     def _cur_price(conn, token_id: str) -> float:
@@ -310,8 +522,8 @@ class AccountService:
         if bids and asks:
             return price_to_float((max(bids) + min(asks)) // 2)
         last = conn.execute(
-            "SELECT PRICE FROM trades WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-            "ORDER BY MATCH_TIME DESC LIMIT 1",
-            (token_id,),
+            TableRead.TOKEN_PRINTS_CTE
+            + "SELECT PRICE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
+            ([token_id], [token_id]),
         ).fetchone()
         return price_to_float(int(last["PRICE"])) if last else 0.5

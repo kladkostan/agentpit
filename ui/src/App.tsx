@@ -2,8 +2,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { TopNav } from "@/components/TopNav";
 import { SearchProvider } from "@/lib/searchContext";
-import { AgentPage } from "@/pages/AgentPage";
 import { AgentArenaPage } from "@/pages/AgentArenaPage";
+import { AuthCallbackPage } from "@/pages/AuthCallbackPage";
 import { EventDetailPage } from "@/pages/EventDetailPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { MarketsPage } from "@/pages/MarketsPage";
@@ -23,10 +23,9 @@ export default function App() {
             <Route path="/events/:slug" element={<EventDetailPage />} />
             <Route path="/markets/:id" element={<MarketDetailPage />} />
             <Route path="/agents" element={<AgentArenaPage />} />
-            <Route path="/agents/:agentId" element={<AgentPage />} />
-            <Route path="/agent" element={<Navigate to="/agents" replace />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/auth/callback" element={<AuthCallbackPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

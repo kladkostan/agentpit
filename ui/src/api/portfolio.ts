@@ -18,6 +18,8 @@ export interface Position {
   oppositeAsset: string;
   title: string;
   slug: string;
+  /** Slug of the event grouping this market; "" when it belongs to none. */
+  eventSlug: string;
   icon: string;
   redeemable: boolean;
   endDate: string;        // market end/resolution time, unix seconds (string)
@@ -73,6 +75,28 @@ export function useUsdcBalance(enabled = true) {
   });
 }
 
+export interface CreditsBalance {
+  credits_wei: string;
+}
+
+/** The wallet's native balance — what pays for a transaction, as a wei
+ *  string. It stays a string end to end so the caller's own formatter
+ *  (`formatCredits`) does the arithmetic; wei overflows `Number`'s safe
+ *  integer range for any account that has been topped up a few times. */
+export async function getCredits(): Promise<string> {
+  const r = await apiFetch<CreditsBalance>("/me/credits");
+  return r.credits_wei;
+}
+
+export function useCredits(enabled = true) {
+  return useQuery({
+    queryKey: ["credits"],
+    queryFn: getCredits,
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
 export interface TopUpStatus {
   nextAllowedAt: number;
 }
@@ -121,6 +145,13 @@ export function topUpButtonState(
     disabled: isPending || now < nextAllowedAt,
     label: isPending ? "Topping up…" : topUpLabel(nextAllowedAt, now),
   };
+}
+
+export function claimPositionRequest(conditionId: string): Promise<unknown> {
+  return apiFetch<unknown>("/positions/claim", {
+    method: "POST",
+    body: JSON.stringify({ condition_id: conditionId }),
+  });
 }
 
 export function useTopUp() {

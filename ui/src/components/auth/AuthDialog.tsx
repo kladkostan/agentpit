@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -10,91 +9,184 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/useAuth";
-import { ApiError } from "@/api/client";
+import {
+  buildAuthorizeUrl,
+  createState,
+  STATE_KEY,
+  WORKOS_CLIENT_ID,
+  WORKOS_REDIRECT_URI,
+} from "@/lib/workosAuth";
+import {
+  CODE_LENGTH,
+  canResend,
+  isCompleteCode,
+  normaliseCode,
+  resendSecondsLeft,
+  sendCodeErrorMessage,
+  signInErrorMessage,
+  statusOf,
+} from "@/components/auth/codeFlow";
 
 const EMAIL_RE = /.+@.+\..+/;
-const MIN_PASSWORD_LENGTH = 8;
 
-function extractDetail(error: unknown): string {
-  if (error instanceof ApiError) {
-    try {
-      const parsed = JSON.parse(error.body) as { detail?: unknown };
-      if (typeof parsed.detail === "string") return parsed.detail;
-      if (Array.isArray(parsed.detail) && parsed.detail.length > 0) {
-        // FastAPI 422: array of {msg, loc, ...}; surface the first message.
-        const first = parsed.detail[0] as { msg?: unknown };
-        if (typeof first.msg === "string") return first.msg;
-      }
-    } catch {
-      /* fall through to error.message */
-    }
-    return error.message;
-  }
-  return error instanceof Error ? error.message : "Something went wrong";
-}
+/** Which of the two mailed-code steps the dialog is showing. */
+type Step = "email" | "code";
 
 export function AuthDialog() {
-  const {
-    dialogOpen,
-    dialogMode,
-    closeDialog,
-    setDialogMode,
-    login,
-    register,
-  } = useAuth();
+  const { dialogOpen, closeDialog, sendCode, signInWithCode } = useAuth();
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState<Step>("email");
+  const [lastSentAt, setLastSentAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Reset form whenever the dialog re-opens or the mode changes.
+  // Reset everything whenever the dialog re-opens.
   useEffect(() => {
     if (dialogOpen) {
       setEmail("");
-      setPassword("");
+      setCode("");
+      setStep("email");
+      setLastSentAt(null);
       setError(null);
       setSubmitting(false);
     }
-  }, [dialogOpen, dialogMode]);
+  }, [dialogOpen]);
 
-  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
+  // Drives the resend countdown. Only ticks on the code step, so the rest of
+  // the app never re-renders on a timer it cannot see.
+  useEffect(() => {
+    if (step !== "code") return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [step]);
 
-    if (!EMAIL_RE.test(email)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-      return;
-    }
-
+  // Shared by the first send and every resend. Only advances to the code step
+  // when the send actually succeeded — otherwise the user is asked for a code
+  // that was never mailed.
+  const requestCode = async (address: string) => {
     setSubmitting(true);
     try {
-      if (dialogMode === "login") {
-        await login(email, password);
-      } else {
-        await register(email, password);
-      }
+      await sendCode(address);
+      setLastSentAt(Date.now());
+      setCode("");
+      setStep("code");
     } catch (err) {
-      setError(extractDetail(err));
+      setError(sendCodeErrorMessage(statusOf(err)));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const isLogin = dialogMode === "login";
-  const title = isLogin ? "Log in" : "Sign up";
-  const description = isLogin
-    ? "Welcome back. Sign in to keep trading."
-    : "Create an account — we'll mint your wallet and starter balance for you.";
-  const submitLabel = isLogin ? "Log in" : "Sign up";
-  const switchLabel = isLogin
-    ? "Don't have an account? Sign up"
-    : "Already have an account? Log in";
-  const switchTo = isLogin ? "signup" : "login";
+  const onSendCode = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    if (!EMAIL_RE.test(email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    await requestCode(email);
+  };
+
+  const onVerifyCode = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    if (!isCompleteCode(code)) {
+      setError(`Enter the ${CODE_LENGTH}-digit code from the email.`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await signInWithCode(email, code);
+    } catch (err) {
+      setError(signInErrorMessage(statusOf(err)));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onResend = async () => {
+    setError(null);
+    await requestCode(email);
+  };
+
+  const title = step === "email" ? "Sign in" : "Check your email";
+
+  const secondsLeft = resendSecondsLeft(lastSentAt, now);
+  const resendReady = canResend(lastSentAt, now) && !submitting;
+
+  // The product's own label device — mono micro-caps, the same one the market
+  // cards use for anything that labels data.
+  const fieldLabelClass =
+    "font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground";
+  const linkClass =
+    "font-medium text-blue-600 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 dark:text-blue-400";
+
+  const errorBlock = error && (
+    <p
+      role="alert"
+      className="text-sm text-destructive"
+      data-testid="auth-error"
+    >
+      {error}
+    </p>
+  );
+
+  const emailField = (
+    <div className="space-y-1.5">
+      <Label htmlFor="auth-email" className={fieldLabelClass}>
+        Email
+      </Label>
+      <Input
+        id="auth-email"
+        type="email"
+        autoComplete="email"
+        autoFocus
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        disabled={submitting}
+      />
+    </div>
+  );
+
+  const onGoogleAuthorize = () => {
+    // Narrowing an imported const doesn't survive into this closure (see
+    // GoogleSignInButton), so re-check rather than trust the render guard
+    // that decided whether this block exists at all.
+    if (!WORKOS_CLIENT_ID || !WORKOS_REDIRECT_URI) return;
+    const state = createState();
+    sessionStorage.setItem(STATE_KEY, state);
+    window.location.href = buildAuthorizeUrl({
+      clientId: WORKOS_CLIENT_ID,
+      redirectUri: WORKOS_REDIRECT_URI,
+      provider: "GoogleOAuth",
+      state,
+    });
+  };
+
+  const googleBlock = WORKOS_CLIENT_ID && WORKOS_REDIRECT_URI && (
+    <div className="space-y-4">
+      {/* Below the fields, not above them: the emailed code is the primary
+          path, and the divider reads as "or, instead of the above". */}
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-border" />
+        <span className={fieldLabelClass}>or</span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={onGoogleAuthorize}
+      >
+        Continue with Google
+      </Button>
+    </div>
+  );
 
   return (
     <Dialog
@@ -103,61 +195,97 @@ export function AuthDialog() {
         if (!next) closeDialog();
       }}
     >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+      {/* A dialog that touches both edges of a phone screen reads as a page
+          that failed to load, not as a panel. */}
+      <DialogContent
+        className="w-[calc(100%-2rem)] sm:max-w-md"
+        aria-describedby={undefined}
+      >
+        {/* Centred, and the only thing at this size. With the explanatory copy
+            gone the dialog is a title, a field and a button, so the title has
+            to carry the weight the paragraph used to. `pt-1` because Radix
+            pins its close button top-right and an optically centred line wants
+            a little air above it. */}
+        <DialogHeader className="pt-1 text-center sm:text-center">
+          <DialogTitle className="text-2xl font-semibold tracking-tight">
+            {title}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="auth-email">Email</Label>
-            <Input
-              id="auth-email"
-              type="email"
-              autoComplete="email"
-              autoFocus
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={submitting}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="auth-password">Password</Label>
-            <Input
-              id="auth-password"
-              type="password"
-              autoComplete={isLogin ? "current-password" : "new-password"}
-              required
-              minLength={MIN_PASSWORD_LENGTH}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={submitting}
-            />
-          </div>
-          {error && (
-            <p
-              role="alert"
-              className="text-sm text-destructive"
-              data-testid="auth-error"
-            >
-              {error}
+
+        {step === "email" ? (
+          <form onSubmit={onSendCode} className="space-y-4">
+            {emailField}
+            {errorBlock}
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? "Sending…" : "Send code"}
+            </Button>
+            {googleBlock}
+          </form>
+        ) : (
+          <form onSubmit={onVerifyCode} className="space-y-4">
+            {/* Kept, and centred under the title: this line is not an
+                explanation, it names the address to go and look in. */}
+            <p className="text-center text-sm text-muted-foreground">
+              We sent a {CODE_LENGTH}-digit code to{" "}
+              <span className="font-medium text-foreground">{email}</span>.
             </p>
-          )}
-          <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? `${submitLabel}…` : submitLabel}
-          </Button>
-          <div className="text-center text-sm text-muted-foreground">
-            <button
-              type="button"
-              className="underline-offset-4 hover:underline"
-              onClick={() => setDialogMode(switchTo)}
-              disabled={submitting}
+            <div className="space-y-1.5">
+              <Label htmlFor="auth-code" className={fieldLabelClass}>
+                Code
+              </Label>
+              <Input
+                id="auth-code"
+                // one-time-code lets the OS offer the code straight from the
+                // mail; inputMode gets the numeric keypad on a phone.
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                autoFocus
+                required
+                maxLength={CODE_LENGTH}
+                className="font-mono text-lg tracking-[0.4em]"
+                value={code}
+                // Normalised on the way in, not on submit: a paste of
+                // "515 627" should look right in the field immediately.
+                onChange={(e) => setCode(normaliseCode(e.target.value))}
+                disabled={submitting}
+              />
+            </div>
+            {errorBlock}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={submitting || !isCompleteCode(code)}
             >
-              {switchLabel}
-            </button>
-          </div>
-        </form>
+              {submitting ? "Signing in…" : "Sign in"}
+            </Button>
+            <p className="pt-1 text-center text-sm text-muted-foreground">
+              {resendReady ? (
+                <button
+                  type="button"
+                  className={linkClass}
+                  onClick={() => void onResend()}
+                >
+                  Send a new code
+                </button>
+              ) : (
+                <span>Send a new code in {secondsLeft}s</span>
+              )}
+            </p>
+            <p className="text-center text-sm text-muted-foreground">
+              <button
+                type="button"
+                className={linkClass}
+                onClick={() => {
+                  setStep("email");
+                  setError(null);
+                }}
+                disabled={submitting}
+              >
+                Use a different email
+              </button>
+            </p>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );

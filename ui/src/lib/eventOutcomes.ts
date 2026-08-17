@@ -57,3 +57,37 @@ export function buyChipCents(market: Market): {
     no: market.best_bid !== null ? (1 - market.best_bid) * 100 : null,
   };
 }
+
+/** Which market row an event page should open with, and on which outcome.
+ *
+ *  `wantedSlug` comes from the `?market=` the profile appends when it links a
+ *  position at its event. Without it the page opens the top-ranked outcome,
+ *  which for a rate decision is whichever is most likely — not the one the
+ *  reader clicked. A stale or unknown slug falls back to the usual choice
+ *  rather than selecting nothing.
+ *
+ *  `live` wins only when nothing was asked for: a rotating series should open
+ *  its live window, but an explicit request still beats it.
+ */
+export function pickInitialSelection(
+  ordered: ReadonlyArray<Market>,
+  live: Market | null | undefined,
+  wantedSlug: string | null,
+  wantedOutcome: string | null,
+): { marketId: number; outcome: string } | null {
+  const requested = wantedSlug
+    ? ordered.find((m) => m.slug === wantedSlug)
+    : undefined;
+  const market = requested ?? live ?? ordered[0];
+  if (!market) return null;
+  const labels = market.erc1155_tokens.map(([, label]) => label);
+  const fallback = labels[0];
+  if (fallback === undefined) return null;
+  // Only honour the requested outcome on the requested market — carrying it
+  // onto a fallback row would assert a side the reader never chose.
+  const outcome =
+    requested && wantedOutcome && labels.includes(wantedOutcome)
+      ? wantedOutcome
+      : fallback;
+  return { marketId: market.market_id, outcome };
+}

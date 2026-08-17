@@ -7,46 +7,61 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import {
-  loginRequest,
+  completeCallbackRequest,
+  googleSignInRequest,
   meRequest,
-  registerRequest,
+  refreshSessionRequest,
+  sendCodeRequest,
+  signInWithCodeRequest,
   type UserPublic,
 } from "@/api/auth";
-import { setAccessTokenGetter, UNAUTHORIZED_EVENT } from "@/api/client";
-import { AuthContext, type AuthValue, type DialogMode } from "./context";
+import {
+  setAccessTokenGetter,
+  setTokenRefresher,
+  UNAUTHORIZED_EVENT,
+} from "@/api/client";
+import {
+  refreshFailureEndsSession,
+  statusOf,
+} from "@/components/auth/codeFlow";
+import { hydratesFromStoredToken } from "@/lib/workosAuth";
+import { AuthContext, type AuthValue } from "./context";
+import { showWelcomeToast } from "./welcomeToast";
 
 const TOKEN_KEY = "agentpit.access_token";
+// The AuthKit access token lives 300 seconds (measured against staging,
+// 2026-08-11), so the refresh token — which does not rotate — is what actually
+// keeps a session alive across a reload.
+const REFRESH_KEY = "agentpit.refresh_token";
 
-function readStoredToken(): string | null {
+function readStored(key: string): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeStoredToken(token: string | null): void {
+function writeStored(key: string, value: string | null): void {
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
   } catch {
-    /* private mode etc. — token only lives in memory this session */
+    /* private mode etc. — value only lives in memory this session */
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [accessToken, setAccessToken] = useState<string | null>(() =>
-    readStoredToken(),
+    readStored(TOKEN_KEY),
   );
   const [user, setUser] = useState<UserPublic | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(() =>
-    readStoredToken() !== null,
+    readStored(TOKEN_KEY) !== null,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogMode, setDialogMode] = useState<DialogMode>("login");
 
   // Keep the api client in sync with the live token without a circular import.
   const tokenRef = useRef(accessToken);
@@ -56,16 +71,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistToken = useCallback((token: string | null) => {
-    writeStoredToken(token);
+    writeStored(TOKEN_KEY, token);
     tokenRef.current = token;
     setAccessToken(token);
   }, []);
 
+  // Nothing renders from the refresh token, so it stays a ref: putting it in
+  // state would re-render the whole tree every time a background refresh lands.
+  const refreshTokenRef = useRef<string | null>(readStored(REFRESH_KEY));
+
+  const persistRefreshToken = useCallback((token: string | null) => {
+    writeStored(REFRESH_KEY, token);
+    refreshTokenRef.current = token;
+  }, []);
+
   const logout = useCallback(() => {
     persistToken(null);
+    persistRefreshToken(null);
     setUser(null);
     queryClient.clear();
-  }, [persistToken, queryClient]);
+  }, [persistToken, persistRefreshToken, queryClient]);
+
+  // A 401 on any request is repaired here rather than ending the session: the
+  // access token expires after 300 seconds, so without this every signed-in
+  // user would be thrown out every five minutes. `client.ts` calls this at
+  // most once per request and replays the original with whatever comes back.
+  const refreshInFlight = useRef<Promise<string | null> | null>(null);
+
+  const refreshAccessToken = useCallback(async (): Promise<string | null> => {
+    const stored = refreshTokenRef.current;
+    if (!stored) return null;
+    // A page usually has several requests in flight, and they all 401 at the
+    // same moment. Share one refresh between them instead of sending five.
+    const existing = refreshInFlight.current;
+    if (existing) return existing;
+    const attempt = (async () => {
+      try {
+        const resp = await refreshSessionRequest(stored);
+        persistToken(resp.access_token);
+        persistRefreshToken(resp.refresh_token);
+        setUser(resp.user);
+        return resp.access_token;
+      } catch (err) {
+        // Only a rejection of the credential itself ends the session. An
+        // outage must not: WorkOS does not rotate refresh tokens, so the copy
+        // in storage is the only copy, and deleting it on a 503 sends
+        // everybody who was signed in at that moment back to their inbox.
+        if (refreshFailureEndsSession(statusOf(err))) {
+          logout();
+        }
+        return null;
+      } finally {
+        refreshInFlight.current = null;
+      }
+    })();
+    refreshInFlight.current = attempt;
+    return attempt;
+  }, [logout, persistRefreshToken, persistToken]);
+
+  useEffect(() => {
+    setTokenRefresher(refreshAccessToken);
+    return () => setTokenRefresher(null);
+  }, [refreshAccessToken]);
 
   // If a 401 fires after the initial bootstrap, drop local auth state so the
   // user sees the Log in / Sign up buttons again.
@@ -79,10 +146,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
   }, [logout]);
 
-  // On mount, if we have a token, hydrate the user via /me.
+  // On mount, if we have a token, hydrate the user via /me — unless the app
+  // was loaded straight onto the callback route, where doing so races the code
+  // exchange and can end the session it just created. The reasoning is on
+  // `hydratesFromStoredToken`; it lives there so it is covered, since this
+  // component cannot be render-tested.
   useEffect(() => {
     let cancelled = false;
-    if (!accessToken) {
+    if (!hydratesFromStoredToken(window.location.pathname, accessToken)) {
+      // Loading has to end either way. Leaving it true for the callback page
+      // to clear would strand the nav in a loading state whenever the exchange
+      // fails; the cost of clearing it now is a brief logged-out nav over a
+      // page that already reads "Signing you in…".
       setIsLoading(false);
       return;
     }
@@ -104,67 +179,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
     // We only want this to run once on mount; subsequent token changes go
-    // through login/register which set the user themselves.
+    // through signInWithCode, signInWithCallbackCode or refreshAccessToken,
+    // all of which set the user themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openLogin = useCallback(() => {
-    setDialogMode("login");
-    setDialogOpen(true);
-  }, []);
-
-  const openSignup = useCallback(() => {
-    setDialogMode("signup");
-    setDialogOpen(true);
-  }, []);
+  // One opener, because there is one door. Signing in and signing up stopped
+  // being different actions at the cutover: the dialog asks for an address,
+  // mails a code, and the server decides whether that code lands on an
+  // existing row or makes a new one -- after the code has proved the caller
+  // owns the address, which is a better moment to decide than before.
+  const openAuth = useCallback(() => setDialogOpen(true), []);
 
   const closeDialog = useCallback(() => setDialogOpen(false), []);
 
-  const login = useCallback<AuthValue["login"]>(
-    async (email, password) => {
-      const resp = await loginRequest(email, password);
+  const sendCode = useCallback<AuthValue["sendCode"]>(async (email) => {
+    await sendCodeRequest(email);
+  }, []);
+
+  const signInWithCode = useCallback<AuthValue["signInWithCode"]>(
+    async (email, code) => {
+      const resp = await signInWithCodeRequest(email, code);
       persistToken(resp.access_token);
+      persistRefreshToken(resp.refresh_token);
       setUser(resp.user);
       setDialogOpen(false);
     },
-    [persistToken],
+    [persistRefreshToken, persistToken],
   );
 
-  const register = useCallback<AuthValue["register"]>(
-    async (email, password) => {
-      const resp = await registerRequest(email, password);
+  const signInWithCallbackCode = useCallback<
+    AuthValue["signInWithCallbackCode"]
+  >(
+    async (code) => {
+      const resp = await completeCallbackRequest(code);
       persistToken(resp.access_token);
+      persistRefreshToken(resp.refresh_token);
       setUser(resp.user);
       setDialogOpen(false);
-      // First sign-up: a prominent, top-center welcome so new users immediately
-      // see their wallet is funded. Deferred a beat so it pops after the auth
-      // dialog closes rather than behind it.
-      window.setTimeout(() => {
-        toast.custom(
-          () => (
-            <div className="flex w-[min(92vw,460px)] items-start gap-3 rounded-2xl border border-emerald-500/40 bg-card px-5 py-4 shadow-xl">
-              <span className="text-3xl leading-none">🎉</span>
-              <div className="min-w-0">
-                <p className="text-base font-semibold tracking-tight text-foreground">
-                  Welcome to agentpit! Your wallet is funded.
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                  {"We've credited your account with apUSD — open any market and place your first trade."}
-                </p>
-                <a
-                  href="/#build"
-                  className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-emerald-600 underline-offset-4 hover:underline dark:text-emerald-400"
-                >
-                  Connect your own trading agent →
-                </a>
-              </div>
-            </div>
-          ),
-          { position: "top-center", duration: 5000, unstyled: true },
-        );
-      }, 300);
     },
-    [persistToken],
+    [persistRefreshToken, persistToken],
+  );
+
+  const signInWithGoogle = useCallback<AuthValue["signInWithGoogle"]>(
+    async (credential) => {
+      const resp = await googleSignInRequest(credential);
+      persistToken(resp.access_token);
+      persistRefreshToken(resp.refresh_token);
+      setUser(resp.user);
+      setDialogOpen(false);
+      // Only a brand-new account gets the greeting — a returning user has seen
+      // it, and being told their wallet was just funded would be untrue.
+      if (resp.created) showWelcomeToast();
+    },
+    [persistRefreshToken, persistToken],
   );
 
   const value = useMemo<AuthValue>(
@@ -174,13 +242,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       isLoading,
       dialogOpen,
-      dialogMode,
-      openLogin,
-      openSignup,
+      openAuth,
       closeDialog,
-      setDialogMode,
-      login,
-      register,
+      sendCode,
+      signInWithCode,
+      signInWithGoogle,
+      signInWithCallbackCode,
       logout,
     }),
     [
@@ -189,12 +256,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       isLoading,
       dialogOpen,
-      dialogMode,
-      openLogin,
-      openSignup,
+      openAuth,
       closeDialog,
-      login,
-      register,
+      sendCode,
+      signInWithCode,
+      signInWithGoogle,
+      signInWithCallbackCode,
       logout,
     ],
   );

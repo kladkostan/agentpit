@@ -25,6 +25,10 @@ def test_mirrored_trade_feeds_last_trade_price_but_no_user_feed():
     assert row["STATUS"] == MIRROR_TRADE_STATUS
     assert row["TAKER_API_KEY"] == MIRROR_API_KEY      # never a real user's key
     assert int(row["PRICE"]) == 480_000
+    # A mirrored print is a plain trade, not a mint: both columns the
+    # matcher's own rows carry now stay filled here too.
+    assert row["MAKER_ASSET_ID"] == yes_token
+    assert row["MATCH_KIND"] == "NORMAL"
 
     # Token-scoped readers see it (STATUS != 'FAILED' filter passes)...
     book = client.get(f"/book?token_id={yes_token}").json()

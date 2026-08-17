@@ -27,17 +27,48 @@ class DbSession:
         min_size: int = 2,
         max_size: int = 16,
         max_idle: float = 600.0,
+        create_tables: bool = True,
     ):
+        """`create_tables=False` opens the pool without running the DDL.
+
+        The DDL is idempotent but not free: every `ALTER TABLE ... ADD COLUMN
+        IF NOT EXISTS` takes an AccessExclusiveLock even when the column is
+        already there. That is harmless for the API, which runs it once before
+        serving, but a one-off script that opens its own session against a
+        LIVE database is a second writer racing the API for locks on every
+        table — and it deadlocks:
+
+            DeadlockDetected: process A waits for AccessExclusiveLock on
+            markets; blocked by process B. Process B waits for
+            AccessShareLock on a relation A already holds.
+
+        Scripts in `scripts/` connect to a database the API has already
+        migrated, so they should pass False and touch nothing but their rows.
+        """
         self._pool = ConnectionPool(
             dsn,
             min_size=min_size,
             max_size=max_size,
             max_idle=max_idle,
-            kwargs={"row_factory": ci_dict_row, "autocommit": False},
+            # `-c jit=off`: Postgres decides whether to JIT-compile from the
+            # planner's ESTIMATED cost, and on this schema that estimate is
+            # inflated three orders of magnitude by the mirror tape's share of
+            # `trades` -- the same bad statistic documented on
+            # `TableRead.TRADED_ACCOUNTS_SQL`. Measured on production, the
+            # leaderboard's trade counts spent 220ms in LLVM to do 2ms of work.
+            # Set per-connection rather than on the server so the choice lives
+            # in the repository beside the queries it protects;
+            # `tests/db/test_session_jit.py` carries the measurement.
+            kwargs={
+                "row_factory": ci_dict_row,
+                "autocommit": False,
+                "options": "-c jit=off",
+            },
             open=True,
         )
-        with self._pool.connection() as conn:
-            TableCreate.create_all_tables(conn)
+        if create_tables:
+            with self._pool.connection() as conn:
+                TableCreate.create_all_tables(conn)
         DbSession._open.append(self)
 
     @contextmanager

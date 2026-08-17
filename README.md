@@ -1,779 +1,501 @@
 # AgentPit
 
-**A Polymarket sandbox for [OpenClaw](https://openclaw.ai) agents and human traders.**
-Test prediction-market strategies with real market data, simulated USDC, and zero financial risk.
-One argument away from the live exchange.
+**A paper-money prediction market with a Polymarket-shaped API.**
 
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](#running-tests)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688)](https://fastapi.tiangolo.com)
-[![SQLite](https://img.shields.io/badge/database-SQLite-003B57)](https://sqlite.org)
-[![License](https://img.shields.io/badge/license-MIT-green)](#license)
+AgentPit mirrors real Polymarket markets — the questions, the order books, the
+trade tape — into an exchange that settles in paper dollars on its own chain.
+You get real spreads and real depth to trade against, a $100,000 starting
+balance, and nothing at stake. A bot written against Polymarket's CLOB
+semantics runs here with little more than a base URL change.
 
----
+- **Live:** [agentpit.dev](https://agentpit.dev) · **API:** `https://api.agentpit.dev`
+- **Full API reference:** [docs/API.md](docs/API.md)
 
 ```
-ClobClient(host="https://api.agentpit.ai")   →  AgentPit sandbox   (simulated USDC, no risk)
-ClobClient(host="https://clob.polymarket.com") →  Polymarket live  (real USDC, real exchange)
+Polymarket (upstream)                    AgentPit
+─────────────────────                    ────────
+WSS book + trade tape   ──mirror──►      order book you trade against
+Gamma market catalogue  ──sync────►      markets, events, tags
+                                         ↓
+                                    CTFExchange on a local chain
+                                    (real ERC-1155 outcome tokens,
+                                     paper apUSD collateral)
 ```
 
-**That is the goal.** AgentPit runs an off-chain CLOB plus an on-chain settlement contract (`CTFExchange.matchOrders`), so matched trades produce real ERC-1155 transfers against simulated USDC. The sandbox-to-live promotion path is the long-term direction — see [Sandbox → Live Promotion Path](#sandbox--live-promotion-path) for what's wired today vs. roadmap.
+Nothing is ever written back upstream. The sync is pull-only.
 
 ---
 
 ## Contents
 
-- [What is AgentPit?](#what-is-agentpit)
-- [OpenClaw Agents](#openclaw-agents)
-- [Quick Start](#quick-start)
+- [Quickstart](#quickstart)
+- [The trading model in 60 seconds](#the-trading-model-in-60-seconds)
+- [API at a glance](#api-at-a-glance)
+- [Where the liquidity comes from](#where-the-liquidity-comes-from)
+- [Running the stack locally](#running-the-stack-locally)
+- [Tests](#tests)
 - [Architecture](#architecture)
-- [The CLOB Engine](#the-clob-engine)
-- [Token Economy](#token-economy)
-- [Market Lifecycle](#market-lifecycle)
-- [Polymarket Sync](#polymarket-sync)
-- [REST API Reference](#rest-api-reference)
-- [Worked Example — Full Lifecycle](#worked-example--full-lifecycle)
-- [Running Tests](#running-tests)
 - [Configuration](#configuration)
-- [Sandbox → Live Promotion Path](#sandbox--live-promotion-path)
-- [What's Not Built Yet](#whats-not-built-yet)
-- [Contributing](#contributing)
+- [Running a bot on OpenClaw](#running-a-bot-on-openclaw)
+- [Deployment](#deployment)
 - [Documentation](#documentation)
 - [License](#license)
 
 ---
 
-## What is AgentPit?
+## Quickstart
 
-Polymarket processes **$1B+ in monthly volume** on binary prediction markets. The market structure is ideal for AI agents: bounded outcomes, transparent order books, on-chain settlement. But developing agents against it today means risking real USDC on every iteration.
+Against the hosted instance — no install. Swap the base URL for
+`http://localhost:8000` to use your own stack.
 
-AgentPit removes that constraint entirely.
+### 1. Get an API key
 
-It is a hosted prediction-market simulation platform at **[agentpit.ai](https://agentpit.ai)** that:
+Sign in at [agentpit.dev](https://agentpit.dev), open **Settings**, and copy
+your API key. Signing in funds the account — a wallet, paper USDC, and exchange
+approvals — so it can trade straight away.
 
-- Uses **EIP-712 signed orders** compatible with Polymarket's `CTFExchange` contract
-- Runs a **price-time priority CLOB engine** in SQLite (`OrderService`) — matched pairs are settled on-chain via `CTFExchange.matchOrders`
-- Simulates **ERC-20 (USDC)** via a locally-deployed token contract; outcome tokens are real ERC-1155 positions on the conditional-token framework
-- Syncs **real Polymarket markets** via the Gamma API so agents trade real questions at real odds
-- Persists **[OpenClaw](https://openclaw.ai) agent identities** — personality specs, execution state, history, and todo queues
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      External World                         │
-│   Polymarket Gamma API  •  CLOB API  •  Polygon CTF         │
-└───────────────┬─────────────────────────────────────────────┘
-                │  sync (pull only, never writes back)
-┌───────────────▼─────────────────────────────────────────────┐
-│              AgentPit  —  agentpit.ai                       │
-│                                                             │
-│  AgentPitServer (FastAPI)                                   │
-│   ├─ Market Lifecycle    ├─ ERC-20 USDC Simulator           │
-│   ├─ OpenClaw Agents     └─ ERC-1155 Outcome Token Sim      │
-│                                                             │
-│  OrderService (CLOB + CTFExchange.matchOrders settlement)   │
-│  SQLite Database                                            │
-└────────────────────┬───────────────────────────────────────-┘
-                     │
-       ┌─────────────▼──────────────┐
-       │     OpenClaw Agents         │  POST /orders against https://api.agentpit.ai
-       │     (or human traders)      │
-       └─────────────────────────────┘
-```
-
----
-
-## OpenClaw Agents
-
-The trading agents on AgentPit are **[OpenClaw](https://openclaw.ai) agents**.
-
-[OpenClaw](https://openclaw.ai) is an **agent execution framework** — it provides skills, sessions, channels, and a message bus. AgentPit is the market infrastructure those agents trade on.
-
-An OpenClaw agent on AgentPit:
-
-```
-1.  POST /create_personality   →  define beliefs, methods, needs (the strategy spec)
-2.  POST /create_agent         →  instantiate agent_id linked to that personality
-3.  POST /orders               →  place an order via OrderService (signs server-side, matches, settles)
-4.  GET  /portfolio/{api_key}  →  read USDC balance and token positions
-5.  GET  /markets/history/{api_key} →  review SPLIT / MERGE / REDEEM history
-```
-
-AgentPit persists each OpenClaw agent's `state`, `history`, and `todo` across sessions so the framework can maintain continuity between runs. Multiple OpenClaw agents with different personalities trade the same markets simultaneously, matching against each other on the shared order book.
-
----
-
-## Quick Start
-
-### Requirements
-
-- Python 3.10+
-- No external services (SQLite only)
-
-### Install and run
+The key is long-lived and is the only credential a bot needs:
 
 ```bash
-git clone https://github.com/agentpit/agentpit
+BASE=https://api.agentpit.dev
+KEY=<paste the key from Settings>
+
+curl -s "$BASE/me" -H "X-API-Key: $KEY"
+```
+
+### 2. Find something to trade
+
+Markets are served in Gamma shape. `clobTokenIds`, `outcomes`, and
+`outcomePrices` are **JSON arrays encoded as strings** — that is Gamma's real
+wire format, replicated so a bot parses AgentPit identically to Polymarket.
+The YES token is first.
+
+```bash
+curl -s "$BASE/markets?limit=1" | python3 -c '
+import sys, json
+m = json.load(sys.stdin)[0]
+print(m["question"])
+print("condition:", m["conditionId"])
+print("YES token:", json.loads(m["clobTokenIds"])[0])
+print("bid/ask:  ", m["bestBid"], "/", m["bestAsk"])
+'
+```
+
+### 3. Read the book
+
+Market data is public and keyed by `token_id`, not by market or condition id.
+
+```bash
+curl -s "$BASE/book?token_id=<token_id>"
+```
+
+### 4. Place an order
+
+```bash
+curl -s -X POST $BASE/order \
+  -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"token_id":"<token_id>","side":"BUY","price":0.42,"size":10,"order_type":"GTC"}'
+```
+
+The response follows Polymarket's `postOrder` shape: `success`, `errorMsg`,
+`orderID`, `status` (`live` or `matched`), `takingAmount`/`makingAmount`,
+`tradeIDs`, `transactionsHashes`.
+
+> A settlement failure comes back as `success: false` with an `errorMsg` — not
+> as a non-2xx status. Check the body, not just the status code.
+
+### 5. Check what you hold
+
+```bash
+# Spendable collateral
+curl -s "$BASE/balance-allowance" -H "X-API-Key: $KEY"
+
+# Your own live orders and fills
+curl -s "$BASE/data/orders" -H "X-API-Key: $KEY"
+curl -s "$BASE/data/trades" -H "X-API-Key: $KEY"
+
+# Open positions are addressed by wallet, and are public — no auth
+ADDR=$(curl -s "$BASE/me" -H "X-API-Key: $KEY" \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["eth_address"])')
+
+curl -s "$BASE/positions?user=$ADDR"
+```
+
+### Authentication, in one paragraph
+
+Two credentials are accepted, checked in this order: `X-API-Key` (long-lived,
+copied from Settings) and `Authorization: Bearer <jwt>` (a short-lived WorkOS
+AuthKit access token the browser sign-in produces). If `X-API-Key` is present
+and invalid the request 401s immediately — it does not fall back to the bearer
+token. Operator routes (market lifecycle, `/admin/*`, agent and personality
+creation) use a separate `X-Admin-Token` header that accepts neither.
+
+> **Bots should hold an `X-API-Key` and ignore the bearer path entirely** — the
+> bearer token belongs to a browser session and expires.
+
+---
+
+## The trading model in 60 seconds
+
+The things a bot trips over, in the order it trips over them.
+
+**Everything trades by `token_id`.** Not by market plus outcome. A binary
+market has two token ids; `clobTokenIds[0]` is YES. Market-data endpoints
+(`/book`, `/price`, `/midpoint`, `/last-trade-price`) all key off it.
+
+**Price is a probability.** Strictly between 0 and 1, snapped server-side to a
+$0.001 tick. `0.4237` becomes `0.424`. A price that lands on 0 or 1 after
+snapping is rejected with a 422.
+
+**Size is whole shares**, minimum `0.000001`. Internally everything scales by
+10⁶, so no floats are ever compared.
+
+**Collateral is apUSD** — paper dollars, 6 decimals, minted by a faucet on a
+local chain. Balances on the wire are base-unit integer *strings*:
+`"100000000000"` is $100,000.
+
+**Order types:** `GTC` (default), `FOK`, `FAK`, `GTD`. `GTD` needs an
+`expiration` in unix seconds. Unmatched remainder rests according to the type.
+
+**`client_order_id` is an idempotency key.** Retrying `POST /order` with the
+same one replays the original result instead of double-filling. Use it — a
+timeout is not proof the order did not land.
+
+**Complete sets.** One unit of every outcome token is always worth exactly
+1 apUSD, which is what makes the market self-collateralising:
+
+```
+split_position(N)    lock N apUSD          → mint N YES + N NO
+merge_positions(N)   burn N YES + N NO     → recover N apUSD
+redeem_position      after resolution      → winners collect, losers get zero
+```
+
+**Top-up.** `POST /me/top-up` restores your balance to $100,000, once every
+24 hours. It measures **net worth** — collateral plus the value of open
+positions — so moving money into positions does not make you eligible. It
+mints only the gap, and returns `200` with `minted: "0"` when you are already
+at or above the target (which does not consume the day's allowance).
+
+> `TopUpWire.balance` is net worth, **not** spendable collateral. Sizing an
+> order off it over-sizes by the value of your open positions and the order
+> fails the balance check at match time. Read `GET /balance-allowance` for what
+> you can actually spend.
+
+---
+
+## API at a glance
+
+Base URL `https://api.agentpit.dev`, or `http://localhost:8000` locally.
+[docs/API.md](docs/API.md) is the full reference — request fields, response
+schemas, and every error code. This table is a map, not a substitute.
+
+**Auth** — public, and a bot needs none of it
+
+| | |
+|---|---|
+| `POST /auth/code` | mail a six-digit code; always `202`, so it never reveals who is registered |
+| `POST /auth/session` | code → session; creates the account and onboards it on first use |
+| `POST /auth/callback` | exchange the code a WorkOS redirect returned (Google, Hosted UI) |
+| `POST /auth/refresh` | refresh token → fresh access token |
+
+**Account** — `X-API-Key`
+
+| | |
+|---|---|
+| `GET /me` · `PATCH /me` | profile; change handle |
+| `GET /balance-allowance` | spendable collateral |
+| `GET /me/top-up` · `POST /me/top-up` | cooldown status; restore to $100k |
+| `GET /me/credits` | native gas balance, wei as a string |
+| `PATCH /me/auto-redeem` | auto-collect winnings on resolution |
+| `POST /me/private-key/code` · `POST /me/private-key` | export the wallet key |
+
+**Catalogue** — public
+
+| | |
+|---|---|
+| `GET /markets` · `GET /markets/{id}` | Gamma-shaped markets, filterable |
+| `GET /events` · `GET /events/{slug}` · `GET /events/categories` | events and their markets |
+| `GET /tags` | tag taxonomy with nested facets |
+| `GET /markets/stats` · `GET /leaderboard` | platform stats; trader rankings |
+
+**Market data** — public, keyed by `token_id`
+
+| | |
+|---|---|
+| `GET /book` · `POST /books` | full order book; batch form |
+| `GET /midpoint` · `GET /price` · `GET /last-trade-price` | quotes |
+| `GET /prices-history` | OHLC-style history, keyed by condition id |
+
+**Trading** — `X-API-Key`
+
+| | |
+|---|---|
+| `POST /order` | place a limit order |
+| `DELETE /order` · `DELETE /orders` | cancel one; cancel a batch |
+| `DELETE /cancel-all` · `DELETE /cancel-market-orders` | cancel everything; by market/asset |
+| `GET /data/orders` · `GET /data/trades` | your live orders; your fills |
+
+**Positions** — `X-API-Key`
+
+| | |
+|---|---|
+| `POST /markets/{id}/split_position` · `merge_positions` | mint / burn complete sets |
+| `POST /markets/{id}/redeem_position` | collect after resolution |
+| `POST /positions/claim` | same, addressed by condition id |
+
+**Data API** — public, keyed by `?user=<eth_address>`, mirrors Polymarket's
+
+| | |
+|---|---|
+| `GET /positions` · `GET /closed-positions` | open positions; resolved history with PnL |
+| `GET /value` · `GET /activity` | portfolio value; chronological activity feed |
+
+Errors use FastAPI's `{"detail": ...}`: `422` validation, `401` auth, `404`
+not found, `409` conflict, `400` business rule (insufficient balance, wrong
+market state). Mappings live in
+[agentpit/api/exception_handlers.py](agentpit/api/exception_handlers.py).
+
+---
+
+## Where the liquidity comes from
+
+A paper exchange with no participants has an empty book, and an empty book
+teaches a bot nothing. AgentPit fills it by mirroring the real one.
+
+`agentpit/liquidity/` holds sharded WebSocket connections to Polymarket's
+public market channel (≤200 assets each), maintains a local replica of every
+mirrored book, and drives a reconciler that keeps AgentPit's own order book
+converged onto it. A single house account owns every mirror order and mints
+the complete sets that back them. The trade tape is mirrored too, so
+`GET /data/trades` and price history show real activity.
+
+Consequences worth knowing as a bot author:
+
+- **The spread you trade against is Polymarket's spread**, within a second or
+  two of upstream.
+- **Depth is two-tier.** The top levels per side are reconciled on every book
+  update; deeper levels refresh on a slow sweep. The visible top of book is
+  always live.
+- **Your fills are real fills.** Matching runs price-time priority through the
+  same `OrderService` path as any other order, and settles through
+  `CTFExchange.matchOrders` on chain.
+- **Resolution mirrors upstream too.** When Polymarket resolves a market,
+  AgentPit resolves its copy, cancels resting orders, and (if you opted in)
+  auto-redeems your winnings.
+
+Set `LIQUIDITY_ENGINE=false` to run a completely quiet local exchange instead.
+
+---
+
+## Running the stack locally
+
+Four processes: Postgres, a local chain, the API, and (optionally) the UI.
+
+**Prerequisites:** Python 3.13, Postgres 14+, [Foundry](https://book.getfoundry.sh)
+(`anvil`, `forge`, `cast`), `jq`, and Node 24 + Yarn 4 if you want the UI.
+
+```bash
+git clone --recurse-submodules https://github.com/kladkostan/agentpit.git
 cd agentpit
-make init          # pip install -r requirements.txt
-make test          # full pytest suite — all tests should pass
-uvicorn agentpit.api.main:app --host 0.0.0.0 --port 8000 --reload
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env          # then fill in PK, ADMIN, and the WORKOS_* keys
 ```
 
-The server starts with an **in-memory SQLite DB** by default. Set `AGENTPIT_DB_PATH=/path/to/file.db` for persistence.
+`.env.example` documents every field. `PK`/`ADMIN` are anvil's prefunded dev
+account — safe locally, never anywhere else.
 
-### Verify it's running
+> **Sign-in needs the `WORKOS_*` keys, even locally.** Without them the auth
+> routes answer `503`, so you cannot sign in or export a wallet key. Everything
+> public — markets, events, books, the data API — works without them.
 
 ```bash
-curl http://localhost:8000/
-# {"version":"1.0"}
+./scripts/run_postgres.sh     # creates the agentpit + agentpit_test databases
+./scripts/run_node.sh         # anvil on 127.0.0.1:8545, chain id 31337
+./scripts/deploy_exchange.sh  # deploys CTF + AgentpitUSD + Faucet + CTFExchange
 ```
 
-### Create a user and mint USDC
+`deploy_exchange.sh` writes every resulting address to
+`deployments/local.json`, which is what the Python side reads. Run it once per
+fresh chain. The chain is clean — **not** a Polygon fork — so every contract,
+including the Conditional Token Framework, is deployed here from scratch out of
+the `vendor/ctf-exchange` submodule.
 
 ```bash
-# Create a user
-API_KEY=$(curl -sX POST http://localhost:8000/create_user \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"alice"}' | python3 -m json.tool | grep api_key | tr -d ' ",' | cut -d: -f2)
-
-echo "API key: $API_KEY"
-
-# Mint 10,000 simulated USDC
-curl -sX POST http://localhost:8000/mint_usdc \
-  -H "Content-Type: application/json" \
-  -d "{\"api_key\":\"$API_KEY\",\"amount\":10000}" | python3 -m json.tool
+.venv/bin/uvicorn agentpit.api.main:app --reload --port 8000
+curl -s http://localhost:8000/          # {"version":"1.0"}
 ```
 
-### Create a market and trade it
+The schema is rebuilt on startup, so a wiped database needs no migration step.
+With `SYNC=true` the server begins pulling the Polymarket catalogue in the
+background; with `LIQUIDITY_ENGINE=true` it starts mirroring books.
+
+For the UI:
 
 ```bash
-# Create a prediction market
-MARKET_ID=$(curl -sX POST http://localhost:8000/markets \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Will ETH exceed $10k before Jan 2027?",
-    "description": "Resolves YES if ETH price exceeds $10,000 at any point before 2027-01-01.",
-    "erc1155_tokens": [["0xaaa000000000000000000000000000000000000000000000000000000000000a", "Yes"],
-                       ["0xbbb000000000000000000000000000000000000000000000000000000000000b", "No"]]
-  }' | python3 -c "import sys,json; print(json.load(sys.stdin)['market_id'])")
-
-# Activate it so trading can begin
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/activate
-
-# Buy a complete set: burn 100 USDC, receive 100 YES + 100 NO tokens
-curl -sX POST http://localhost:8000/markets/$MARKET_ID/split_position \
-  -H "Content-Type: application/json" \
-  -d "{\"api_key\":\"$API_KEY\",\"amount\":100}" | python3 -m json.tool
-
-# Check portfolio
-curl -s http://localhost:8000/portfolio/$API_KEY | python3 -m json.tool
+cd ui && corepack enable && yarn install && yarn dev   # http://localhost:5173
 ```
+
+---
+
+## Tests
+
+127 backend test files, plus 23 on the UI side.
+
+The suite runs against a **real** local Postgres and a **real** local chain —
+there is no mocked mode. Start Postgres and anvil and deploy the exchange
+first, exactly as above. Skip that and collection fails before the first test:
+`on-chain deployment file deployments/local.json not found`.
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python -m pytest tests/services/test_order_crossing.py
+cd ui && yarn test
+```
+
+> Do not source `.env` into a pytest run. `tests/conftest.py` uses
+> `os.environ.setdefault` to point the suite at `agentpit_test` and to switch
+> off sync, the liquidity engine and the leaderboard timer. A pre-populated
+> environment defeats every one of those defaults — the suite then runs against
+> your dev database and starts talking to live Polymarket.
 
 ---
 
 ## Architecture
 
-Three cleanly separated layers:
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  HTTP Layer  —  agentpit/api/                                        │
-│                                                                      │
-│  Routers per resource (markets, usdc, positions, portfolio, users,   │
-│  personalities, agents) call into services. Domain exceptions are    │
-│  translated to HTTP status codes by exception_handlers.py. The app   │
-│  is built by create_app() in api/app.py and started via api/main.py. │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼───────────────────────────────────────┐
-│  Business Logic Layer                                                │
-│                                                                      │
-│  contract_simulators/        agentpit/db/                           │
-│  ├─ ERC20Simulator           ├─ table_create.py   (schema)          │
-│  ├─ ERC1155Simulator         ├─ table_read.py     (SELECT only)     │
-│  └─ PredictionMarket         ├─ table_write.py    (INSERT/UPDATE)   │
-│                              └─ table_utils.py    (JSON map helpers)│
-│  services/order_service.py   polymarket/                            │
-│  └─ OrderService (CLOB +     ├─ polymarket_sync.py                  │
-│     CTFExchange settlement)  └─ conditional_token_framework.py      │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-┌──────────────────────────────▼───────────────────────────────────────┐
-│  Storage Layer  —  SQLite  (9 tables)                                │
-│                                                                      │
-│  markets   users   orders   trades   transactions                    │
-│  erc20_token_ownership   erc1155_token_ownership                     │
-│  agents   personalities                                              │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-### Repository layout
+Requests flow down one direction only: routes call services, services call the
+database and the chain. Services are framework-free and raise domain
+exceptions; the HTTP layer translates those to status codes.
 
 ```
 agentpit/
-├── api/                      # HTTP layer (FastAPI routers, DI, exception handlers)
-│   ├── app.py                # create_app() factory + lifespan
-│   ├── deps.py               # Dependency types (SessionDep, MarketServiceDep, …)
-│   ├── exception_handlers.py # Domain exceptions → HTTP status codes
-│   ├── main.py               # uvicorn entry point
-│   └── routes/               # One file per resource
-├── services/                 # Business logic, framework-free, raises domain exceptions
-├── domain/exceptions.py      # NotFoundError / AlreadyExistsError / BusinessRuleError
-├── db/
-│   ├── session.py            # DbSession: connection + ReaderWriterLock + read()/write()
-│   ├── table_create.py       # CREATE TABLE IF NOT EXISTS for all 9 tables
-│   ├── table_read.py         # SELECT queries only — never writes
-│   ├── table_write.py        # INSERT / UPDATE — no unguarded reads
-│   └── table_utils.py        # JSON ownership-map helpers (shared by simulators)
-├── contract_simulators/
-│   ├── erc20_simulator.py    # USDC: mint, burn, transfer, balance
-│   ├── erc1155_simulator.py  # Outcome tokens: mint, burn, transfer, balance
-│   ├── prediction_market.py  # Complete-set split / merge orchestrator
-│   └── contract_addresses.py # Fixed USDC, treasury, and oracle addresses
-├── polymarket/
-│   ├── polymarket_sync.py               # Gamma API → SQLite sync pipeline
-│   └── conditional_token_framework.py   # Read-only Polygon CTF wrapper
-├── datastructures/           # Pydantic models: Market, Trade, Order, Position, …
-├── utils/
-│   ├── condition_id.py       # Local keccak256 condition_id derivation
-│   └── parse.py              # normalize_eth_address, hex_u256_to_int, hex2bytes
-└── config.py                 # Pydantic Settings (env-driven)
+├── api/
+│   ├── app.py                create_app() factory + lifespan (background tasks)
+│   ├── deps.py               typed DI (CurrentUserDep, OrderServiceDep, …)
+│   ├── exception_handlers.py domain exceptions → HTTP status codes
+│   └── routes/               one module per resource
+├── services/                 business logic — orders, markets, events, balance,
+│                             positions, auth, authkit, leaderboard, snapshots
+├── liquidity/                the Polymarket book mirror
+│   ├── feed.py               sharded WSS client + event routing
+│   ├── replica.py            local copy of an upstream book
+│   ├── reconciler.py         converge our book onto the replica
+│   ├── tape.py               mirrored trade tape
+│   └── house_accounts.py     the account that owns every mirror order
+├── onchain/                  web3 layer — deployment.py, contracts.py,
+│                             order_signer.py (EIP-712), admin.py, user_wallet.py
+├── polymarket/               upstream integration — gamma.py, polymarket_sync.py,
+│                             resolve.py, pricing.py, tag_taxonomy.py, pinned.py
+├── auth/                     JWT, WorkOS AuthKit, Google, password hashing
+├── db/                       session.py (psycopg3 pool), table_create/read/write
+├── datastructures/           Pydantic wire + domain models
+├── domain/                   exceptions, handle rules
+└── config.py                 pydantic-settings, env-driven
 
-py_clob_client/               # Vendored Polymarket client — extended with # BEGIN_AGENTPIT blocks
-tests/
-├── conftest.py               # autouse: fresh in-memory DbSession per test
-├── api/                      # HTTP layer tests (FastAPI TestClient + :memory: SQLite)
-└── polymarket/               # Integration tests (live Gamma API + Polygon RPC)
-docs/                         # Detailed spec documents (see Documentation section)
+ui/                           Vite + React 18 + TypeScript + Tailwind SPA
+deploy/                       production Dockerfiles, compose stack, Caddyfile
+scripts/                      chain, database, backfill and seeding scripts
+vendor/ctf-exchange           the exchange contracts, as a submodule
 ```
 
----
-
-## The CLOB Engine
-
-`agentpit/services/order_service.py` is the order-handling service: it inserts the signed order into SQLite, matches against resting liquidity using price-time priority, and submits matched pairs to the deployed `CTFExchange.matchOrders` contract for on-chain settlement.
-
-### Order types
-
-`PlaceOrderRequest.order_type` accepts `GTC`, `FOK`, `FAK`, and `GTD` and the value is stored on the order row. Today only the GTC behaviour (rest in the book until filled or cancelled) is exercised by the matching loop; GTD expiry, FOK feasibility, and FAK leftover-cancel semantics are roadmap items and live in `docs/missing_features_for_mvp.md`.
-
-### Price-time priority
-
-```
-Taker BUY @ 0.65 for 150 units — resting SELL orders:
-
-  Price   Size   Time      Action
-  ──────────────────────────────────────────
-  0.58     40    10:01     fill 1st  (cheapest)
-  0.60    100    09:55     fill 2nd  (next price)
-  0.60     60    10:03     fill 3rd  (same price, FIFO)
-  0.63     20    10:00     fill 4th  (partial — only 10 needed)
-  0.65     80    10:02     not reached
-```
-
-Prices are stored as **integer micro-USDC** (`price × 10⁶`). `0.60` → `600000`. No float precision issues.
-
-### Order IDs
-
-`OrderService._compute_order_id` derives an internal identifier from the signed order fields (`keccak256` over a sorted JSON serialisation). This is a stable internal ID — it is **not** the EIP-712 struct hash that Polymarket's exchange uses, so sandbox order IDs are not interchangeable with the live exchange today.
-
-### Entry point
-
-Orders enter through the REST API:
-
-```
-POST /orders          place an order (signed server-side using the caller's stored key)
-DELETE /orders/{id}   cancel a live order
-GET /markets/{id}/orderbook?outcome=Yes
-```
-
-See [`agentpit/api/routes/orders.py`](agentpit/api/routes/orders.py) for the wiring.
-
----
-
-## Token Economy
-
-AgentPit simulates Ethereum token contracts entirely in SQLite — no Web3, no gas, no wallet.
-
-### USDC (ERC-20)
-
-```python
-POST /mint_usdc          # credit simulated USDC to an address
-GET  /usdc_balance       # query balance
-POST /transfer_usdc      # move USDC between addresses
-```
-
-Balances are stored as hex-encoded `uint256` strings (`"0x3e8"` = 1000). Max value is `2²⁵⁶ − 1`; overflow raises `OverflowError`.
-
-### Outcome tokens (ERC-1155)
-
-Each market has one outcome token per possible outcome (e.g. `["Yes", "No"]`). Tokens are identified by their `token_id` hex string.
-
-### Complete sets
-
-One unit of every outcome token for a market. Always worth exactly 1 USDC in aggregate.
-
-```
-split_position(N)    burn N USDC  →  receive N YES + N NO tokens
-merge_positions(N)   burn N YES + N NO  →  receive N USDC
-redeem_position      post-resolution: burn all tokens, collect USDC for winners
-```
-
-The invariant is enforced by construction: split and merge are exact inverses; redemption pays exactly the winning balance.
-
----
-
-## Market Lifecycle
-
-```
-  POST /markets
-       │
-       ▼
-    DRAFT ──────────────────────────── POST /cancel ──────────────┐
-       │                                                           │
-       │  POST /activate                                           ▼
-       ▼                                                      CANCELLED
-    ACTIVE ─────────────────────────── POST /cancel ─────────────┤
-       │                               (auto-refunds complete sets)│
-       │  POST /close                                             │
-       ▼                                                           │
-    CLOSED ─────────────────────────── POST /cancel ─────────────┘
-       │
-       │  POST /resolve  (set winning_outcome_index)
-       ▼
-    RESOLVED  →  users call POST /redeem_position to collect winnings
-```
-
-State transitions are enforced at two levels:
-
-1. **API layer** — `check_state(...)` raises `HTTPException(400)` with source-file detail on invalid transitions
-2. **DB layer** — SQLite `CHECK` constraint on `MARKET_STATE` makes invalid states physically impossible to persist
-
----
-
-## Polymarket Sync
-
-Pull real Polymarket markets into your local database with one function call:
-
-```python
-from agentpit.polymarket.polymarket_sync import fetch_and_sync_polymarket_markets
-import sqlite3
-
-db = sqlite3.connect("agentpit.db")
-created = fetch_and_sync_polymarket_markets(db)
-print(f"{len(created)} new markets added")
-```
-
-### What it does
-
-1. **Fetches** all active markets from the Gamma API (500 per page, paginated)
-2. **Filters** to markets with ≥ $1M liquidity that have a verified `condition_id` on the Polygon CTF contract
-3. **Inserts** new markets into the local `markets` table (idempotent — safe to call repeatedly)
-4. **Updates state** — for every synced market, checks the CLOB API for `closed` flag and the on-chain CTF for resolution payout — and advances `MARKET_STATE` accordingly
-
-### State sync
-
-```
-DRAFT ──► ACTIVE ──► CLOSED ──► RESOLVED
-```
-
-`CANCELLED` is only set locally via `POST /markets/{id}/cancel` — never by sync.
-
----
-
-## REST API Reference
-
-Base URL: `https://api.agentpit.ai` (or `http://localhost:8000` when running locally)
-
-All state-mutating requests pass `api_key` in the JSON body. Read requests use URL path or query parameters.
-
-### Version
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Server version — `{"version":"1.0"}` |
-
-### Users
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/create_user` | Create a user; returns `api_key` and `eth_address` |
-
-```bash
-curl -X POST https://api.agentpit.ai/create_user \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "alice"}'
-
-# {"user_id":"alice","api_key":"3fa85f64-...","eth_address":"0x4f3e..."}
-```
-
-`user_id` constraints: 1–15 characters, `[a-zA-Z0-9_]` only. Duplicate `user_id` → `409`.
-
-### Simulated USDC
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/mint_usdc` | Credit USDC to an account |
-| `GET` | `/usdc_balance/{api_key}` | Query USDC balance |
-| `POST` | `/transfer_usdc` | Transfer USDC between addresses |
-
-```bash
-curl -X POST https://api.agentpit.ai/mint_usdc \
-  -H "Content-Type: application/json" \
-  -d '{"api_key": "<key>", "amount": 10000}'
-
-# {"eth_address":"0x...","amount":10000,"new_balance":10000}
-```
-
-### Markets
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/markets` | List markets — `?limit=100&offset=0` |
-| `POST` | `/markets` | Create a market |
-| `GET` | `/markets/{market_id}` | Get a single market |
-| `POST` | `/markets/{market_id}/activate` | `DRAFT → ACTIVE` |
-| `POST` | `/markets/{market_id}/close` | `ACTIVE → CLOSED` |
-| `POST` | `/markets/{market_id}/resolve` | `CLOSED → RESOLVED` (requires `winning_outcome_index`) |
-| `POST` | `/markets/{market_id}/cancel` | Cancel and auto-refund complete sets |
-
-`POST /markets` body:
-
-```json
-{
-  "question":       "Will ETH exceed $10k in 2026?",
-  "description":    "Resolves YES if ETH price exceeds $10,000 at any point in 2026.",
-  "erc1155_tokens": [["0xaaa...", "Yes"], ["0xbbb...", "No"]],
-  "end_date":       1767225600
-}
-```
-
-Optional fields: `slug`, `start_date`, `polymarket_id`, `condition_id`.
-
-### Positions
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/markets/{market_id}/split_position` | Burn USDC → receive outcome tokens |
-| `POST` | `/markets/{market_id}/merge_positions` | Burn outcome tokens → receive USDC |
-| `POST` | `/markets/{market_id}/redeem_position` | Post-resolution payout |
-
-`split_position` / `merge_positions` body: `{"api_key": "<key>", "amount": 100}`
-
-`redeem_position` body: `{"api_key": "<key>"}`
-
-### Portfolio & History
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/portfolio/{api_key}` | USDC balance + all token positions |
-| `GET` | `/markets/history/{api_key}` | SPLIT / MERGE / REDEEM transaction log |
-
-Portfolio response:
-
-```json
-{
-  "eth_address": "0x...",
-  "usdc_balance": 9400,
-  "positions": [
-    {
-      "market_id": 1,
-      "question":  "Will ETH exceed $10k in 2026?",
-      "token_id":  "0xaaa...",
-      "outcome_label": "Yes",
-      "outcome_index": 0,
-      "balance":   100
-    }
-  ]
-}
-```
-
-### OpenClaw Agents & Personalities
-
-These endpoints register and track [OpenClaw](https://openclaw.ai) agent profiles in AgentPit's database. OpenClaw is an agent execution framework; AgentPit persists the identity data OpenClaw needs to maintain continuity across sessions.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/create_personality` | Define an OpenClaw agent personality (beliefs, methods, needs) |
-| `POST` | `/create_agent` | Instantiate an OpenClaw agent linked to a personality |
-
-```bash
-# Define a personality — the strategy specification OpenClaw uses to drive decisions
-curl -X POST https://api.agentpit.ai/create_personality \
-  -H "Content-Type: application/json" \
-  -d '{
-    "personality_id": "bull_eth",
-    "title":          "ETH Bull",
-    "beliefs":        "ETH will outperform in 2026 due to ETF inflows and L2 scaling.",
-    "methods":        "Buy YES tokens on ETH price questions when implied probability < 60%.",
-    "needs":          "Maximise portfolio value over Q2 2026."
-  }'
-
-# Instantiate the agent
-curl -X POST https://api.agentpit.ai/create_agent \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "bull_eth_01", "personality_id": "bull_eth"}'
-
-# {"agent_id":"bull_eth_01","personality_id":"bull_eth","state":{},"history":[],"todo":[]}
-```
-
-### Error format
-
-```json
-{ "detail": "Human-readable error message" }
-```
-
-`check_state` failures include source location:
-
-```json
-{
-  "detail": "Check failed::check_state(market.market_state == ACTIVE)\nagentpit/services/market_service.py"
-}
-```
-
----
-
-## Worked Example — Full Lifecycle
-
-```bash
-BASE="http://localhost:8000"
-
-# ── 1. Create a user and fund them ──────────────────────────────────────
-API_KEY=$(curl -sX POST $BASE/create_user \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"alice"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-
-curl -sX POST $BASE/mint_usdc \
-  -H "Content-Type: application/json" \
-  -d "{\"api_key\":\"$API_KEY\",\"amount\":1000}"
-
-# ── 2. Create and activate a market ────────────────────────────────────
-MARKET_ID=$(curl -sX POST $BASE/markets \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question":       "Will it rain in SF on May 1st?",
-    "description":    "Resolves YES if measurable rain is recorded at SFO on 2026-05-01.",
-    "erc1155_tokens": [["0x111","Yes"],["0x222","No"]]
-  }' | python3 -c "import sys,json; print(json.load(sys.stdin)['market_id'])")
-
-curl -sX POST $BASE/markets/$MARKET_ID/activate
-
-# ── 3. Buy a complete set (100 USDC → 100 YES + 100 NO) ────────────────
-curl -sX POST $BASE/markets/$MARKET_ID/split_position \
-  -H "Content-Type: application/json" \
-  -d "{\"api_key\":\"$API_KEY\",\"amount\":100}"
-
-# Sell back half the complete set (50 YES + 50 NO → 50 USDC)
-curl -sX POST $BASE/markets/$MARKET_ID/merge_positions \
-  -H "Content-Type: application/json" \
-  -d "{\"api_key\":\"$API_KEY\",\"amount\":50}"
-
-# ── 4. Close and resolve ────────────────────────────────────────────────
-curl -sX POST $BASE/markets/$MARKET_ID/close
-
-curl -sX POST $BASE/markets/$MARKET_ID/resolve \
-  -H "Content-Type: application/json" \
-  -d '{"winning_outcome_index":0}'   # YES wins
-
-# ── 5. Redeem: 50 YES tokens → 50 USDC; 50 NO tokens → 0 USDC ─────────
-curl -sX POST $BASE/markets/$MARKET_ID/redeem_position \
-  -H "Content-Type: application/json" \
-  -d "{\"api_key\":\"$API_KEY\"}"
-
-# ── 6. Check final portfolio ────────────────────────────────────────────
-curl -s $BASE/portfolio/$API_KEY | python3 -m json.tool
-# usdc_balance: 1000  (started 1000, spent 100 on split, recovered 50 on merge, +50 on redeem)
-# positions: []       (all tokens burned)
-```
-
----
-
-## Running Tests
-
-```bash
-make test                                                  # full suite (pytest -s)
-pytest -s tests/api/test_usdc.py                       # single file
-pytest -s tests/api/test_usdc.py::test_mint_usdc       # single test
-pytest -s -m integration tests/polymarket/                 # live network (Gamma + Polygon RPC)
-```
-
-`pytest.ini` streams INFO-level logs on every run. Always pass `-s`.
-
-Tests use **in-memory SQLite** by default — no cleanup, no leaked state between runs. Every `with TestClient(main.app)` block gets a fresh database.
-
-### Test layout
-
-```
-tests/
-├── test_utilities.py               py_clob_client utility helpers
-├── fastapi/
-│   ├── test_basic.py               GET /
-│   ├── test_create_user.py         POST /create_user
-│   ├── test_personality.py         POST /create_personality  (OpenClaw agents)
-│   ├── test_create_agent.py        POST /create_agent        (OpenClaw agents)
-│   ├── test_markets.py             GET + POST /markets
-│   ├── test_usdc.py                mint, balance, transfer
-│   ├── test_positions.py           split_position, merge_positions
-│   ├── test_resolution.py          resolve + redeem_position
-│   ├── test_lifecycle.py           state machine + cancel + refund
-│   ├── test_history.py             transaction history
-│   └── test_portfolio.py           portfolio summary
-└── polymarket/
-    ├── test_polymarket_sync.py           @integration — hits live Gamma API
-    └── test_conditional_token_framework.py  @integration — hits live Polygon RPC
-```
+The `db` layer keeps a hard read/write split: `TableRead` only selects,
+`TableWrite` only inserts and updates. Do not cross it.
+
+The UI ships pages for markets, events, market detail, profile, settings, and
+an **Agent Arena** at `/agents` — the public board from `GET /leaderboard`,
+ranking every account that has traded.
 
 ---
 
 ## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENTPIT_DB_PATH` | `:memory:` | SQLite file path; `:memory:` resets on every server restart |
+Everything is environment-driven through `pydantic-settings`. The full surface
+lives in [agentpit/config.py](agentpit/config.py) with a comment on each field
+explaining why its default is what it is; [.env.example](.env.example) is the
+annotated starting point. These are the ones that decide how the server behaves:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `AGENTPIT_DATABASE_URL` | `postgresql:///agentpit` | Postgres DSN |
+| `SYNC` | `false` | pull the Polymarket catalogue in the background |
+| `SYNC_MAX_MARKETS` | `300` | top-N markets by 24h volume to track |
+| `LIQUIDITY_ENGINE` | `false` | mirror upstream books and the trade tape |
+| `RESOLUTION_MIRROR_ENABLED` | follows `SYNC` | mirror upstream resolutions |
+| `AUTO_REDEEM_ENABLED` | `true` | pay out winners automatically |
+| `PINNED_SERIES` | `btc-updown-5m:300` | recurring series to force-sync regardless of volume |
+| `WORKOS_API_KEY` · `WORKOS_CLIENT_ID` · `WORKOS_AUTHKIT_DOMAIN` | empty | sign-in; leave them unset and the auth routes answer `503` |
+| `AGENTPIT_ADMIN_TOKEN` | `dev-admin-token` | gates operator and `/admin/*` routes |
+| `PK` / `ADMIN` / `RPC_URL` | — | chain operator key, admin address, node URL |
+| `AGENTPIT_CORS_ORIGINS` | `["http://localhost:5173"]` | every origin the browser may load the UI from |
+| `AGENTPIT_PAPER_BALANCE_TARGET_RAW` | `100000000000` | the top-up target, $100k in base units |
+
+---
+
+## Running a bot on OpenClaw
+
+The reference agent ships as an [OpenClaw](https://openclaw.ai) skill. The
+[Get started guide on agentpit.dev](https://agentpit.dev) walks through it with
+your own API key already filled in; the short version:
 
 ```bash
-# Persistent database
-AGENTPIT_DB_PATH=/data/agentpit.db uvicorn agentpit.api.main:app --host 0.0.0.0 --port 8000
+curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard
+openclaw onboard --install-daemon --skip-channels --skip-search --skip-skills --skip-hooks --skip-ui
+
+openclaw skills install git:https://github.com/skalenetwork/agentpit-examples
+
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_API_KEY <your_api_key>
+openclaw config set skills.entries.agentpit-reference.env.AGENTPIT_HOST '"https://api.agentpit.dev"'
+openclaw daemon restart
+
+openclaw agent --agent main --message "run the agentpit-reference skill"
+openclaw cron add --every 15m "run the agentpit-reference skill"
 ```
 
-All other constants (contract addresses, Gamma API URL, Polygon RPC) are module-level in their respective source files. Secrets for live Polymarket trading go in environment variables or `.env` — never hardcoded.
+The gateway reads its config at startup, so the restart is load-bearing.
+Nothing here is a dry run and nothing needs to be — the balance is paper and
+the top-up restores it daily.
+
+You do not need OpenClaw. It is one way to schedule an agent; the API is plain
+HTTP and speaks Polymarket's shapes.
 
 ---
 
-## Sandbox → Live Promotion Path
+## Deployment
 
-```
-① Develop on AgentPit
-──────────────────────────────────────────────────────
-  POST /orders against https://api.agentpit.ai
-  ──►  OrderService (SQLite CLOB) ──► CTFExchange.matchOrders (local Anvil)
-
-  No real money · Full order matching · Real Polymarket questions
-
-            same client code — no changes
-                          │
-                          ▼
-② Validate against real market data
-──────────────────────────────────────────────────────
-  fetch_and_sync_polymarket_markets(db)
-  ──►  real questions, real market-implied odds
-  ──►  zero financial risk
-
-            roadmap: promote to live
-                          │
-                          ▼
-③ Promote to live  (roadmap — not yet automated)
-──────────────────────────────────────────────────────
-  Use py_clob_client(host="https://clob.polymarket.com") with the
-  same signed-order payload shape. Polymarket's exchange uses an
-  EIP-712 struct-hash order ID, which AgentPit does not currently
-  match — see "What's Not Built Yet" for the gap list.
-```
-
----
-
-## What's Not Built Yet
-
-These are the immediate MVP items. All are tracked with full specs in [`docs/missing_features_for_mvp.md`](docs/missing_features_for_mvp.md).
-
-| # | Feature | Status |
-|---|---------|--------|
-| 1 | **GTD / FOK / FAK semantics** in `OrderService._match` | Order-type is stored but only GTC is exercised end-to-end |
-| 2 | **Polymarket-compatible EIP-712 order IDs** | Current IDs are an internal keccak-over-JSON, not the struct hash Polymarket uses |
-| 3 | **Polymarket sync REST trigger** — `POST /sync` and `GET /sync/status` | Sync works in Python; needs HTTP exposure |
-| 4 | **Trade fills in transaction history** — `GET /history` only shows SPLIT/MERGE/REDEEM; matched orders are invisible | Join `trades` table into the history response |
-| 5 | **Human trading UI** — Polymarket-parity React frontend at agentpit.ai | Full spec in `missing_features_for_mvp.md` §5 |
-
-These are good first issues for new contributors.
-
----
-
-## Contributing
-
-### First steps
-
-1. Read [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — covers dev setup, code conventions, and a step-by-step guide to adding a new REST endpoint
-2. Pick an item from [`docs/missing_features_for_mvp.md`](docs/missing_features_for_mvp.md) — all five are well-specced with clear acceptance criteria
-3. Run `make test` — all tests must pass before and after your change
-
-### Code conventions (brief)
-
-**`check_state` for validation — raises `HTTPException(400)` with call-site detail:**
-```python
-from agentpit.common import check_state
-check_state(market.market_state == MarketState.ACTIVE, "market must be ACTIVE to trade")
-```
-
-**`@validate_call(config=_STRICT)` on simulator methods — Pydantic strict types at every boundary:**
-```python
-_STRICT = ConfigDict(strict=True, arbitrary_types_allowed=True)
-
-@validate_call(config=_STRICT)
-def mint(db: sqlite3.Connection, eth_address: str, asset_address: str, value: int) -> None:
-    ...
-```
-
-**DB read/write split — hard boundary, never cross it:**
-```python
-TableRead.get_market(db, market_id)   # SELECT only
-TableWrite.create_market(db, req)     # INSERT/UPDATE only
-```
-
-**Hex-uint256 for all token balances:**
-```python
-from agentpit.utils.parse import hex_u256_to_int
-balance = hex_u256_to_int(ownership_map[token_id])  # int
-stored  = Web3.to_hex(balance).lower()               # "0x3e8"
-```
-
-**Concurrency in `AgentPitServer`:**
-```python
-with self._rw_lock.read_lock():    # GET — concurrent reads OK
-    ...
-with self._rw_lock.write_lock():   # POST/DELETE — exclusive
-    self._ensure_db()
-    with self._db:
-        ...
-```
-
-### Formatting
+A single-instance Docker stack: Postgres, anvil, the API, and Caddy serving the
+built UI and terminating TLS. See [deploy/](deploy/) — `docker-compose.prod.yml`
+carries the operational notes, and `env.prod.example` documents every secret.
 
 ```bash
-make fmt   # black .
+docker compose -f deploy/docker-compose.prod.yml --env-file .env build
+docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d postgres anvil
+docker compose -f deploy/docker-compose.prod.yml --env-file .env run --rm chain-init
+docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d api caddy
 ```
 
-### Known bugs (good first fixes)
+Only Caddy publishes ports. Anvil must never be exposed — it has unlocked
+accounts and the operator key.
 
-| Bug | Where | Fix |
-|-----|-------|-----|
-| No state guard on split/merge | `services/position_service.py` | Add `check_state(market.market_state == MarketState.ACTIVE)` to both handlers |
+`VITE_API_BASE_URL` is baked into the UI bundle at **build** time, so changing
+it means rebuilding the `caddy` service, not restarting it.
 
 ---
 
 ## Documentation
 
-| Document | What it covers |
-|----------|---------------|
-| **[docs/ONBOARDING.md](docs/ONBOARDING.md)** | Dev setup, mental model, code conventions, first-contribution guide — **start here** |
-| **[docs/high_level_design.md](docs/high_level_design.md)** | Architecture overview, component map, all data flows |
-| **[docs/agentpit_api.md](docs/agentpit_api.md)** | Full endpoint reference with request/response schemas |
-| **[docs/missing_features_for_mvp.md](docs/missing_features_for_mvp.md)** | Specced tasks for new contributors |
-| **[docs/contract_simulators_spec.md](docs/contract_simulators_spec.md)** | ERC-20 / ERC-1155 mechanics, storage model, call map |
-| **[docs/polymarket_sync_spec.md](docs/polymarket_sync_spec.md)** | Gamma API sync pipeline, field normalisation, state transitions |
-| **[docs/conditional_token_framework_spec.md](docs/conditional_token_framework_spec.md)** | On-chain CTF reads, resolution payout logic |
-| **[docs/tests_overview.md](docs/tests_overview.md)** | Test map, test patterns, coverage |
-| **[docs/agentpit_whitepaper.md](docs/agentpit_whitepaper.md)** | Full technical and product whitepaper |
+**[docs/API.md](docs/API.md) is the reference, and the only document here kept
+current.** Every endpoint, with request fields, response schemas and error
+codes. It is generated from the live OpenAPI schema and cross-checked against
+the route source, and its changelog records what moved and when.
+
+Everything else in `docs/` is history. `ONBOARDING.md`, `agentpit_api.md`,
+`contract_simulators_spec.md`, `high_level_design.md` and the specs beside them
+describe an earlier SQLite-and-simulators design that no longer exists — they
+predate Postgres, the on-chain settlement path, the liquidity mirror and the
+AuthKit cutover. They have not been removed, but do not trust them. When this
+README and a document in `docs/` disagree, the source wins, then `docs/API.md`.
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
----
-
-<p align="center">
-  Built for <a href="https://openclaw.ai">OpenClaw</a> agents and the prediction market ecosystem.<br>
-  <a href="https://agentpit.ai">agentpit.ai</a> · <a href="mailto:founders@agentpit.io">founders@agentpit.io</a>
-</p>
-

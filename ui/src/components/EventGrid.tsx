@@ -9,6 +9,8 @@ interface EventGridProps {
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
+  /** Which volume figure the cards show, following the list's sort. */
+  volumePrefer?: "total" | "24h";
 }
 
 export function EventGrid({
@@ -16,6 +18,7 @@ export function EventGrid({
   hasNextPage,
   isFetchingNextPage,
   onLoadMore,
+  volumePrefer = "total",
 }: EventGridProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -39,14 +42,17 @@ export function EventGrid({
               key={event.event_id}
               market={markets[0]!}
               eventSlug={event.slug}
+              eventEndDate={event.end_date}
               volume={event.volume}
               volume24hr={event.volume_24hr}
+              volumePrefer={volumePrefer}
             />
           ) : (
             <MultiMarketEventCard
               key={event.event_id}
               event={event}
               markets={markets}
+              volumePrefer={volumePrefer}
             />
           ),
         )}

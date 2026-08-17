@@ -80,7 +80,7 @@ def test_snapshots_round_trip_and_prune():
     TableWrite.insert_account_snapshot(conn, user_id, 2_000, 333, 444)
 
     latest = TableRead.latest_account_snapshots(conn)
-    assert latest[user_id] == (333, 444), "the most recent row wins"
+    assert latest[user_id] == (333, 444, 0, 0), "the most recent row wins"
 
     assert TableWrite.prune_account_snapshots(conn, older_than=1_500) == 1
     conn.close()
@@ -98,7 +98,7 @@ def test_latest_snapshot_breaks_a_tied_t_by_insertion_order():
     TableWrite.insert_account_snapshot(conn, user_id, 5_000, 999, 888)
 
     latest = TableRead.latest_account_snapshots(conn)
-    assert latest[user_id] == (999, 888)
+    assert latest[user_id] == (999, 888, 0, 0)
     conn.close()
 
 
@@ -125,12 +125,23 @@ class _FakeOnchainBalance:
 
 
 class _FakeAccounts:
-    """total_value keyed by address; an address with no positions -- or one
-    never given a value -- reads back as [] like AccountService.total_value
-    does for an account holding nothing."""
+    """`value_and_cost` keyed by address. An address with no positions -- or
+    one never given a value -- reads back as (0, 0), like the real
+    AccountService does for an account holding nothing.
 
-    def __init__(self, values: dict[str, float] | None = None):
+    `costs` is optional so the tests that only care about capital stay short.
+    """
+
+    def __init__(
+        self,
+        values: dict[str, float] | None = None,
+        costs: dict[str, float] | None = None,
+    ):
         self._values = values or {}
+        self._costs = costs or {}
+
+    def value_and_cost(self, address: str) -> tuple[float, float]:
+        return (self._values.get(address, 0.0), self._costs.get(address, 0.0))
 
     def total_value(self, address: str) -> list[dict]:
         if address not in self._values:
@@ -144,7 +155,11 @@ def test_capital_raw_sums_cash_and_position_value():
     service = LeaderboardService(
         db=None, onchain=onchain, accounts=accounts, settings=Settings()
     )
-    assert service._capital_raw("0xabc") == 100_000_000_000
+    assert service._capital_invested_unrealized_raw("0xabc") == (
+        100_000_000_000,
+        0,
+        70_000_000_000,
+    )
 
 
 def test_capital_raw_with_no_positions_is_just_cash():
@@ -153,7 +168,7 @@ def test_capital_raw_with_no_positions_is_just_cash():
     service = LeaderboardService(
         db=None, onchain=onchain, accounts=accounts, settings=Settings()
     )
-    assert service._capital_raw("0xabc") == 42_000_000
+    assert service._capital_invested_unrealized_raw("0xabc") == (42_000_000, 0, 0)
 
 
 def test_take_snapshot_writes_one_row_per_traded_account_with_deposited():
@@ -180,7 +195,14 @@ def test_take_snapshot_writes_one_row_per_traded_account_with_deposited():
     check = fresh_test_conn()
     latest = TableRead.latest_account_snapshots(check)
     check.close()
-    assert latest[user_id] == (100_000_000_000, 55_000_000_000)
+    # The fake values positions at $70k with no cost recorded, so the whole
+    # $70k reads as unrealized -- which is the point: none of it is banked.
+    assert latest[user_id] == (
+        100_000_000_000,
+        55_000_000_000,
+        0,
+        70_000_000_000,
+    )
     db.close()
 
 
@@ -210,10 +232,14 @@ def test_one_account_write_failure_does_not_cost_the_rest(monkeypatch):
 
     real_insert = TableWrite.insert_account_snapshot
 
-    def flaky_insert(db, user_id, t, capital_raw, deposited_raw):
+    def flaky_insert(
+        db, user_id, t, capital_raw, deposited_raw, invested_raw=0, unrealized_raw=0
+    ):
         if user_id == bad_id:
             raise RuntimeError("db hiccup on insert")
-        return real_insert(db, user_id, t, capital_raw, deposited_raw)
+        return real_insert(
+            db, user_id, t, capital_raw, deposited_raw, invested_raw, unrealized_raw
+        )
 
     monkeypatch.setattr(TableWrite, "insert_account_snapshot", flaky_insert)
 
@@ -426,7 +452,7 @@ def test_the_snapshot_records_the_reset_figure_not_the_stale_one():
     conn = fresh_test_conn()
     latest = TableRead.latest_account_snapshots(conn)
     conn.close()
-    assert latest[user_id] == (0, 0)
+    assert latest[user_id] == (0, 0, 0, 0)
     db.close()
 
 
@@ -589,3 +615,85 @@ def test_list_account_snapshots_returns_the_newest_rows_oldest_first():
     rows = TableRead.list_account_snapshots(conn, user_id, limit=2)
     conn.close()
     assert rows == [(2_000, 20_000, 500), (3_000, 30_000, 500)]
+
+
+def test_the_snapshot_records_what_the_account_put_to_work():
+    """`invested` is the cost basis of the open positions, taken from the SAME
+    walk as capital -- valuing an account reads every touched market on chain,
+    so asking twice would double the board's most expensive operation."""
+    conn = fresh_test_conn()
+    user_id, acct, api_key = TableWrite.create_user(
+        conn, email="invested@example.com", password_hash="x", handle=None
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-inv", api_key, 1_700_000_000, "PENDING"),
+    )
+    conn.close()
+
+    db = fresh_test_db()
+    service = LeaderboardService(
+        db=db,
+        onchain=_FakeOnchainBalance({acct.address: 30_000_000}),
+        # Positions worth $70 that cost $50: capital is cash + value, and
+        # invested is the cost -- they must not be confused for each other.
+        accounts=_FakeAccounts({acct.address: 70.0}, {acct.address: 50.0}),
+        settings=Settings(),
+    )
+    assert service.take_snapshot(1_700_001_000) == 1
+
+    check = fresh_test_conn()
+    latest = TableRead.latest_account_snapshots(check)
+    check.close()
+    capital, _deposited, invested, unrealized = latest[user_id]
+    assert capital == 30_000_000 + 70_000_000
+    assert invested == 50_000_000
+    assert unrealized == 20_000_000, "the $70 they are worth less the $50 they cost"
+    db.close()
+
+
+def test_the_board_carries_invested_through_to_its_rows():
+    conn = fresh_test_conn()
+    user_id, acct, api_key = TableWrite.create_user(
+        conn, email="board-inv@example.com", password_hash="x", handle="Investor"
+    )
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, TAKER_API_KEY, MATCH_TIME, STATUS) "
+        "VALUES (%s, %s, %s, %s)",
+        ("t-board-inv", api_key, 1_700_000_000, "PENDING"),
+    )
+    TableWrite.insert_account_snapshot(
+        conn, user_id, 1_700_001_000, 100_500_000, 100_000_000, 1_250_000, 200_000
+    )
+    conn.close()
+
+    db = fresh_test_db()
+    service = LeaderboardService(
+        db=db, onchain=_FakeOnchainBalance({}), accounts=_FakeAccounts(),
+        settings=Settings(),
+    )
+    row = next(r for r in service.build_board() if r.address == acct.address)
+    assert row.invested_raw == 1_250_000
+    assert row.earned_raw == 500_000
+    assert row.unrealized_raw == 200_000
+    # The residual: of $0.50 made, $0.20 is still riding, so $0.30 is banked.
+    assert row.realized_raw == 300_000
+    db.close()
+
+
+def test_a_snapshot_written_before_the_column_existed_reads_as_zero_invested():
+    """Rows predating INVESTED_RAW cannot be reconstructed -- the positions
+    they valued have moved since -- so they read 0 rather than a guess."""
+    conn = fresh_test_conn()
+    user_id, _acct, _key = TableWrite.create_user(
+        conn, email="legacy-inv@example.com", password_hash="x", handle=None
+    )
+    conn.execute(
+        "INSERT INTO account_snapshots (USER_ID, T, CAPITAL_RAW, DEPOSITED_RAW) "
+        "VALUES (%s, %s, %s, %s)",
+        (user_id, 1_700_000_000, 10, 20),
+    )
+    latest = TableRead.latest_account_snapshots(conn)
+    conn.close()
+    assert latest[user_id] == (10, 20, 0, 0)

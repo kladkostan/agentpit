@@ -51,11 +51,26 @@ class LeaderboardRow(BaseModel):
     address: str
     capital_raw: int
     deposited_raw: int
+    #: Cost basis of the open positions -- what the account put to work.
+    invested_raw: int = 0
+    #: Mark-to-market gain on those open positions -- profit only on paper.
+    unrealized_raw: int = 0
     trades: int
 
     @property
     def earned_raw(self) -> int:
         return compute_earned_raw(self.capital_raw, self.deposited_raw)
+
+    @property
+    def realized_raw(self) -> int:
+        """Profit the account has actually banked.
+
+        The residual: total profit is `capital - deposited`, and whatever of it
+        is not still riding on an open position has been settled into cash.
+        Nothing else records where that line falls, which is why the
+        unrealized half is what gets stored.
+        """
+        return self.earned_raw - self.unrealized_raw
 
     @property
     def return_pct(self) -> float:
@@ -114,11 +129,21 @@ class LeaderboardService:
         self._accounts = accounts
         self._settings = settings
 
-    def _capital_raw(self, address: str) -> int:
+    def _capital_invested_unrealized_raw(self, address: str) -> tuple[int, int, int]:
+        """`(capital, invested, unrealized)` in base units, from ONE walk.
+
+        Capital is cash plus what the open positions are worth now; invested is
+        what they cost; unrealized is the difference. The three together are
+        what makes the board legible: $22 up on $1,426 at work is a different
+        story from $2 on $35, and neither is money anyone has actually banked.
+        """
         cash = self._onchain.usd_balance(address)
-        rows = self._accounts.total_value(address)
-        value_whole = rows[0]["value"] if rows else 0.0
-        return cash + int(round(value_whole * 10**6))
+        value_whole, cost_whole = self._accounts.value_and_cost(address)
+        value_raw = int(round(value_whole * 10**6))
+        cost_raw = int(round(cost_whole * 10**6))
+        # Subtracting after rounding, so unrealized + invested == value exactly
+        # and the columns cannot disagree by a base unit.
+        return (cash + value_raw, cost_raw, value_raw - cost_raw)
 
     def take_snapshot(self, now: int) -> int:
         """Value every trading account. Returns the number of rows written.
@@ -132,7 +157,9 @@ class LeaderboardService:
         written = 0
         for account in accounts:
             try:
-                capital = self._capital_raw(account.eth_address)
+                capital, invested, unrealized = (
+                    self._capital_invested_unrealized_raw(account.eth_address)
+                )
                 with self._db.write() as conn:
                     # Before the deposit is read, not after: the row written
                     # this tick must carry the corrected figure. See
@@ -145,7 +172,13 @@ class LeaderboardService:
                         conn, account.user_id, self._settings.paper_balance_target_raw
                     )
                     TableWrite.insert_account_snapshot(
-                        conn, account.user_id, now, capital, deposited
+                        conn,
+                        account.user_id,
+                        now,
+                        capital,
+                        deposited,
+                        invested,
+                        unrealized,
                     )
             except Exception:
                 # One account must not cost every other account its data
@@ -182,13 +215,15 @@ class LeaderboardService:
             if snapshot is None:
                 # Traded, but the valuation pass has not reached it yet.
                 continue
-            capital, deposited = snapshot
+            capital, deposited, invested, unrealized = snapshot
             rows.append(
                 LeaderboardRow(
                     name=display_name(account.handle, account.eth_address),
                     address=account.eth_address,
                     capital_raw=capital,
                     deposited_raw=deposited,
+                    invested_raw=invested,
+                    unrealized_raw=unrealized,
                     trades=counts.get(account.user_id, 0),
                 )
             )

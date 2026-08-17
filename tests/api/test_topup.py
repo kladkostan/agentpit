@@ -54,14 +54,11 @@ class _FakeAccounts:
         raise AssertionError("GET /me/top-up must not walk positions on chain")
 
 
-def test_top_up_status_does_not_mint_or_touch_last_topup_at():
+def test_top_up_status_does_not_mint_or_touch_last_topup_at(sign_in):
     with TestClient(app) as client:
-        reg = client.post(
-            "/register",
-            json={"email": "topup-get@example.com", "password": "hunter22hunter22"},
-        ).json()
-        token = reg["access_token"]
-        user_id = reg["user"]["user_id"]
+        session = sign_in(client, "topup-get@example.com")
+        token = session["access_token"]
+        user_id = session["user"]["user_id"]
 
         fake = _FakeOnchain()
         fake_accounts = _FakeAccounts()

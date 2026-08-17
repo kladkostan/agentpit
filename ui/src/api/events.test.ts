@@ -47,6 +47,7 @@ function event(id: string, markets: GammaMarket[]): GammaEvent {
     volume: "0",
     volume24hr: "0",
     liquidity: "0",
+    competitive: "0",
     markets,
   } as GammaEvent;
 }
@@ -89,5 +90,39 @@ describe("listEvents", () => {
     vi.mocked(apiFetch).mockResolvedValueOnce([event("9", [])]);
     const r = await listEvents({ limit: 1, offset: 0 });
     expect(r.events).toEqual([]);
+  });
+});
+
+describe("listEvents sort param", () => {
+  beforeEach(() => vi.mocked(apiFetch).mockReset().mockResolvedValue([]));
+
+  function requestedPath(): string {
+    return String(vi.mocked(apiFetch).mock.calls[0]?.[0]);
+  }
+
+  it("serialises the sort", async () => {
+    await listEvents({ limit: 20, offset: 0, sort: "liquidity" });
+    expect(requestedPath()).toContain("sort=liquidity");
+  });
+
+  it("omits the sort when absent or blank, so the server picks its default", async () => {
+    await listEvents({ limit: 20, offset: 0, sort: "  " });
+    expect(requestedPath()).not.toContain("sort=");
+    await listEvents({ limit: 20, offset: 0 });
+    expect(String(vi.mocked(apiFetch).mock.calls[1]?.[0])).not.toContain("sort=");
+  });
+
+  it("keeps carrying the tag filters alongside it", async () => {
+    await listEvents({
+      limit: 20,
+      offset: 0,
+      sort: "competitive",
+      tag: "politics",
+      subtags: ["trump"],
+    });
+    const path = requestedPath();
+    expect(path).toContain("sort=competitive");
+    expect(path).toContain("tag=politics");
+    expect(path).toContain("subtag=trump");
   });
 });

@@ -467,9 +467,9 @@ class OrderService:
                 (token_id,),
             ).fetchall()
             last = conn.execute(
-                "SELECT PRICE FROM trades WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-                "ORDER BY MATCH_TIME DESC LIMIT 1",
-                (token_id,),
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT PRICE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
+                ([token_id], [token_id]),
             ).fetchone()
         bids = sorted(
             (r for r in rows if r["SIDE"] == "BUY"),
@@ -544,16 +544,35 @@ class OrderService:
             start = end - hours * 3600
         with self._db.read() as conn:
             rows = conn.execute(
-                "SELECT MATCH_TIME, PRICE FROM trades "
-                "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-                "AND MATCH_TIME >= %s AND MATCH_TIME <= %s "
-                "ORDER BY MATCH_TIME ASC",
-                (token_id, start, end),
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT MATCH_TIME, PRICE FROM prints "
+                  "WHERE MATCH_TIME >= %s AND MATCH_TIME <= %s "
+                  "ORDER BY MATCH_TIME ASC",
+                ([token_id], [token_id], start, end),
             ).fetchall()
+            # A price holds until the next trade, so a window containing no
+            # trade is not a window with no price. Without this the one-day
+            # series of a market whose last print is 26 hours old came back
+            # empty and the card drew its no-data placeholder beside a live
+            # headline -- with the tape as sparse as it is, that is most cards.
+            #
+            # Stamped AT `start`, not at its own time: left where it happened, a
+            # month-old print would stretch a one-day chart back over a range
+            # the caller never asked for.
+            opening = conn.execute(
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT PRICE FROM prints WHERE MATCH_TIME < %s "
+                  "ORDER BY MATCH_TIME DESC LIMIT 1",
+                ([token_id], [token_id], start),
+            ).fetchone()
         points = [
             {"t": int(r["MATCH_TIME"]), "p": price_to_float(int(r["PRICE"]))}
             for r in rows
         ]
+        if opening is not None:
+            points.insert(
+                0, {"t": start, "p": price_to_float(int(opening["PRICE"]))}
+            )
         # Optional fidelity thinning (minutes between kept points).
         if fidelity > 0 and points:
             step = fidelity * 60
@@ -594,10 +613,9 @@ class OrderService:
     def get_last_trade_price(self, token_id: str) -> dict:
         with self._db.read() as conn:
             row = conn.execute(
-                "SELECT PRICE, SIDE FROM trades "
-                "WHERE ASSET_ID = %s AND STATUS != 'FAILED' "
-                "ORDER BY MATCH_TIME DESC LIMIT 1",
-                (token_id,),
+                TableRead.TOKEN_PRINTS_CTE
+                + "SELECT PRICE, SIDE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
+                ([token_id], [token_id]),
             ).fetchone()
         if row is None:
             raise NotFoundError("no trades for token")
@@ -976,6 +994,12 @@ class OrderService:
         maker_row = match["maker_row"]
         maker_user_id = TableRead.get_user_id_by_api_key(conn, maker_row["API_KEY"])
         maker_side = maker_row["SIDE"]
+        # The maker's order is booked against ITS token, which for a
+        # MINT/MERGE is the complement of the taker's. Reading it from the
+        # maker row is what makes the leg reconstructable; copying `token_id`
+        # here is the bug this replaces.
+        maker_asset_id = maker_row["TOKEN_ID"]
+        match_kind = match.get("match_kind", "NORMAL")
         maker_orders_payload = [
             {
                 "order_id": match["maker_order_id"],
@@ -984,7 +1008,7 @@ class OrderService:
                 "matched_amount": str(match["trade_size"]),
                 "price": int(match["price"]),
                 "fee_rate_bps": int(maker_row["FEE_RATE_BPS"]),
-                "asset_id": token_id,
+                "asset_id": maker_asset_id,
                 "outcome": outcome_label,
                 "side": maker_side,
             }
@@ -993,10 +1017,11 @@ class OrderService:
             """
             INSERT INTO trades (
                 TRADE_ID, TAKER_ORDER_ID, MAKER_ORDERS, MARKET, ASSET_ID,
+                MAKER_ASSET_ID, MATCH_KIND,
                 PRICE, TRADE_SIZE, REMAINING_SIZE, SIDE, STATUS,
                 MATCH_TIME, TRANSACTION_HASH, BUCKET_INDEX, FEE_RATE_BPS,
                 TAKER_API_KEY, MAKER_API_KEY
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 trade_id,
@@ -1004,6 +1029,8 @@ class OrderService:
                 json.dumps(maker_orders_payload),
                 condition_id,                 # MARKET = condition_id (§7 fix)
                 token_id,                     # ASSET_ID = token_id
+                maker_asset_id,
+                match_kind,
                 match["price"],
                 match["trade_size"],
                 taker_row["REMAINING_AMOUNT"],

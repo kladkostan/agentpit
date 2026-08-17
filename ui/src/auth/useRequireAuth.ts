@@ -9,16 +9,16 @@ import { useAuth } from "./useAuth";
  *   <Button onClick={requireAuth(() => placeOrder.mutate(...))}>Buy</Button>
  */
 export function useRequireAuth() {
-  const { user, openLogin } = useAuth();
+  const { user, openAuth } = useAuth();
   return useCallback(
     <Args extends unknown[], R>(fn: (...args: Args) => R) =>
       (...args: Args): R | undefined => {
         if (!user) {
-          openLogin();
+          openAuth();
           return undefined;
         }
         return fn(...args);
       },
-    [user, openLogin],
+    [user, openAuth],
   );
 }

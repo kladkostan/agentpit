@@ -6,6 +6,8 @@
  *  null inputs so call sites don't have to guard.
  */
 
+import type { MarketState } from "@/types/market";
+
 const SHORT_DATE_FMT = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -27,6 +29,39 @@ export function formatShortDate(seconds: number | null): string | null {
 export function formatLongDate(seconds: number | null): string | null {
   if (seconds === null) return null;
   return LONG_DATE_FMT.format(new Date(seconds * 1000));
+}
+
+/** What a card prints where a closing date goes.
+ *
+ *  A market can trade past its own stated deadline — Polymarket keeps the book
+ *  open while the question stays open — and printing "closes Jun 1" beside a
+ *  live order book makes the card contradict itself.
+ *
+ *  The test is deliberately date AND state, never date alone: 849 events on
+ *  production are past-dated and fully resolved, and for those the date is the
+ *  right thing to show.
+ *
+ *  `formatDate` defaults to the short grid-card format; the detail pages pass
+ *  their own long-date formatter so this stays the one place "is this overdue
+ *  and live" gets decided, while each caller keeps its own date shape. */
+export function closeLabel(
+  endDate: number | null,
+  state: MarketState,
+  nowSeconds: number,
+  formatDate: (seconds: number) => string | null = formatShortDate,
+): { prefix: string | null; value: string } | null {
+  if (endDate === null) return null;
+  if (endDate < nowSeconds && state === "ACTIVE") {
+    // The deadline lapsed, not the market: upstream keeps the book open while
+    // the question stays open. Keep the date — how far it has slipped is
+    // information — and drop the claim that anything is closing.
+    const overdue = formatDate(endDate);
+    return overdue === null ? null : { prefix: "overdue", value: overdue };
+  }
+  const value = formatDate(endDate);
+  // `value` is only ever null here if a caller's formatter returns null for a
+  // non-null input, which none does — kept for the TS narrowing below.
+  return value === null ? null : { prefix: "closes", value };
 }
 
 const CLOCK_FMT = new Intl.DateTimeFormat("en-US", {
@@ -113,16 +148,164 @@ export function relativeTime(secsAgo: number): string {
 
 /** Which volume figure a card should show, and what to call it.
  *
- *  All-time is preferred, but only events touched by a recent sync carry it: an
- *  event that has dropped out of the synced top-N keeps its last-captured 24h
- *  figure and never gets an all-time one. Falling back to that figure — labelled
- *  as what it is — beats dropping the line, which would have blanked 545 of 962
- *  production events. */
+ *  `prefer` follows the list's sort, so the number on a card explains the order
+ *  it is in. Under "24hr Volume" a card showing its all-time figure reads as a
+ *  contradiction — $16.2M sitting above $12.0M above $1.4M, in a list that says
+ *  it is ranked by the last day.
+ *
+ *  Either figure falls back to the other, because only events touched by a
+ *  recent sync carry both: one that has dropped out of the synced top-N keeps
+ *  its last-captured 24h figure and never gets an all-time one. Showing that —
+ *  labelled as what it is — beats dropping the line, which would have blanked
+ *  545 of 962 production events. */
 export function volumeStat(
   volume: number | null,
   volume24hr: number | null,
+  prefer: "total" | "24h" = "total",
 ): { value: number; label: string } | null {
-  if (volume !== null) return { value: volume, label: "vol" };
-  if (volume24hr !== null) return { value: volume24hr, label: "24h vol" };
-  return null;
+  const total = volume !== null ? { value: volume, label: "vol" } : null;
+  const daily =
+    volume24hr !== null ? { value: volume24hr, label: "24h vol" } : null;
+  return prefer === "24h" ? (daily ?? total) : (total ?? daily);
+}
+
+/** "3.3" / "25" / "-21.9" — a P/L percentage at one decimal, dropping a
+ *  trailing ".0" so a clean value still reads as "25".
+ *
+ *  Rounding to a whole percent made the parenthetical contradict the dollars
+ *  beside it: a $0.30 gain on a $9.20 cost is 3.26%, and "+$0.30 (3%)" invites
+ *  the reader to compute 9.20 x 1.03 = $9.48 and wonder where the $9.50 came
+ *  from. The sign is preserved; callers that print their own sign should pass
+ *  an absolute value. */
+export function formatPnlPct(pct: number): string {
+  if (!Number.isFinite(pct)) return "0";
+  const rounded = Math.round(pct * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+const WEI_PER_NATIVE = 1_000_000_000_000_000_000n;
+
+/** Four decimals: the signup grant is 0.02 native (`signup_gas_grant_wei`),
+ *  so two decimals rounds most real balances straight to "0.00" long before
+ *  the wallet is actually out of gas. This is the smallest fixed precision
+ *  that still shows life at that scale. */
+const CREDITS_DECIMALS = 4n;
+const CREDITS_SCALE = 10n ** CREDITS_DECIMALS;
+
+/** "0.0134" — a wei string (from `/me/credits`) as a native-coin figure,
+ *  precise enough to stay useful at the signup-grant's own scale.
+ *
+ *  BigInt arithmetic throughout, never `Number`: the whole point of sending
+ *  wei as a string is that it can exceed Number's safe integer range, and
+ *  routing it through a float on the way to four decimals would silently
+ *  reintroduce the precision loss the string was chosen to avoid. Rounds
+ *  half up at the fourth decimal rather than truncating. */
+export function formatCredits(weiString: string): string {
+  // `BigInt("")` returns 0n rather than throwing, so an empty string needs
+  // its own guard before the try/catch below can catch everything else.
+  if (weiString.trim() === "") return "—";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiString);
+  } catch {
+    return "—";
+  }
+  const negative = wei < 0n;
+  if (negative) wei = -wei;
+  const scaledUnits =
+    (wei * CREDITS_SCALE + WEI_PER_NATIVE / 2n) / WEI_PER_NATIVE;
+  const whole = scaledUnits / CREDITS_SCALE;
+  const frac = scaledUnits % CREDITS_SCALE;
+  const body = `${whole}.${frac.toString().padStart(Number(CREDITS_DECIMALS), "0")}`;
+  return negative ? `-${body}` : body;
+}
+
+/** "0.0134" / "1" / "0" — a wei string as its exact native-coin figure, with
+ *  no rounding and no trailing zeros. For the tooltip on the Credits cell,
+ *  the same role `USD.format(balance)` plays for the apUSD cell: the
+ *  abbreviated/fixed-precision headline value stays scannable, and hovering
+ *  reveals precisely what's there down to the last wei. */
+export function formatCreditsExact(weiString: string): string {
+  if (weiString.trim() === "") return "—";
+  let wei: bigint;
+  try {
+    wei = BigInt(weiString);
+  } catch {
+    return "—";
+  }
+  const negative = wei < 0n;
+  if (negative) wei = -wei;
+  const whole = wei / WEI_PER_NATIVE;
+  const frac = wei % WEI_PER_NATIVE;
+  const fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
+  const body = fracStr ? `${whole}.${fracStr}` : `${whole}`;
+  return negative ? `-${body}` : body;
+}
+
+/** "0x933B…5215" — an address short enough to sit on one line without
+ *  wrapping, keeping both ends so it stays recognisable at a glance. The full
+ *  value is never far: every place this renders offers a way to copy it.
+ *
+ *  Shared rather than per-page: the Arena board and the profile show the same
+ *  account, and two truncation rules would make it look like two accounts. */
+export function shortAddress(a: string): string {
+  return a.length < 12 ? a : `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+/** Labels title-casing gets wrong because they are acronyms, not words.
+ *
+ *  Only entries actually observed arriving lowercase from upstream, plus the
+ *  league abbreviations that would land here the same way — a speculative list
+ *  would rot, since upstream mints new tags constantly and most already arrive
+ *  correctly cased ("ATP Tour", "MLB", "AI"). Keyed on the full lowercase
+ *  label, so a multi-word label can map too. */
+const TAG_ACRONYMS = new Map<string, string>([
+  ["fomc", "FOMC"],
+  ["lol", "LoL"],
+  ["val", "VAL"],
+  ["nba", "NBA"],
+  ["nfl", "NFL"],
+  ["mlb", "MLB"],
+  ["nhl", "NHL"],
+  ["ufc", "UFC"],
+  ["mma", "MMA"],
+  ["ai", "AI"],
+  ["etf", "ETF"],
+  ["ipo", "IPO"],
+  ["gdp", "GDP"],
+  ["cpi", "CPI"],
+  ["btc", "BTC"],
+  ["eth", "ETH"],
+  ["xrp", "XRP"],
+]);
+
+/** Small words that stay lowercase inside a title, unless they lead it. */
+const TITLE_STOPWORDS = new Set([
+  "a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs",
+]);
+
+/** A tag label, cased for display.
+ *
+ *  Upstream authors these by hand and is inconsistent: most read like titles
+ *  ("Global Elections", "ATP Tour", "Argentina Primera División") but a
+ *  handful arrive entirely lowercase ("league of legends", "primary
+ *  elections", "baseball") and look like a bug beside their neighbours.
+ *
+ *  Only the all-lowercase ones are touched. Any label carrying a capital was
+ *  cased deliberately, and re-casing it would wreck the acronyms and proper
+ *  nouns that make up most of the list — "AI", "ATP", "A100", "US Election"
+ *  would come back as "Ai", "Atp", "A100", "Us Election".
+ */
+export function displayTagLabel(label: string): string {
+  if (/[A-Z]/.test(label)) return label;
+  const acronym = TAG_ACRONYMS.get(label);
+  if (acronym) return acronym;
+  return label
+    .split(" ")
+    .map((word, i) =>
+      i > 0 && TITLE_STOPWORDS.has(word)
+        ? word
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
 }

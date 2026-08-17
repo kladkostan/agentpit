@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Market } from "@/types/market";
-import { buyChipCents, sortMarketsByYesMid, yesPriceMap } from "./eventOutcomes";
+import {
+  buyChipCents,
+  pickInitialSelection,
+  sortMarketsByYesMid,
+  yesPriceMap,
+} from "./eventOutcomes";
 
 function m(id: number, label = `m${id}`, yesPrice: number | null = null): Market {
   return {
@@ -120,5 +125,65 @@ describe("buyChipCents", () => {
     });
     expect(askOnly.yes).toBeCloseTo(64, 5);
     expect(askOnly.no).toBeNull();
+  });
+});
+
+describe("pickInitialSelection", () => {
+  // Ranked by probability: the reader clicked m3 but m1 sits on top.
+  const ordered = [m(1), m(2), m(3)];
+
+  it("opens the requested market rather than the top-ranked one", () => {
+    // The complaint: linking a "25 bps increase" position opened "no change",
+    // because the leaderboard is sorted by likelihood.
+    expect(pickInitialSelection(ordered, null, "s3", null)).toEqual({
+      marketId: 3,
+      outcome: "Yes",
+    });
+  });
+
+  it("falls back to the top-ranked market with no request", () => {
+    expect(pickInitialSelection(ordered, null, null, null)).toEqual({
+      marketId: 1,
+      outcome: "Yes",
+    });
+  });
+
+  it("falls back to the top-ranked market when the slug is unknown", () => {
+    // A stale link must still open something.
+    expect(pickInitialSelection(ordered, null, "gone", null)).toEqual({
+      marketId: 1,
+      outcome: "Yes",
+    });
+  });
+
+  it("prefers the live window of a rotating series when nothing was asked", () => {
+    expect(pickInitialSelection(ordered, m(9), null, null)?.marketId).toBe(9);
+  });
+
+  it("lets an explicit request beat the live window", () => {
+    expect(pickInitialSelection(ordered, m(9), "s2", null)?.marketId).toBe(2);
+  });
+
+  it("honours the requested outcome when the market carries it", () => {
+    expect(pickInitialSelection(ordered, null, "s3", "No")).toEqual({
+      marketId: 3,
+      outcome: "No",
+    });
+  });
+
+  it("ignores an outcome the requested market does not have", () => {
+    expect(pickInitialSelection(ordered, null, "s3", "Maybe")?.outcome).toBe("Yes");
+  });
+
+  it("does not carry a requested outcome onto a fallback market", () => {
+    // The reader never chose a side on this row, so asserting one would lie.
+    expect(pickInitialSelection(ordered, null, "gone", "No")).toEqual({
+      marketId: 1,
+      outcome: "Yes",
+    });
+  });
+
+  it("returns null when the event has no markets", () => {
+    expect(pickInitialSelection([], null, null, null)).toBeNull();
   });
 });

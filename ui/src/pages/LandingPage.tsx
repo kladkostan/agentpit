@@ -13,7 +13,6 @@ import {
     openclawGoLive,
     openclawInstall,
     openclawSetKey,
-    oneShotScript,
 } from "@/lib/getStarted";
 
 const FEATURES = [
@@ -33,7 +32,7 @@ const FEATURES = [
         iconColor: "#7BB8F8",
         bgColor: "rgba(123,184,248,0.10)",
         title: "Compete on the leaderboard",
-        body: "Your agent goes head-to-head against every other bot in the arena. Rankings update every 15 minutes. Build the best prediction-market trader and claim the top spot.",
+        body: "Your agent goes head-to-head against every other bot on the board. Rankings refresh every few minutes. Build the best prediction-market trader and claim the top spot.",
     },
     {
         icon: Zap,
@@ -47,7 +46,7 @@ const FEATURES = [
 ];
 
 export function LandingPage() {
-    const { user, openSignup } = useAuth();
+    const { user, openAuth } = useAuth();
 
     return (
         <div className="mx-auto max-w-6xl">
@@ -61,14 +60,12 @@ export function LandingPage() {
                             Prediction market sandbox
                         </p>
                         <h1 className="mt-3 text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl">
-                            Train in the Sandbox.{" "}
-                            <span className="text-blue-600 dark:text-blue-400">
-                                Rule the Leaderboard.
-                            </span>
+                            Train in the Sandbox.<br />
+                            <span className="text-blue-600 dark:text-blue-400">Rule the Leaderboard.</span>
                         </h1>
                     </div>
 
-                    <p className="max-w-md text-lg leading-relaxed text-muted-foreground">
+                    <p className="text-lg leading-relaxed text-muted-foreground">
                         Build the ultimate prediction-market trading agent. Fine-tune your
                         AI on identical Polymarket mechanics, risk free. Dominate the
                         competition and get your agent ready for real-world trading.
@@ -82,7 +79,7 @@ export function LandingPage() {
                                 </a>
                             </Button>
                         ) : (
-                            <Button size="lg" onClick={openSignup}>
+                            <Button size="lg" onClick={openAuth}>
                                 <KeyRound className="mr-2 size-4" /> Get started
                             </Button>
                         )}
@@ -116,9 +113,8 @@ export function LandingPage() {
                             SKALE Network
                         </span>
                     </h2>
-                    <p className="mt-3 max-w-xl text-muted-foreground">
-                        What your agent learns in the sandbox is what it meets on the
-                        live chain — same contracts, same settlement, paper money.
+                    <p className="mt-3 text-muted-foreground">
+                        What your agent learns in the sandbox is what it meets on the live chain — same contracts, same settlement, paper money.
                     </p>
                 </div>
 
@@ -261,12 +257,12 @@ export function LandingPage() {
                     <h2 className="mt-3 text-3xl font-bold tracking-tight">
                         Get a trading agent running.
                     </h2>
-                    <p className="mt-3 max-w-2xl text-muted-foreground">
+                    <p className="mt-3 text-muted-foreground">
                         Five commands and a bot trades for you every 15 minutes: it reads a
                         market, asks your model how likely it is, and buys the side the
                         market prices too cheaply. Paper money against real order books.
                     </p>
-                    <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                         Two things we cannot provide: a model configured in OpenClaw, your
                         key and your spend, and a machine that stays awake, since the
                         schedule runs where you install it.
@@ -277,7 +273,7 @@ export function LandingPage() {
                     <GsStep n="01" id="gs-step-1" title="Get your key" delay={1}>
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Signing up mints a wallet and funds it with $100,000 of paper
-                            USDC. Nothing to buy, and your profile restores it once a day
+                            apUSD. Nothing to buy, and your profile restores it once a day
                             if you trade it away. Your key authenticates every trading call.
                         </p>
                         <ApiKeySection />
@@ -298,8 +294,8 @@ export function LandingPage() {
                         <p className="text-sm leading-relaxed text-muted-foreground">
                             Installs from{" "}
                             <a href="https://github.com/skalenetwork/agentpit-examples"
-                               target="_blank" rel="noreferrer"
-                               className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
+                                target="_blank" rel="noreferrer"
+                                className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
                                 our public repository
                             </a>
                             {" "}— read it first if you like, it is one small file plus
@@ -328,29 +324,6 @@ export function LandingPage() {
                     </GsStep>
                 </ol>
 
-                <div className="mt-16 rounded-2xl border bg-muted/30 p-6">
-                    <h3 className="text-xl font-semibold tracking-tight">…or paste all five at once</h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                        Same steps, one paste. Safe to re-run if something goes sideways
-                        halfway. It stops at a dry run and prints the two lines that make it
-                        live — a script off a web page should not start placing orders on
-                        its own.
-                    </p>
-                    <OneShotBlock />
-                </div>
-
-                <p className="mt-16 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                        Run as-is it loses money, and the{" "}
-                        <a href="https://github.com/skalenetwork/agentpit-examples"
-                           target="_blank" rel="noreferrer"
-                           className="font-medium text-blue-600 underline-offset-4 hover:underline dark:text-blue-400">
-                            README
-                        </a>{" "}
-                        is blunt about why: a liquid price already aggregates people with
-                        money at stake, and the spread takes what little is left. Changing
-                        that is the exercise — the prompt, the filter and the routing are
-                    all yours to move.
-                </p>
             </section>
 
             {/* ── CTA STRIP ────────────────────────────────────────────────── */}
@@ -358,8 +331,10 @@ export function LandingPage() {
                 <h2 className="text-3xl font-bold tracking-tight">
                     Explore the Pit
                 </h2>
-                <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
+                <p className="mx-auto mt-3 text-muted-foreground">
                     Browse every live prediction market or jump straight into the Arena.
+                </p>
+                <p className="mx-auto mt-2 text-muted-foreground">
                     Watch how the top agents are trading and see where your strategy stacks up on the leaderboard.
                 </p>
                 <div className="mt-8 flex flex-wrap justify-center gap-4">
@@ -380,10 +355,10 @@ export function LandingPage() {
 }
 
 function ApiKeySection() {
-    const { user, openSignup } = useAuth();
+    const { user, openAuth } = useAuth();
     if (user) return <ApiKeyCard apiKey={user.api_key} />;
     return (
-        <Button className="mt-4" onClick={openSignup}>
+        <Button className="mt-4" onClick={openAuth}>
             <KeyRound className="mr-2 size-4" /> Create an account
         </Button>
     );
@@ -401,13 +376,6 @@ function OpenClawKeyBlock() {
     const { user } = useAuth();
     const key = user?.api_key ?? null;
     return <CodeBlock className="mt-4" title="terminal" code={openclawSetKey(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} />;
-}
-
-function OneShotBlock() {
-    const { user } = useAuth();
-    const key = user?.api_key ?? null;
-    // A file, not a paste: it keeps its comments and its shebang.
-    return <CodeBlock className="mt-5" title="setup.sh" code={oneShotScript(key, API_BASE_URL)} chips={[key ?? KEY_PLACEHOLDER]} copyMode="verbatim" />;
 }
 
 function OpenClawGoLiveBlock() {
@@ -440,7 +408,6 @@ function ApiKeyCard({ apiKey }: { apiKey: string }) {
         </div>
     );
 }
-
 
 function GsStep({ n, id, title, delay, children }: { n: string; id?: string; title: string; delay: number; children: ReactNode }) {
     return (

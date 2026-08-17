@@ -6,7 +6,9 @@ non-crossed per token AND across the YES/NO complement map, so the mirror can
 never self-match — provided cancels are applied before placements.
 """
 import logging
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -210,19 +212,52 @@ def inventory_mint_micro(need_micro: int, held_micro: int, seed_micro: int) -> i
     return need_micro + seed_micro - held_micro
 
 
+def _read_balances(
+    onchain: OnchainAdmin, user: User, ref
+) -> "tuple[dict[str, int], int]":
+    """The three balances a pass needs, fetched in one round trip.
+
+    They are independent of each other and each is a remote call. Measured
+    against the SKALE node on 2026-08-12, in the api container: three calls
+    in a row take 1583ms, the same three together take 545ms. Against a local
+    anvil both are noise, which is why the sequential version survived this
+    long.
+
+    Threads rather than async: `OnchainAdmin` is a synchronous web3 client and
+    the wait is socket I/O, which releases the GIL. Sharing one client across
+    them was verified rather than assumed — five runs of three concurrent
+    reads returned numbers identical to the sequential ones.
+    """
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        yes = pool.submit(onchain.ctf_balance, user.eth_address, int(ref.yes_token))
+        no = pool.submit(onchain.ctf_balance, user.eth_address, int(ref.no_token))
+        usd = pool.submit(onchain.usd_balance, user.eth_address)
+        return {ref.yes_token: yes.result(), ref.no_token: no.result()}, usd.result()
+
+
 def _ensure_inventory(
-    onchain: OnchainAdmin, user: User, ref, snap: BookSnapshot, cfg: Settings
+    onchain: OnchainAdmin,
+    user: User,
+    ref,
+    snap: BookSnapshot,
+    cfg: Settings,
+    held: "dict[str, int]",
 ) -> int:
     """Split-mint CTF inventory to back every SELL, a block at a time.
-    Returns the number of split txs performed (0 or 1 per call — splits are
-    admin txs behind the global send_lock, budgeted by the caller)."""
+
+    Takes the holdings the caller already read rather than reading them again:
+    they were two of the five remote round trips a pass used to spend, and the
+    caller needs them regardless. Returns the number of split txs performed
+    (0 or 1 per call — splits are admin txs behind the global send_lock,
+    budgeted by the caller); a non-zero return means `held` is now stale.
+    """
     need = int(Decimal(str(cfg.mirror_inventory_buffer)) * split_target_micro(snap))
     if need <= 0:
         return 0
-    held_yes = onchain.ctf_balance(user.eth_address, int(ref.yes_token))
-    held_no = onchain.ctf_balance(user.eth_address, int(ref.no_token))
     add = inventory_mint_micro(
-        need, min(held_yes, held_no), cfg.mirror_inventory_seed_micro
+        need,
+        min(held[ref.yes_token], held[ref.no_token]),
+        cfg.mirror_inventory_seed_micro,
     )
     if add <= 0:
         return 0
@@ -273,10 +308,16 @@ def reconcile_market(
     SUCCESSFUL placements; "deferred" is hot placements skipped over budget
     and "failed" is placements that errored or raised — both mean the cycle
     is incomplete and a later cycle must converge the remainder."""
+    # Timing, carried out in the stats the caller already logs. A pass that
+    # gets slow should say where without anyone adding a profiler: the same
+    # code costs milliseconds against a local anvil and seconds against a
+    # remote node, and which segment grew is the whole question.
+    t0 = time.perf_counter()
     tokens = [ref.yes_token, ref.no_token]
     with db.read() as conn:
         rows = TableRead.list_live_order_levels(conn, user.api_key, tokens)
         foreign = {t: TableRead.foreign_touch(conn, user.api_key, t) for t in tokens}
+    t_db = time.perf_counter() - t0
     current = [
         LiveLevel(r["ORDER_ID"], r["TOKEN_ID"], r["SIDE"],
                   int(r["PRICE"]), int(r["REMAINING_AMOUNT"]))
@@ -290,20 +331,27 @@ def reconcile_market(
     )
     cancels, places = diff_levels(desired, current, protect=protect)
 
+    # One round trip for all three balances, and the pass keeps them: calm
+    # (resting) placements never move them, so this replaces one on-chain read
+    # per order — the dominant cost when replicating a deep book.
+    t1 = time.perf_counter()
+    held, house_usd = _read_balances(onchain, user, ref)
     splits = 0
     try:
-        splits = _ensure_inventory(onchain, user, ref, snap, cfg)
+        splits = _ensure_inventory(onchain, user, ref, snap, cfg, held)
     except Exception:
         log.exception("inventory split failed for market %s", ref.market_id)
-    inventory = {
-        ref.yes_token: onchain.ctf_balance(user.eth_address, int(ref.yes_token)),
-        ref.no_token: onchain.ctf_balance(user.eth_address, int(ref.no_token)),
-    }
-    # Cache this cycle's house balances for the placement loop below: calm
-    # (resting) placements never move them, so one read per balance replaces one
-    # on-chain read per order — the dominant cost when replicating a deep book.
+    if splits:
+        # A split mints both outcomes and spends collateral, so all three
+        # numbers above are stale. Re-read rather than adjust them by the
+        # amount asked for: that assumes the transaction moved exactly that
+        # and nothing else touched the position, and inventory reading high
+        # backs asks the house cannot cover. Splits are rare enough for the
+        # second round trip to cost nothing — zero in 179 production passes.
+        held, house_usd = _read_balances(onchain, user, ref)
+    t_chain = time.perf_counter() - t1
+    inventory = dict(held)
     raw_ctf = dict(inventory)
-    house_usd = onchain.usd_balance(user.eth_address)
     # KEPT resting SELLs already reserve inventory; only the surplus may back
     # new asks (negative remainder ⇒ the cap places nothing for that token).
     cancel_set = set(cancels)
@@ -377,6 +425,7 @@ def reconcile_market(
         house_usd if p.side == "BUY" else raw_ctf.get(p.token_id)
         for p in calm
     ]
+    t2 = time.perf_counter()
     try:
         ids = order.replace_resting_orders(
             user, cancels, calm_reqs, balance_hints=calm_hints)
@@ -386,9 +435,11 @@ def reconcile_market(
         log.warning("mirror batch replace raised (market=%s)",
                     ref.market_id, exc_info=True)
         failed += len(calm)
+    t_calm = time.perf_counter() - t2
 
     # Phase 2: hot placements (real settlements), budgeted by ATTEMPT — a
     # failed settlement still consumed chain time and must count.
+    t3 = time.perf_counter()
     attempted = 0
     for p in hot:
         if attempted >= cfg.mirror_max_settlements_per_cycle:
@@ -396,6 +447,13 @@ def reconcile_market(
             continue
         attempted += 1
         _try_place(p, expect_fill=True)
+    t_hot = time.perf_counter() - t3
 
     return {"placed": placed, "cancelled": len(cancels), "fills": fills,
-            "splits": splits, "deferred": deferred, "failed": failed}
+            "splits": splits, "deferred": deferred, "failed": failed,
+            # Milliseconds, rounded: the log line is read by a person.
+            "ms_db": round(t_db * 1000),
+            "ms_chain": round(t_chain * 1000),
+            "ms_calm": round(t_calm * 1000),
+            "ms_hot": round(t_hot * 1000),
+            "ms_all": round((time.perf_counter() - t0) * 1000)}
