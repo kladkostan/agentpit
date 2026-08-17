@@ -358,14 +358,18 @@ class OrderService:
         order_id: str | None = None,
     ) -> list[OpenOrder]:
         """Return the caller's live orders as Polymarket OpenOrder[] (§8.3)."""
-        clauses = ["API_KEY = %s", TableRead.LIVE_ORDER]
-        params: list = [user.api_key, int(time.time())]
+        clauses = ["API_KEY = %s"]
+        params: list = [user.api_key]
         if asset_id is not None:
             clauses.append("TOKEN_ID = %s")
             params.append(asset_id)
         if order_id is not None:
             clauses.append("ORDER_ID = %s")
             params.append(order_id)
+        # Last, per the positional-parameter rule: any clause added above
+        # this line without touching both lists the same way still lines up.
+        clauses.append(TableRead.LIVE_ORDER)
+        params.append(int(time.time()))
         with self._db.read() as conn:
             rows = conn.execute(
                 "SELECT ORDER_ID, TOKEN_ID, SIDE, PRICE, REMAINING_AMOUNT, MAKER, "
@@ -446,8 +450,8 @@ class OrderService:
     ) -> CancelOrdersResponse:
         """Cancel the caller's live orders filtered by condition_id (`market`)
         and/or token_id (`asset_id`). With neither filter, cancels all."""
-        clauses = ["API_KEY = %s", TableRead.LIVE_ORDER]
-        params: list = [user.api_key, int(time.time())]
+        clauses = ["API_KEY = %s"]
+        params: list = [user.api_key]
         if asset_id is not None:
             clauses.append("TOKEN_ID = %s")
             params.append(asset_id)
@@ -459,6 +463,10 @@ class OrderService:
             placeholders = ",".join("%s" for _ in token_ids)
             clauses.append(f"TOKEN_ID IN ({placeholders})")
             params.extend(token_ids)
+        # Last, per the positional-parameter rule: any clause added above
+        # this line without touching both lists the same way still lines up.
+        clauses.append(TableRead.LIVE_ORDER)
+        params.append(int(time.time()))
         with self._db.read() as conn:
             ids = [
                 r["ORDER_ID"]

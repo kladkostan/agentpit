@@ -12,7 +12,7 @@ from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 
 
-def _order(conn, *, token: str, expiration: int, order_id: str) -> None:
+def _order(conn, *, token: str, expiration: int | None, order_id: str) -> None:
     conn.execute(
         "INSERT INTO orders (ORDER_ID, TOKEN_ID, SIDE, PRICE, STATUS, "
         "REMAINING_AMOUNT, EXPIRATION, CREATED_AT, API_KEY) "
@@ -57,3 +57,21 @@ def test_an_order_dies_a_minute_before_its_stated_expiration():
 
 def test_the_grace_is_a_minute_and_is_stated_once():
     assert TableRead.EXPIRY_GRACE_SECONDS == 60
+
+
+def test_a_null_expiration_never_dies():
+    # EXPIRATION is a nullable BIGINT with no DEFAULT, so a direct write that
+    # omits it (a test fixture, a future migration) leaves it NULL rather
+    # than 0. NULL must read the same as "never expires" — otherwise the row
+    # is not just invisible to book/price reads, it is UNCANCELLABLE, since
+    # cancel_orders/cancel_all route through this same predicate.
+    db = DbSession(Settings().database_url)
+    now = int(time.time())
+    with db.write() as conn:
+        _order(conn, token="t-null", expiration=None, order_id="o-null")
+        rows = conn.execute(
+            f"SELECT ORDER_ID FROM orders WHERE TOKEN_ID = 't-null' "
+            f"AND {TableRead.LIVE_ORDER}",
+            (now,),
+        ).fetchall()
+    assert [r["ORDER_ID"] for r in rows] == ["o-null"]

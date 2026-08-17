@@ -148,10 +148,16 @@ class TableRead:
     #: silently shifts every parameter after it.
     #:
     #: An expiration of 0 means never — Polymarket's own convention, and the
-    #: default on `PlaceOrderRequest`.
+    #: default on `PlaceOrderRequest`. A NULL expiration reads the same way:
+    #: EXPIRATION is a nullable BIGINT with no DEFAULT, so any direct write
+    #: that omits it (a test fixture, a future migration) leaves it NULL
+    #: rather than 0, and `NULL = 0` / `NULL > x` both evaluate to NULL, which
+    #: WHERE treats as false. Without the explicit IS NULL arm such a row
+    #: would silently fail every liveness check AND every cancel — an
+    #: unkillable ghost order, worse than one that simply never expires.
     LIVE_ORDER = (
-        "STATUS = 'live' AND (EXPIRATION = 0 OR EXPIRATION > %s + "
-        f"{EXPIRY_GRACE_SECONDS})"
+        "STATUS = 'live' AND (EXPIRATION IS NULL OR EXPIRATION = 0 "
+        f"OR EXPIRATION > %s + {EXPIRY_GRACE_SECONDS})"
     )
 
     #: One price print per (match, token): "this token traded at this price".
