@@ -140,6 +140,12 @@ class TableRead:
     #: Polymarket's grace: a GTD order dies one minute BEFORE its stated
     #: expiration. Their clients compensate by sending `now + 60 + N` for a
     #: lifetime of N, so subtracting it here is what makes "1 hour" an hour.
+    #:
+    #: Documented, not folklore: Polymarket docs, page `trading/place-orders.mdx`,
+    #: "GTD orders expire one minute before their stated expiration as a
+    #: security threshold. To set an effective lifetime of N seconds, use
+    #: `now + 60 + N`. In addition, the expiration must be at least 3 minutes
+    #: in the future — orders expiring sooner are rejected."
     EXPIRY_GRACE_SECONDS = 60
 
     #: What every read means by a live order. Takes ONE parameter, `now` in

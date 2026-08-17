@@ -53,6 +53,12 @@ _EXCHANGE_ONE = 10**18
 # Polymarket rejects a GTD expiring sooner than this, and we match them: with
 # the one-minute grace subtracted on read, anything closer would be an order
 # that is already dead when it is placed.
+#
+# Documented, not folklore: Polymarket docs, page `trading/place-orders.mdx`,
+# "GTD orders expire one minute before their stated expiration as a security
+# threshold. To set an effective lifetime of N seconds, use `now + 60 + N`.
+# In addition, the expiration must be at least 3 minutes in the future —
+# orders expiring sooner are rejected."
 _EXPIRY_MIN_LEAD_SECONDS = 180
 
 
