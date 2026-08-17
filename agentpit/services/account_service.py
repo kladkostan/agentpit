@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import dataclass
 
 from agentpit.datastructures.activity_wire import ActivityWire
@@ -514,8 +515,9 @@ class AccountService:
     def _cur_price(conn, token_id: str) -> float:
         """Book midpoint in dollars; fall back to last trade, else 0.5."""
         rows = conn.execute(
-            "SELECT SIDE, PRICE FROM orders WHERE TOKEN_ID = %s AND STATUS = 'live'",
-            (token_id,),
+            "SELECT SIDE, PRICE FROM orders WHERE TOKEN_ID = %s "
+            f"AND {TableRead.LIVE_ORDER}",
+            (token_id, int(time.time())),
         ).fetchall()
         bids = [int(r["PRICE"]) for r in rows if r["SIDE"] == "BUY"]
         asks = [int(r["PRICE"]) for r in rows if r["SIDE"] == "SELL"]

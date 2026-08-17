@@ -334,12 +334,13 @@ class OrderService:
         prepared = self._prepare_resting_orders(user, payloads, balance_hints)
         if not cancel_ids and not prepared:
             return []
+        now = int(time.time())
         with self._db.write() as conn:
             for oid in dict.fromkeys(cancel_ids):
                 conn.execute(
                     "UPDATE orders SET STATUS = 'cancelled' "
-                    "WHERE ORDER_ID = %s AND API_KEY = %s AND STATUS = 'live'",
-                    (oid, user.api_key),
+                    f"WHERE ORDER_ID = %s AND API_KEY = %s AND {TableRead.LIVE_ORDER}",
+                    (oid, user.api_key, now),
                 )
             for order, order_id, signature, price_int, order_type in prepared:
                 self._insert_order(
@@ -357,8 +358,8 @@ class OrderService:
         order_id: str | None = None,
     ) -> list[OpenOrder]:
         """Return the caller's live orders as Polymarket OpenOrder[] (§8.3)."""
-        clauses = ["API_KEY = %s", "STATUS = 'live'"]
-        params: list = [user.api_key]
+        clauses = ["API_KEY = %s", TableRead.LIVE_ORDER]
+        params: list = [user.api_key, int(time.time())]
         if asset_id is not None:
             clauses.append("TOKEN_ID = %s")
             params.append(asset_id)
@@ -411,12 +412,13 @@ class OrderService:
         """Cancel a set of the caller's live orders by id (§8.2)."""
         order_ids = list(dict.fromkeys(order_ids))  # dedup, preserve order (Polymarket ignores dupes)
         result = CancelOrdersResponse()
+        now = int(time.time())
         with self._db.write() as conn:
             for order_id in order_ids:
                 cur = conn.execute(
                     "UPDATE orders SET STATUS = 'cancelled' "
-                    "WHERE ORDER_ID = %s AND API_KEY = %s AND STATUS = 'live'",
-                    (order_id, user.api_key),
+                    f"WHERE ORDER_ID = %s AND API_KEY = %s AND {TableRead.LIVE_ORDER}",
+                    (order_id, user.api_key, now),
                 )
                 if cur.rowcount > 0:
                     result.canceled.append(order_id)
@@ -433,8 +435,8 @@ class OrderService:
                 r["ORDER_ID"]
                 for r in conn.execute(
                     "SELECT ORDER_ID FROM orders "
-                    "WHERE API_KEY = %s AND STATUS = 'live'",
-                    (user.api_key,),
+                    f"WHERE API_KEY = %s AND {TableRead.LIVE_ORDER}",
+                    (user.api_key, int(time.time())),
                 ).fetchall()
             ]
         return self.cancel_orders(user, ids)
@@ -444,8 +446,8 @@ class OrderService:
     ) -> CancelOrdersResponse:
         """Cancel the caller's live orders filtered by condition_id (`market`)
         and/or token_id (`asset_id`). With neither filter, cancels all."""
-        clauses = ["API_KEY = %s", "STATUS = 'live'"]
-        params: list = [user.api_key]
+        clauses = ["API_KEY = %s", TableRead.LIVE_ORDER]
+        params: list = [user.api_key, int(time.time())]
         if asset_id is not None:
             clauses.append("TOKEN_ID = %s")
             params.append(asset_id)
@@ -475,8 +477,8 @@ class OrderService:
                 raise MarketNotFoundError(0)
             rows = conn.execute(
                 "SELECT SIDE, PRICE, SUM(REMAINING_AMOUNT) AS SZ FROM orders "
-                "WHERE TOKEN_ID = %s AND STATUS = 'live' GROUP BY SIDE, PRICE",
-                (token_id,),
+                f"WHERE TOKEN_ID = %s AND {TableRead.LIVE_ORDER} GROUP BY SIDE, PRICE",
+                (token_id, int(time.time())),
             ).fetchall()
             last = conn.execute(
                 TableRead.TOKEN_PRINTS_CTE
@@ -602,8 +604,8 @@ class OrderService:
         with self._db.read() as conn:
             rows = conn.execute(
                 "SELECT SIDE, PRICE FROM orders "
-                "WHERE TOKEN_ID = %s AND STATUS = 'live'",
-                (token_id,),
+                f"WHERE TOKEN_ID = %s AND {TableRead.LIVE_ORDER}",
+                (token_id, int(time.time())),
             ).fetchall()
         bids = [int(r["PRICE"]) for r in rows if r["SIDE"] == "BUY"]
         asks = [int(r["PRICE"]) for r in rows if r["SIDE"] == "SELL"]
@@ -889,20 +891,23 @@ class OrderService:
         taker_price = int(taker_row["PRICE"])
         token_id = taker_row["TOKEN_ID"]
         taker_remaining = int(taker_row["REMAINING_AMOUNT"])
+        # Bound once and reused across all four queries below, so a single
+        # matching pass cannot disagree with itself about what time it is.
+        now = int(time.time())
 
         opposite = "SELL" if taker_side == "BUY" else "BUY"
         if taker_side == "BUY":
             sql = (
-                "SELECT * FROM orders WHERE SIDE=%s AND STATUS='live' "
-                "AND PRICE <= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
+                "SELECT * FROM orders WHERE SIDE=%s AND PRICE <= %s "
+                f"AND TOKEN_ID=%s AND ORDER_ID != %s AND {TableRead.LIVE_ORDER}"
             )
         else:
             sql = (
-                "SELECT * FROM orders WHERE SIDE=%s AND STATUS='live' "
-                "AND PRICE >= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
+                "SELECT * FROM orders WHERE SIDE=%s AND PRICE >= %s "
+                f"AND TOKEN_ID=%s AND ORDER_ID != %s AND {TableRead.LIVE_ORDER}"
             )
         same_token = conn.execute(
-            sql, (opposite, taker_price, token_id, taker_row["ORDER_ID"])
+            sql, (opposite, taker_price, token_id, taker_row["ORDER_ID"], now)
         ).fetchall()
         same_token = sorted(
             same_token,
@@ -919,22 +924,22 @@ class OrderService:
             threshold = _PRICE_ONE - taker_price
             if taker_side == "BUY":
                 comp_sql = (
-                    "SELECT * FROM orders WHERE SIDE='BUY' AND STATUS='live' "
-                    "AND PRICE >= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
+                    "SELECT * FROM orders WHERE SIDE='BUY' AND PRICE >= %s "
+                    f"AND TOKEN_ID=%s AND ORDER_ID != %s AND {TableRead.LIVE_ORDER}"
                 )
                 kind = "MINT"
                 # best maker = highest price (covers more of the mint cost).
                 comp_key = lambda r: (-int(r["PRICE"]), int(r["CREATED_AT"]))
             else:
                 comp_sql = (
-                    "SELECT * FROM orders WHERE SIDE='SELL' AND STATUS='live' "
-                    "AND PRICE <= %s AND TOKEN_ID=%s AND ORDER_ID != %s"
+                    "SELECT * FROM orders WHERE SIDE='SELL' AND PRICE <= %s "
+                    f"AND TOKEN_ID=%s AND ORDER_ID != %s AND {TableRead.LIVE_ORDER}"
                 )
                 kind = "MERGE"
                 # best maker = lowest ask (smallest cut of the merge proceeds).
                 comp_key = lambda r: (int(r["PRICE"]), int(r["CREATED_AT"]))
             comp_rows = conn.execute(
-                comp_sql, (threshold, complement_id, taker_row["ORDER_ID"])
+                comp_sql, (threshold, complement_id, taker_row["ORDER_ID"], now)
             ).fetchall()
             tagged.extend((kind, r) for r in sorted(comp_rows, key=comp_key))
 

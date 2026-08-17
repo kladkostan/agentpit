@@ -66,13 +66,16 @@ def _seed_resting_order(
 ) -> None:
     """Insert a minimal `orders` row sufficient for mid computation.
 
-    The snapshot service only reads TOKEN_ID, SIDE, PRICE, STATUS — every
-    other column is left at its default so the helper stays small.
+    The snapshot service only reads TOKEN_ID, SIDE, PRICE, STATUS, plus
+    EXPIRATION now that `_compute_mid` filters through `TableRead.LIVE_ORDER`
+    — every other column is left at its default so the helper stays small.
+    EXPIRATION = 0 is the "never" convention (see `PlaceOrderRequest`); a
+    bare NULL would read as already-expired and vanish from the query.
     """
     with session.write() as conn:
         conn.execute(
-            "INSERT INTO orders (ORDER_ID, TOKEN_ID, SIDE, PRICE, STATUS) "
-            "VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO orders (ORDER_ID, TOKEN_ID, SIDE, PRICE, STATUS, EXPIRATION) "
+            "VALUES (%s, %s, %s, %s, %s, 0)",
             (
                 f"o-{token_id}-{side}-{price_micro_usd}",
                 token_id,
