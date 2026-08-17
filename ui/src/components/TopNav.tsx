@@ -148,11 +148,11 @@ export function TopNav() {
             )}
             <span>{isDarkMode ? "Dark" : "Light"}</span>
             <span
-              className={`inline-flex h-4.5 w-8 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
+              className={`inline-flex h-5 w-9 items-center rounded-full transition-colors ${isDarkMode ? "bg-primary" : "bg-muted-foreground/40"}`}
               aria-hidden
             >
               <span
-                className={`inline-block size-3.5 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-4" : "translate-x-0.5"}`}
+                className={`inline-block size-3.5 rounded-full bg-white transition-transform ${isDarkMode ? "translate-x-[18px]" : "translate-x-[3px]"}`}
               />
             </span>
           </button>
