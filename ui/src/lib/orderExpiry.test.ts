@@ -33,6 +33,21 @@ describe("expiryForLabel", () => {
     midnight.setHours(24, 0, 0, 0);
     expect(expiration).toBe(Math.floor(midnight.getTime() / 1000) + 60);
   });
+
+  it("does not lose a second when now falls mid-second", () => {
+    // Every other "End of day" case above lands on an exact second, which
+    // hides a double-floor bug: flooring the gap to midnight AND flooring
+    // now separately (when this lifetime is added back to now) rounds off
+    // now's millisecond remainder twice, landing ~1s before midnight.
+    // `midnight` itself is always exact -- setHours(24, 0, 0, 0) zeroes the
+    // sub-second fields regardless of `now` -- so the expected expiration is
+    // the same "midnight + grace" formula as the exact-second case above.
+    const nowMs = NOON + 328;
+    const { expiration } = expiryForLabel("End of day", nowMs);
+    const midnight = new Date(nowMs);
+    midnight.setHours(24, 0, 0, 0);
+    expect(expiration).toBe(Math.floor(midnight.getTime() / 1000) + 60);
+  });
 });
 
 describe("isExpiryDisabled", () => {

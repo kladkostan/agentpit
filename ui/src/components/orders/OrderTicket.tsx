@@ -25,6 +25,7 @@ import type { Erc1155Token } from "@/types/market";
 import type { OrderBookSummary, OrderSide } from "@/types/order";
 import { ApiError } from "@/api/client";
 import { EXPIRY_OPTIONS, expiryForLabel, isExpiryDisabled } from "@/lib/orderExpiry";
+import type { ExpiryLabel } from "@/lib/orderExpiry";
 
 type Mode = "Limit" | "Market";
 
@@ -93,7 +94,7 @@ export function OrderTicket({
   const [limitShares, setLimitShares] = useState<string>("");
   const [marketAmount, setMarketAmount] = useState<string>("");
   const [expiresOpen, setExpiresOpen] = useState(false);
-  const [expiresLabel, setExpiresLabel] = useState("Never");
+  const [expiresLabel, setExpiresLabel] = useState<ExpiryLabel>("Never");
 
   const requireAuth = useRequireAuth();
   const queryClient = useQueryClient();
