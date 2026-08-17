@@ -23,6 +23,7 @@ from agentpit.db.session import DbSession
 from agentpit.db.table_read import TableRead
 from agentpit.db.table_write import TableWrite
 from agentpit.domain.exceptions import (
+    BusinessRuleError,
     InsufficientBalanceError,
     MarketNotFoundError,
     MarketStateError,
@@ -48,6 +49,11 @@ _ZERO_ADDR = "0x0000000000000000000000000000000000000000"
 # it bit-for-bit so a DB match can never trip the on-chain NotCrossing revert
 # (which reverts the whole matchOrders batch). See vendor CalculatorHelper.sol.
 _EXCHANGE_ONE = 10**18
+
+# Polymarket rejects a GTD expiring sooner than this, and we match them: with
+# the one-minute grace subtracted on read, anything closer would be an order
+# that is already dead when it is placed.
+_EXPIRY_MIN_LEAD_SECONDS = 180
 
 
 def _exchange_price(maker_amount: int, taker_amount: int, side: str) -> int:
@@ -96,6 +102,12 @@ class OrderService:
         *,
         balance_hint: int | None = None,
     ) -> OrderResponse:
+        if payload.order_type == "GTD":
+            earliest = int(time.time()) + _EXPIRY_MIN_LEAD_SECONDS
+            if payload.expiration < earliest:
+                raise BusinessRuleError(
+                    "a GTD order must expire at least 3 minutes from now"
+                )
         coid = payload.client_order_id
         if coid is not None:
             with self._db.read() as conn:
