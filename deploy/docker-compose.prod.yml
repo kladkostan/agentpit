@@ -94,7 +94,13 @@ services:
       - ../.env
     environment:
       AGENTPIT_DATABASE_URL: postgresql://agentpit:${POSTGRES_PASSWORD}@postgres:5432/agentpit
-      RPC_URL: http://anvil:8545
+      # The local anvil is the DEFAULT, not the law. This line used to be a
+      # bare `http://anvil:8545`, and an `environment:` entry beats `env_file`,
+      # so a deployment that had moved to a real chain in .env silently kept
+      # talking to the sidecar. On the SKALE cutover that surfaced as
+      # `Connected chain_id 31337 != deployment chain_id 324705682` -- caught
+      # only because `verify_chain()` refuses to start on a mismatch.
+      RPC_URL: ${RPC_URL:-http://anvil:8545}
     volumes:
       - ../deployments:/app/deployments:ro
     depends_on:
