@@ -69,8 +69,12 @@ def _seed_resting_order(
     The snapshot service only reads TOKEN_ID, SIDE, PRICE, STATUS, plus
     EXPIRATION now that `_compute_mid` filters through `TableRead.LIVE_ORDER`
     — every other column is left at its default so the helper stays small.
-    EXPIRATION = 0 is the "never" convention (see `PlaceOrderRequest`); a
-    bare NULL would read as already-expired and vanish from the query.
+    EXPIRATION = 0 is the "never" convention (see `PlaceOrderRequest`) — the
+    same explicit no-timer value every other order-seeding fixture writes.
+    A bare NULL reads the same way to `LIVE_ORDER` (its `IS NULL` arm exists
+    precisely so an omitted EXPIRATION can't fall out of every liveness
+    check AND every cancel); 0 is written here only because that is what a
+    real client actually sends for "never expires".
     """
     with session.write() as conn:
         conn.execute(
