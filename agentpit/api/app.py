@@ -619,16 +619,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _pin_resolve_loop(db_session, onchain_admin, settings)
             )
 
-        order_cleanup_task: asyncio.Task | None = None
-        if settings.liquidity_engine_enabled:
-            log.info(
-                "Order cleanup enabled (every %.0fs, retention=%ds)",
-                settings.order_cleanup_interval_seconds,
-                settings.order_cancelled_retention_seconds,
-            )
-            order_cleanup_task = asyncio.create_task(
-                _order_cleanup_loop(db_session, settings)
-            )
+        # Independent of the liquidity engine on purpose: this loop does two
+        # jobs. Purging old cancelled rows exists because the mirror's fast
+        # re-quoting piles them up -- that part could reasonably wait on the
+        # engine. But it also sweeps due GTD orders out of the live set, and
+        # GTD expiry is a user-facing order type any client can place, engine
+        # or no engine. Gating the whole loop on liquidity_engine_enabled used
+        # to mean an expired order stayed live forever -- present, still
+        # tradable, and unreachable by purge_cancelled_orders -- on any
+        # deployment that ran with the engine off.
+        log.info(
+            "Order cleanup enabled (every %.0fs) -- expires due GTD orders and "
+            "purges cancelled ones past retention=%ds",
+            settings.order_cleanup_interval_seconds,
+            settings.order_cancelled_retention_seconds,
+        )
+        order_cleanup_task: asyncio.Task | None = asyncio.create_task(
+            _order_cleanup_loop(db_session, settings)
+        )
 
         try:
             yield
