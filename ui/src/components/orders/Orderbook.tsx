@@ -118,9 +118,13 @@ export function Orderbook({ tokenId, outcome }: OrderbookProps) {
       </header>
 
       <div className="overflow-hidden rounded-2xl border bg-card">
+        {/* Scrolls without a track. The platform bar renders as a bright
+            white capsule over a dark panel, which reads as a piece of
+            another interface sitting on top of this one; the book's own
+            rows already show there is more of it below. */}
         <div
           ref={scrollRef}
-          className="relative max-h-[420px] overflow-y-auto"
+          className="no-scrollbar relative max-h-[420px] overflow-y-auto"
         >
           <div className="sticky top-0 z-10 grid grid-cols-[1fr_1fr_1fr] border-b bg-card px-5 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             <span>Price</span>
