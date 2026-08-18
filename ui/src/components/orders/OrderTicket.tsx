@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
@@ -24,6 +24,11 @@ import {
 import type { Erc1155Token } from "@/types/market";
 import type { OrderBookSummary, OrderSide } from "@/types/order";
 import { ApiError } from "@/api/client";
+import {
+  STEP_CENTS,
+  normaliseLimitCents,
+  stepLimitCents,
+} from "@/components/orders/limitPrice";
 import { EXPIRY_OPTIONS, expiryForLabel, isExpiryDisabled } from "@/lib/orderExpiry";
 import type { ExpiryLabel } from "@/lib/orderExpiry";
 
@@ -301,7 +306,9 @@ export function OrderTicket({
     // to a constant "Trade", which is the one word that carries no
     // confirmation at all.
     if (!preview) return `${isBuy ? "Buy" : "Sell"} ${outcome}`;
-    const cents = Math.round(preview.price * 100);
+    // Tenths, not whole cents: the field lets a trader enter 11.5¢, and a
+    // button that reads "at 12¢" would name a price they did not ask for.
+    const cents = Math.round(preview.price * 1000) / 10;
     return `${isBuy ? "Buy" : "Sell"} ${preview.shares} ${outcome.toUpperCase()} at ${cents}¢`;
   })();
 
@@ -314,10 +321,7 @@ export function OrderTicket({
   const total = preview?.cost ?? 0;
 
   const adjustLimitCents = (delta: number) => {
-    const raw = parseDecimal(limitCents);
-    const next = Number.isFinite(raw) ? raw + delta : 50 + delta;
-    const clamped = Math.max(1, Math.min(99, Math.round(next)));
-    setLimitCents(String(clamped));
+    setLimitCents((prev) => stepLimitCents(prev, delta));
   };
 
   const adjustShares = (delta: number) => {
@@ -395,7 +399,9 @@ export function OrderTicket({
               <span className="text-[14px] font-medium text-foreground">Limit price</span>
               <CentsStepper
                 cents={limitCents}
-                onChange={setLimitCents}
+                onChange={(typed) =>
+                  setLimitCents((prev) => normaliseLimitCents(typed, prev))
+                }
                 onStep={adjustLimitCents}
                 disabled={isTradingDisabled}
               />
@@ -703,11 +709,31 @@ function CentsStepper({
   onStep: (delta: number) => void;
   disabled?: boolean;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Put the cursor back where the typing left it. The mask can hand back a
+  // string of a different length than the one the field held a moment ago —
+  // shorter when it refuses a keystroke, longer when the third digit becomes
+  // a decimal — and React writes that string into the input, which parks the
+  // cursor at the end. Left alone, a refused keystroke would quietly move the
+  // cursor out from under the trader: their next digit would append to the
+  // price they were editing rather than land where they were pointing, so
+  // clicking into "50" to make it 49 would arrive at 50.9.
+  const restoreCaret = (typed: string, at: number) => {
+    queueMicrotask(() => {
+      const node = inputRef.current;
+      if (!node || document.activeElement !== node) return;
+      const shifted = at + (node.value.length - typed.length);
+      const pos = Math.max(0, Math.min(node.value.length, shifted));
+      node.setSelectionRange(pos, pos);
+    });
+  };
+
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border px-3 py-2">
       <button
         type="button"
-        onClick={() => onStep(-1)}
+        onClick={() => onStep(-STEP_CENTS)}
         disabled={disabled}
         className="text-[16px] text-foreground disabled:opacity-50"
       >
@@ -715,19 +741,31 @@ function CentsStepper({
       </button>
       <span className="inline-flex items-center gap-0.5">
         <input
+          ref={inputRef}
           type="text"
-          inputMode="numeric"
+          // Decimal, not numeric: tenths of a cent are enterable, so the
+          // phone keyboard has to offer the point that types them.
+          inputMode="decimal"
           value={cents}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            const typed = e.target.value;
+            const at = e.target.selectionStart ?? typed.length;
+            onChange(typed);
+            restoreCaret(typed, at);
+          }}
           disabled={disabled}
-          size={Math.max(1, cents.length || 1)}
-          className={`bg-transparent text-center text-[14px] font-semibold tabular-nums outline-none ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}
+          // A fixed width, not one that follows the text. This box sits at the
+          // left of a right-pinned row, so a width that grew with "49.9" and
+          // shrank with "49" would drag the "-" button out from under the
+          // cursor that had just pressed it — on every whole-cent crossing,
+          // which a 0.1¢ step reaches on the first click.
+          className={`w-11 bg-transparent text-center text-[14px] font-semibold tabular-nums outline-none ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}
         />
         <span className={`text-[14px] font-semibold ${cents && cents !== "0" ? "text-foreground" : "text-muted-foreground"}`}>¢</span>
       </span>
       <button
         type="button"
-        onClick={() => onStep(1)}
+        onClick={() => onStep(STEP_CENTS)}
         disabled={disabled}
         className="text-[16px] text-foreground disabled:opacity-50"
       >
