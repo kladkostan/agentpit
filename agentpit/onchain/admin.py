@@ -12,6 +12,11 @@ from agentpit.onchain.user_wallet import (
 )
 from agentpit.onchain.web3_client import Web3Client
 
+# How many token ids go into one balanceOfBatch. Large enough that an ordinary
+# account is a single call, small enough that a heavy one does not ask a public
+# node for a reply it may cap.
+_BALANCE_BATCH = 200
+
 _MAX_UINT256 = 2**256 - 1
 
 
