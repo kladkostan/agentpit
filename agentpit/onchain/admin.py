@@ -162,3 +162,29 @@ class OnchainAdmin:
         return self._contracts.ctf.functions.balanceOf(
             Web3.to_checksum_address(address), token_id
         ).call()
+
+    def ctf_balances(self, address: str, token_ids: list[int]) -> list[int]:
+        """Every token's balance for one holder, in as few calls as possible.
+
+        `ctf_balance` per token is what made the profile page slow: a chain
+        read costs ~0.5s on a remote node, and a position scan asks for two
+        tokens per market the account has ever touched, so a 500-trade
+        account paid over twenty seconds of round trips for a page of
+        fourteen rows. ERC-1155 answers the whole list in one call.
+
+        Chunked because the list grows with the account: an eth_call
+        returning a thousand words is a different proposition from one
+        returning a few dozen, and the node is entitled to refuse it.
+        """
+        if not token_ids:
+            return []
+        owner = Web3.to_checksum_address(address)
+        out: list[int] = []
+        for start in range(0, len(token_ids), _BALANCE_BATCH):
+            chunk = token_ids[start : start + _BALANCE_BATCH]
+            out.extend(
+                self._contracts.ctf.functions.balanceOfBatch(
+                    [owner] * len(chunk), chunk
+                ).call()
+            )
+        return out
