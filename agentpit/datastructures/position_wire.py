@@ -18,6 +18,14 @@ class PositionWire(BaseModel):
     realizedPnl: float = 0.0
     percentRealizedPnl: float = 0.0
     curPrice: float = 0.0
+    # `currentValue` is a mark (`curPrice` is the book MIDPOINT), which is the
+    # right number for a portfolio but not the one to put next to a Sell
+    # button: a sale executes against the bids and walks down as it eats
+    # depth. These two say what the book would actually pay for the whole
+    # position right now, and are 0 when nothing would buy it.
+    sellableValue: float = 0.0
+    sellableSize: float = 0.0
+    settled: bool = False
     redeemable: bool = False
     title: str = ""
     slug: str = ""
