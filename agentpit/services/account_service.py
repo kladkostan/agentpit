@@ -83,6 +83,13 @@ def sellable_against_bids(
     return Sellable(filled_micro / 1_000_000, proceeds / 1_000_000 / 1_000_000)
 
 
+@dataclass(frozen=True)
+class _LivePricing:
+    """Everything one read of a token's live orders answers."""
+
+    cur_price: float
+    sellable: Sellable
+
 
 class AccountService:
     """Public-by-address account reads (positions / value / activity)."""
