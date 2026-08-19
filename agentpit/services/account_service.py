@@ -54,6 +54,35 @@ class Sellable:
     value: float  # dollars they return
 
 
+def sellable_against_bids(
+    bids: list[tuple[int, int]], size_micro: int
+) -> Sellable:
+    """Simulate the market sell of `size_micro` shares against `bids`.
+
+    `bids` is one `(price_micro, remaining_size_micro)` per live BUY order,
+    in any order. The order the ticket sends cannot fill below its price cap,
+    so levels under the floor are invisible to it however deep they are, and
+    a position larger than the depth above the floor comes back short rather
+    than resting on the book — the ticket cancels that remainder.
+    """
+    if size_micro <= 0 or not bids:
+        return Sellable(0.0, 0.0)
+    floor = max(max(p for p, _ in bids) - SLIPPAGE_CAP_MICRO, MIN_PRICE_MICRO)
+    filled_micro = 0
+    # Price-micro x size-micro, so the walk needs no intermediate rounding
+    # (the same reason `_TokenFlow` carries its costs that way).
+    proceeds = 0
+    for price, available in sorted(bids, key=lambda b: -b[0]):
+        if price < floor:
+            break
+        take = min(available, size_micro - filled_micro)
+        if take <= 0:
+            break
+        filled_micro += take
+        proceeds += price * take
+    return Sellable(filled_micro / 1_000_000, proceeds / 1_000_000 / 1_000_000)
+
+
 
 class AccountService:
     """Public-by-address account reads (positions / value / activity)."""
