@@ -37,6 +37,24 @@ class _TokenFlow:
         return self.bought_cost // self.bought_size if self.bought_size else 0
 
 
+#: A market sell is a GTC limit for the whole size at
+#: `max(best_bid - SLIPPAGE_CAP, MIN_PROB)` with the unfilled remainder
+#: cancelled -- `placeMarketOrder` in `ui/src/api/orders.ts` on top of
+#: `computeMarketSell` in `ui/src/components/orders/orderMath.ts`. In micro
+#: units here because that is what the `orders` rows carry.
+SLIPPAGE_CAP_MICRO = 20_000
+MIN_PRICE_MICRO = 10_000
+
+
+@dataclass(frozen=True)
+class Sellable:
+    """What the live bids would pay for a position sold at market."""
+
+    size: float   # shares they absorb; less than the position when thin
+    value: float  # dollars they return
+
+
+
 class AccountService:
     """Public-by-address account reads (positions / value / activity)."""
 
