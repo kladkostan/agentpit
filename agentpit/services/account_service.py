@@ -112,33 +112,49 @@ class AccountService:
             event_slugs = TableRead.event_slugs_by_id(
                 conn, [m.event_id for m in markets if m.event_id is not None]
             )
+        # Narrow first, then ask the chain ONCE. A balance read costs about
+        # half a second against a remote node, and this scan wants two tokens
+        # per market the account has ever touched -- read one at a time, a
+        # 500-trade account spent 23 seconds here for fourteen rows.
+        scanned = [
+            (mkt, idx, token_id, label)
+            for mkt in markets
+            if not market or mkt.condition_id.value in market
+            for idx, (token_id, label) in enumerate(mkt.erc1155_tokens)
+        ]
+        balances = self._onchain.ctf_balances(
+            eth_address, [int(t[2]) for t in scanned]
+        )
+
         out: list[PositionWire] = []
-        for mkt in markets:
-            if market and mkt.condition_id.value not in market:
-                continue
-            tokens = mkt.erc1155_tokens
-            for idx, (token_id, label) in enumerate(tokens):
-                bal = self._onchain.ctf_balance(eth_address, int(token_id))
+        # One connection for the whole build, not one per token: the pricing
+        # reads below are small, and acquiring a pooled connection per token
+        # was the second cost in this loop.
+        with self._db.read() as conn:
+            for (mkt, idx, token_id, label), bal in zip(scanned, balances):
                 if bal <= 0:
                     continue
+                tokens = mkt.erc1155_tokens
                 size = bal / 1_000_000
                 redeemable = (
                     mkt.market_state == MarketState.RESOLVED
                     and mkt.resolved_outcome == idx
                 )
-                with self._db.read() as conn:
-                    avg_price = self._avg_fill_price(conn, user.api_key, token_id)
-                    # A won outcome pays exactly $1 a share, and a resolved
-                    # losing outcome pays exactly $0. Either way the market
-                    # has no live book any more, so `_cur_price` would fall
-                    # through to the last trade print and show settled money
-                    # at whatever it last changed hands for.
-                    if redeemable:
-                        cur_price = 1.0
-                    elif mkt.market_state == MarketState.RESOLVED:
-                        cur_price = 0.0
-                    else:
-                        cur_price = self._cur_price(conn, token_id)
+                avg_price = self._avg_fill_price(conn, user.api_key, token_id)
+                settled = mkt.market_state == MarketState.RESOLVED
+                # A won outcome pays exactly $1 a share, and a resolved
+                # losing outcome pays exactly $0. Either way the market
+                # has no live book any more, so `_live_pricing` would fall
+                # through to the last trade print and show settled money
+                # at whatever it last changed hands for -- and nothing is
+                # sellable, for want of anything to sell into.
+                if settled:
+                    cur_price = 1.0 if redeemable else 0.0
+                    sellable = Sellable(0.0, 0.0)
+                else:
+                    pricing = self._live_pricing(conn, token_id, bal)
+                    cur_price = pricing.cur_price
+                    sellable = pricing.sellable
                 initial_value = avg_price * size
                 current_value = cur_price * size
                 cash_pnl = current_value - initial_value
