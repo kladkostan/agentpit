@@ -592,10 +592,25 @@ class AccountService:
             f"AND {TableRead.LIVE_ORDER}",
             (token_id, int(time.time())),
         ).fetchall()
-        bids = [int(r["PRICE"]) for r in rows if r["SIDE"] == "BUY"]
+        # REMAINING_AMOUNT is nullable with no DEFAULT (`table_create.py`), and
+        # a row carrying none offers no depth to sell into.
+        bids = [
+            (int(r["PRICE"]), int(r["REMAINING_AMOUNT"] or 0))
+            for r in rows
+            if r["SIDE"] == "BUY"
+        ]
         asks = [int(r["PRICE"]) for r in rows if r["SIDE"] == "SELL"]
+        sellable = sellable_against_bids(bids, size_micro)
         if bids and asks:
-            return price_to_float((max(bids) + min(asks)) // 2)
+            mid = price_to_float((max(p for p, _ in bids) + min(asks)) // 2)
+            return _LivePricing(mid, sellable)
+        return _LivePricing(
+            AccountService._last_print_price(conn, token_id), sellable
+        )
+
+    @staticmethod
+    def _last_print_price(conn, token_id: str) -> float:
+        """Price of the token's most recent print in dollars, else 0.5."""
         last = conn.execute(
             TableRead.TOKEN_PRINTS_CTE
             + "SELECT PRICE FROM prints ORDER BY MATCH_TIME DESC LIMIT 1",
