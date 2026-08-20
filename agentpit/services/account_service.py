@@ -585,10 +585,16 @@ class AccountService:
         )
 
     @staticmethod
-    def _cur_price(conn, token_id: str) -> float:
-        """Book midpoint in dollars; fall back to last trade, else 0.5."""
+    def _live_pricing(conn, token_id: str, size_micro: int) -> "_LivePricing":
+        """Book midpoint (fall back to last trade, else 0.5) AND what a market
+        sell of `size_micro` shares would fetch, from ONE read of the book.
+
+        Both answers want every live order for the token and the profile needs
+        both on every row, so the levels are walked here rather than fetched
+        twice per position.
+        """
         rows = conn.execute(
-            "SELECT SIDE, PRICE FROM orders WHERE TOKEN_ID = %s "
+            "SELECT SIDE, PRICE, REMAINING_AMOUNT FROM orders WHERE TOKEN_ID = %s "
             f"AND {TableRead.LIVE_ORDER}",
             (token_id, int(time.time())),
         ).fetchall()
