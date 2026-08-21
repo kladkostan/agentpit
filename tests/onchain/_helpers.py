@@ -66,10 +66,29 @@ def _auth_service(client: TestClient) -> AuthService:
 
 
 def register(client: TestClient, email: str | None = None) -> dict:
-    return client.post(
-        "/register",
-        json={"email": email or unique_email(), "password": "hunter22hunter22"},
-    ).json()
+    """A funded, approved account, shaped like the old POST /register reply.
+
+    `POST /register` went away with the WorkOS cutover -- there is no
+    programmatic signup any more -- but the service behind it is untouched and
+    is still the only place that provisions a wallet, grants gas and sets the
+    exchange approvals. Tests call it directly and authenticate with the
+    account's API key; `access_token` keeps its name so the suite reads the
+    same either side of the cutover.
+    """
+    address = email or unique_email()
+    service = _auth_service(client)
+    response = service.register(
+        RegisterRequest(email=address, password="hunter22hunter22")
+    )
+    db = client.app.dependency_overrides[get_db_session]()  # type: ignore[attr-defined]
+    with db.read() as conn:
+        user = TableRead.get_user_by_email_ci(conn, address)
+    assert user is not None, "register() did not persist the account"
+    return {
+        "access_token": user.api_key,
+        "api_key": user.api_key,
+        "user": response.user.model_dump(),
+    }
 
 
 def create_market(client: TestClient, question: str | None = None) -> dict:
