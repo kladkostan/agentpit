@@ -14,11 +14,14 @@ from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 
-from tests.onchain._helpers import ADMIN_HDR
+from tests.onchain._helpers import ADMIN_HDR, hdr, register
 
 
 def _hdr(t):
-    return {"Authorization": f"Bearer {t}"}
+    # One definition of the suite's credential lives in _helpers; six local
+    # copies is how this file kept sending a bearer token after the cutover
+    # made the API key the thing tests can actually mint.
+    return hdr(t)
 
 
 def _email():
@@ -28,9 +31,9 @@ def _email():
 def test_positions_and_value_public_by_address():
     app = create_app()
     client = TestClient(app)
-    ra = client.post("/register", json={"email": _email(), "password": "hunter22hunter22"}).json()
+    ra = register(client, _email())
     b_email = _email()
-    rb = client.post("/register", json={"email": b_email, "password": "hunter22hunter22"}).json()
+    rb = register(client, b_email)
     ta, tb = ra["access_token"], rb["access_token"]
     a_addr = ra["user"]["eth_address"]
 
