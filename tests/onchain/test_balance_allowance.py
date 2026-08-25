@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 
 from agentpit.api.app import create_app
 
-from tests.onchain._helpers import ADMIN_HDR
+from tests.onchain._helpers import ADMIN_HDR, hdr, register
 
 
 def _hdr(t):
-    return {"Authorization": f"Bearer {t}"}
+    # One definition of the suite's credential lives in _helpers; six local
+    # copies is how this file kept sending a bearer token after the cutover
+    # made the API key the thing tests can actually mint.
+    return hdr(t)
 
 
 def _email():
@@ -24,7 +27,7 @@ def test_collateral_balance_is_signup_grant():
 
     app = create_app()
     client = TestClient(app)
-    body = client.post("/register", json={"email": _email(), "password": "hunter22hunter22"}).json()
+    body = register(client, _email())
     grant = Deployment.load(Settings().deployment_path).signup_grant_raw
 
     resp = client.get("/balance-allowance", headers=_hdr(body["access_token"])).json()
@@ -34,7 +37,7 @@ def test_collateral_balance_is_signup_grant():
 def test_conditional_balance_zero_and_requires_token_id():
     app = create_app()
     client = TestClient(app)
-    reg = client.post("/register", json={"email": _email(), "password": "hunter22hunter22"}).json()
+    reg = register(client, _email())
     tok = reg["access_token"]
     market = client.post("/markets", json={
         "question": f"Bal {secrets.token_hex(4)}?", "description": "x",
