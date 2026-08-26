@@ -14,11 +14,14 @@ from agentpit.onchain.contracts import Contracts
 from agentpit.onchain.deployment import Deployment
 from agentpit.onchain.web3_client import Web3Client
 
-from tests.onchain._helpers import ADMIN_HDR
+from tests.onchain._helpers import ADMIN_HDR, hdr, register
 
 
 def _hdr(t):
-    return {"Authorization": f"Bearer {t}"}
+    # One definition of the suite's credential lives in _helpers; six local
+    # copies is how this file kept sending a bearer token after the cutover
+    # made the API key the thing tests can actually mint.
+    return hdr(t)
 
 
 def _email():
@@ -29,9 +32,9 @@ def test_data_trades_dual_perspective_and_secret_safe():
     app = create_app()
     client = TestClient(app)
     a_email = _email()
-    ra = client.post("/register", json={"email": a_email, "password": "hunter22hunter22"}).json()
+    ra = register(client, a_email)
     b_email = _email()
-    rb = client.post("/register", json={"email": b_email, "password": "hunter22hunter22"}).json()
+    rb = register(client, b_email)
     ta, tb = ra["access_token"], rb["access_token"]
     a_uid, b_uid = ra["user"]["user_id"], rb["user"]["user_id"]
 
@@ -87,7 +90,7 @@ def test_data_trades_dual_perspective_and_secret_safe():
 def test_data_trades_empty_and_requires_auth():
     app = create_app()
     with TestClient(app) as client:
-        body = client.post("/register", json={"email": _email(), "password": "hunter22hunter22"}).json()
+        body = register(client, _email())
         assert client.get("/data/trades", headers=_hdr(body["access_token"])).json() == {
             "limit": 100, "count": 0, "next_cursor": "LTE=", "data": []
         }
