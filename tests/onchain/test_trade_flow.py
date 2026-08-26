@@ -8,11 +8,12 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from tests.onchain._helpers import ADMIN_HDR
+from tests.onchain._helpers import ADMIN_HDR, hdr, register
 
 
 def _hdr(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    # See the note in _helpers.hdr: the suite authenticates with X-API-Key.
+    return hdr(token)
 
 
 def _email() -> str:
@@ -30,10 +31,7 @@ def test_register_funds_user_and_grants_approvals():
     app = create_app()
     client = TestClient(app)
 
-    body = client.post(
-        "/register",
-        json={"email": _email(), "password": "hunter22hunter22"},
-    ).json()
+    body = register(client, _email())
     eth = body["user"]["eth_address"]
     assert body["user"]["onboarded_at"] is not None
 
@@ -62,12 +60,8 @@ def test_match_settles_on_chain():
 
     a_email = _email()
     b_email = _email()
-    ra = client.post(
-        "/register", json={"email": a_email, "password": "hunter22hunter22"}
-    ).json()
-    rb = client.post(
-        "/register", json={"email": b_email, "password": "hunter22hunter22"}
-    ).json()
+    ra = register(client, a_email)
+    rb = register(client, b_email)
     ta, tb = ra["access_token"], rb["access_token"]
     ea, eb = ra["user"]["eth_address"], rb["user"]["eth_address"]
 
@@ -156,12 +150,8 @@ def test_complementary_buys_mint_via_split():
 
     a_email = _email()
     b_email = _email()
-    ra = client.post(
-        "/register", json={"email": a_email, "password": "hunter22hunter22"}
-    ).json()
-    rb = client.post(
-        "/register", json={"email": b_email, "password": "hunter22hunter22"}
-    ).json()
+    ra = register(client, a_email)
+    rb = register(client, b_email)
     ta, tb = ra["access_token"], rb["access_token"]
     ea, eb = ra["user"]["eth_address"], rb["user"]["eth_address"]
 
