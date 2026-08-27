@@ -112,3 +112,22 @@ def test_cost_does_not_grow_with_the_number_of_markets():
     AccountService(big_db, onchain=big).list_positions(big_addr)  # type: ignore[arg-type]
 
     assert small.batch_calls == big.batch_calls == 1
+
+def test_each_balance_lands_on_its_own_token():
+    """A batch read hands back a list; pairing it with the wrong token would
+    report a position on a market the account never held."""
+    db, address, tokens, _cids = _account_across_markets(4)
+    held_yes = tokens[2][0]          # third market's YES
+    held_no = tokens[0][1]           # first market's NO
+    onchain = _CountingOnchain({held_yes: 7_000_000, held_no: 3_000_000})
+
+    out = AccountService(db, onchain=onchain).list_positions(address)  # type: ignore[arg-type]
+
+    by_asset = {p.asset: p for p in out}
+    assert set(by_asset) == {held_yes, held_no}
+    assert by_asset[held_yes].size == pytest.approx(7.0)
+    assert by_asset[held_yes].outcome == "Yes"
+    assert by_asset[held_no].size == pytest.approx(3.0)
+    assert by_asset[held_no].outcome == "No"
+
+
