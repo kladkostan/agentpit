@@ -53,9 +53,14 @@ class _StubOnchain:
 
     def __init__(self, balances: dict[str, int]):
         self._balances = balances
+        self.batch_calls = 0
 
     def ctf_balance(self, _eth_address: str, token_id: int) -> int:
         return self._balances.get(str(token_id), 0)
+
+    def ctf_balances(self, _eth_address: str, token_ids: list[int]) -> list[int]:
+        self.batch_calls += 1
+        return [self._balances.get(str(t), 0) for t in token_ids]
 
 
 def _make_position(email: str, seed: str, *, resolved_outcome: int | None, held_idx: int):
