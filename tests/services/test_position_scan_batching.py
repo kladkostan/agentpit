@@ -131,3 +131,16 @@ def test_each_balance_lands_on_its_own_token():
     assert by_asset[held_no].outcome == "No"
 
 
+def test_a_market_filter_narrows_what_the_chain_is_asked_for():
+    """The filter used to be applied after the balance read, so a request for
+    one market still paid for every market the account had touched."""
+    db, address, tokens, cids = _account_across_markets(5)
+    onchain = _CountingOnchain({tokens[1][0]: 5_000_000})
+
+    out = AccountService(db, onchain=onchain).list_positions(  # type: ignore[arg-type]
+        address, [cids[1]]
+    )
+
+    assert onchain.tokens_asked[0] == [int(tokens[1][0]), int(tokens[1][1])]
+    assert [p.asset for p in out] == [tokens[1][0]]
+
