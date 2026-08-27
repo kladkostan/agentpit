@@ -144,3 +144,20 @@ def test_a_market_filter_narrows_what_the_chain_is_asked_for():
     assert onchain.tokens_asked[0] == [int(tokens[1][0]), int(tokens[1][1])]
     assert [p.asset for p in out] == [tokens[1][0]]
 
+
+def test_an_account_with_no_markets_does_not_call_the_chain_at_all():
+    db = fresh_test_db()
+    with db.write() as conn:
+        _uid, acct, _key = TableWrite.create_user(
+            conn,
+            email=f"empty-{uuid.uuid4().hex[:8]}@x.com",
+            password_hash=hash_password("pw12pw12pw12"),
+            handle=None,
+        )
+    onchain = _CountingOnchain({})
+
+    out = AccountService(db, onchain=onchain).list_positions(acct.address)  # type: ignore[arg-type]
+
+    assert out == []
+    # An empty list still costs a round trip if it is sent; it must not be.
+    assert onchain.tokens_asked in ([], [[]])
