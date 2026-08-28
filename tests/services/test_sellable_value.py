@@ -74,3 +74,12 @@ def test_the_floor_never_falls_below_a_cent():
     )
     assert got.size == 10.0
     assert got.value == pytest.approx(0.15)
+
+
+def test_depth_shorter_than_the_position_sells_only_what_is_there():
+    """The ticket cancels the unfilled remainder, so the shares beyond the
+    book's depth simply do not sell -- `sellableSize` is short of `size`."""
+    got = sellable_against_bids([(500_000, 3_000_000)], 100_000_000)
+    assert got.size == 3.0
+    assert got.value == pytest.approx(1.5)
+
