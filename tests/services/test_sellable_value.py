@@ -90,3 +90,36 @@ def test_a_book_with_no_bids_sells_nothing():
     assert got.value == 0.0
 
 
+# --- through the service ---------------------------------------------------
+
+
+def _hex32(seed: str) -> str:
+    return "0x" + seed.encode().hex().ljust(64, "0")[:64]
+
+
+class _StubOnchain:
+    """Fixed CTF balance per token id -- all `list_positions` reads from it."""
+
+    def __init__(self, balances: dict[str, int]):
+        self._balances = balances
+
+    def ctf_balances(self, _eth_address: str, token_ids: list[int]) -> list[int]:
+        return [self._balances.get(str(t), 0) for t in token_ids]
+
+
+def _insert_trade(conn, *, market: str, asset: str, taker_api_key: str) -> None:
+    """One CONFIRMED fill, which is also what puts the market in scope:
+    `list_positions` only scans markets the account has traded."""
+    conn.execute(
+        "INSERT INTO trades (TRADE_ID, MARKET, ASSET_ID, SIDE, PRICE, TRADE_SIZE, "
+        "STATUS, TAKER_API_KEY, MAKER_ORDERS, MATCH_TIME) "
+        "VALUES (%s, %s, %s, 'BUY', 400000, 100000000, 'CONFIRMED', %s, %s, 0)",
+        (
+            uuid.uuid4().hex,
+            market,
+            asset,
+            taker_api_key,
+            json.dumps([{"side": "SELL"}]),
+        ),
+    )
+
