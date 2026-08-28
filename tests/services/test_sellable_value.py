@@ -141,3 +141,46 @@ def _insert_bid(conn, *, token_id: str, price: int, original: int, remaining: in
     )
 
 
+def _position(email: str, seed: str, *, bids: list[tuple[int, int]], resolved: bool):
+    """The single `PositionWire` for an account holding 100 shares of the YES
+    token, with `bids` -- `(price_micro, remaining_micro)` -- resting on it."""
+    db = fresh_test_db()
+    # `list_positions` does `int(token_id)`, so these have to parse as ints.
+    base = int.from_bytes(seed.encode(), "big")
+    yes_tok, no_tok = str(base * 10 + 1), str(base * 10 + 2)
+    with db.write() as conn:
+        _uid, acct, api_key = TableWrite.create_user(
+            conn,
+            email=email,
+            password_hash=hash_password("pw12pw12pw12"),
+            handle=None,
+        )
+        req = CreateMarketRequest(
+            question="Win?",
+            description="d",
+            erc1155_tokens=[(yes_tok, "Yes"), (no_tok, "No")],
+            slug=f"sell-{seed}",
+            condition_id=ConditionId(_hex32(seed)),
+            state=MarketState.ACTIVE,
+        )
+        m = TableWrite.create_market(conn, req, is_polygon_market=False)
+        _insert_trade(conn, market=_hex32(seed), asset=yes_tok, taker_api_key=api_key)
+        for price, remaining in bids:
+            _insert_bid(
+                conn,
+                token_id=yes_tok,
+                price=price,
+                original=remaining * 2,
+                remaining=remaining,
+            )
+        if resolved:
+            TableWrite.resolve_market(
+                conn, market_id=m.market_id, winning_outcome_index=0
+            )
+
+    onchain = _StubOnchain({yes_tok: 100_000_000})
+    service = AccountService(db, onchain=onchain)  # type: ignore[arg-type]
+    out = service.list_positions(acct.address)
+    assert len(out) == 1
+    return out[0]
+
