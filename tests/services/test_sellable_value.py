@@ -65,3 +65,12 @@ def test_a_bid_exactly_at_the_floor_still_fills():
     assert got.value == pytest.approx(5.0 + 4.8)
 
 
+def test_the_floor_never_falls_below_a_cent():
+    """`MIN_PROB` clamps it: on a near-worthless token `best_bid - 0.02` is
+    negative, and a floor below zero would sweep in bids the real order --
+    which the API will not accept under $0.01 -- can never reach."""
+    got = sellable_against_bids(
+        [(15_000, 10_000_000), (9_000, 10_000_000)], 20_000_000
+    )
+    assert got.size == 10.0
+    assert got.value == pytest.approx(0.15)
