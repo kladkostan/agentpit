@@ -56,3 +56,12 @@ def test_a_bid_beneath_the_slippage_floor_is_left_untouched():
     assert got.value == pytest.approx(5.0)
 
 
+def test_a_bid_exactly_at_the_floor_still_fills():
+    """The cap is a limit price, and a limit fills AT its price."""
+    got = sellable_against_bids(
+        [(500_000, 10_000_000), (480_000, 10_000_000)], 20_000_000
+    )
+    assert got.size == 20.0
+    assert got.value == pytest.approx(5.0 + 4.8)
+
+
