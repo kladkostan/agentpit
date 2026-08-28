@@ -44,3 +44,15 @@ def test_levels_are_consumed_best_price_first():
     assert got.size == 25.0
     assert got.value == pytest.approx(5.0 + 4.9 + 2.4)  # 10@.50 + 10@.49 + 5@.48
 
+
+def test_a_bid_beneath_the_slippage_floor_is_left_untouched():
+    """The order is a limit at `best_bid - SLIPPAGE_CAP`, so a bid one micro
+    below that cannot fill it however deep it is -- here a thousand shares of
+    depth that the position must not be told it can sell into."""
+    got = sellable_against_bids(
+        [(500_000, 10_000_000), (479_999, 1_000_000_000)], 100_000_000
+    )
+    assert got.size == 10.0
+    assert got.value == pytest.approx(5.0)
+
+
