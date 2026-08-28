@@ -123,3 +123,21 @@ def _insert_trade(conn, *, market: str, asset: str, taker_api_key: str) -> None:
         ),
     )
 
+
+def _insert_bid(conn, *, token_id: str, price: int, original: int, remaining: int):
+    conn.execute(
+        "INSERT INTO orders (ORDER_ID, TOKEN_ID, SIDE, PRICE, STATUS, "
+        "MAKER_AMOUNT, TAKER_AMOUNT, REMAINING_AMOUNT, EXPIRATION, CREATED_AT, "
+        "API_KEY) VALUES (%s, %s, 'BUY', %s, 'live', %s, %s, %s, 0, %s, 'maker')",
+        (
+            uuid.uuid4().hex,
+            token_id,
+            price,
+            original * price // 1_000_000,
+            original,
+            remaining,
+            int(time.time()),
+        ),
+    )
+
+
