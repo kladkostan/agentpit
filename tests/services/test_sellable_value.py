@@ -83,3 +83,10 @@ def test_depth_shorter_than_the_position_sells_only_what_is_there():
     assert got.size == 3.0
     assert got.value == pytest.approx(1.5)
 
+
+def test_a_book_with_no_bids_sells_nothing():
+    got = sellable_against_bids([], 100_000_000)
+    assert got.size == 0.0
+    assert got.value == 0.0
+
+
