@@ -184,3 +184,31 @@ def _position(email: str, seed: str, *, bids: list[tuple[int, int]], resolved: b
     assert len(out) == 1
     return out[0]
 
+
+def test_a_live_position_reports_what_its_resting_bids_would_pay():
+    """Each order rests at half its original size, so a row that measured
+    depth by MAKER_AMOUNT / TAKER_AMOUNT would promise twice the proceeds."""
+    p = _position(
+        "sellable-live@x.com",
+        "sv1",
+        bids=[(500_000, 30_000_000), (490_000, 30_000_000)],
+        resolved=False,
+    )
+    assert p.size == 100.0
+    assert p.settled is False
+    assert p.sellableSize == 60.0
+    assert p.sellableValue == pytest.approx(15.0 + 14.7)
+
+
+def test_a_settled_position_is_not_sellable():
+    """Its book is gone once the market resolves -- the orders left in the
+    table are stale, and no sale can execute against them."""
+    p = _position(
+        "sellable-settled@x.com",
+        "sv2",
+        bids=[(500_000, 100_000_000)],
+        resolved=True,
+    )
+    assert p.settled is True
+    assert p.sellableSize == 0.0
+    assert p.sellableValue == 0.0
